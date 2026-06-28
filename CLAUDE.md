@@ -137,3 +137,48 @@ Feature modules follow layered boundaries where practical:
 
 - Current code and `pubspec.yaml` use Sembast plus optional HTTP sync adapters.
 - No Cursor rules or GitHub Copilot instruction file were present when this file was generated.
+
+## Current Handoff (Codex -> Claude Code)
+
+### Latest committed baseline
+
+- `23e17f2 Add calendar routine snooze date picker`
+- `0241dae Add calendar routine selection controls`
+- `9ba0a9b Document phase 3 calendar routine closeout`
+- `01f7c98 Add calendar recurring routine actions`
+
+### Calendar routine feature status
+
+- Agenda view shows a routine banner when today has ready recurring routines.
+- Routine dialog supports per-routine checkboxes plus `Select all` and `Clear`.
+- Apply creates selected routine nodes for today.
+- Skip creates archived routine skip markers for selected routines.
+- Snooze opens a date picker and creates archived routine snooze markers with `automation.snoozedTo`.
+- Skip/snooze markers intentionally surface in Agenda with `Skipped routine` / `Snoozed routine` badges.
+- Agenda has a persisted `Routines` filter. Shortcuts: `1` All, `2` Tasks, `3` Events, `4` Habits, `5` Routines, `6` Done.
+- Skip/snooze snackbars support Undo by deleting generated marker nodes and invalidating Calendar/Mindmap providers.
+
+### Important files
+
+- `lib/features/calendar/calendar_page.dart`
+- `lib/features/calendar/application/calendar_view_controller.dart`
+- `lib/features/mindmap/application/recurring_routine_application.dart`
+- `lib/features/mindmap/domain/recurring_routine.dart`
+- `test/features/calendar/calendar_page_test.dart`
+- `docs/phase_3_closeout.md`
+- `docs/release/beta_release_checklist.md`
+
+### Last validation
+
+```bash
+flutter test test/features/calendar/calendar_page_test.dart
+flutter analyze
+```
+
+Result: both pass. Calendar test suite: 27 tests.
+
+### Suggested next work
+
+- Add routine marker detail actions: delete marker, open source routine/template, or reapply/snooze again.
+- Update Phase 3 docs/beta checklist whenever marker-detail work lands.
+- Run full `flutter test` before release/handoff commit.

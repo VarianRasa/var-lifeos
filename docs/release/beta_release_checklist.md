@@ -44,8 +44,8 @@ Check:
 - Calendar shortcuts work: `M`, `W`, `A` switch views and `1`-`6` switch Agenda filters.
 - Calendar shortcut help opens from the keyboard icon and lists all view/filter shortcuts.
 - Agenda item move-to-date, Month/Week drag-drop rescheduling, `Shift+Left/Right` Agenda rescheduling, and snackbar undo work.
-- Agenda routine banner appears when recurring routines are due today, previews ready routines, applies them, and then disappears.
-- Agenda routine skip/snooze actions create visible routine markers with badges, and snackbar Undo restores the banner.
+- Agenda routine banner appears when recurring routines are due today, previews ready routines, supports per-routine selection/select-all/clear, applies selected routines, and then disappears only when no ready routines remain.
+- Agenda routine skip/custom-date snooze actions create visible routine markers with badges, and snackbar Undo restores the banner.
 - A day mindmap can create, edit, and delete a node.
 - Command palette opens with `Ctrl+K` and can search/create expected node actions.
 - Graph, insights, and workspaces render sensible empty states when there is no data.
