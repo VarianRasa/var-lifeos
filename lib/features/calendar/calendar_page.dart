@@ -685,6 +685,18 @@ class _RoutineApplyBanner extends ConsumerWidget {
         .where((item) => result.selectedRoutineIds.contains(item.routine.id))
         .map((item) => item.routine)
         .toList(growable: false);
+    final snoozeTargetDay = result.action == _RoutineAction.snooze
+        ? await showDatePicker(
+            context: context,
+            initialDate: day.add(const Duration(days: 1)),
+            firstDate: day,
+            lastDate: day.add(const Duration(days: 365)),
+          )
+        : null;
+    if (result.action == _RoutineAction.snooze &&
+        (snoozeTargetDay == null || !context.mounted)) {
+      return;
+    }
     final saved = switch (result.action) {
       _RoutineAction.apply => await applyRecurringRoutines(
         repository: repository,
@@ -699,7 +711,7 @@ class _RoutineApplyBanner extends ConsumerWidget {
       _RoutineAction.snooze => await snoozeRecurringRoutines(
         repository: repository,
         day: day,
-        targetDay: day.add(const Duration(days: 1)),
+        targetDay: snoozeTargetDay!,
         routines: selectedRoutines,
       ),
       _RoutineAction.cancel => <MindmapNode>[],
@@ -710,7 +722,8 @@ class _RoutineApplyBanner extends ConsumerWidget {
     final message = switch (result.action) {
       _RoutineAction.apply => 'Applied ${saved.length} routines',
       _RoutineAction.skip => 'Skipped ${saved.length} routines today',
-      _RoutineAction.snooze => 'Snoozed ${saved.length} routines to tomorrow',
+      _RoutineAction.snooze =>
+        'Snoozed ${saved.length} routines to ${DateFormat('MMM d, y').format(snoozeTargetDay!)}',
       _RoutineAction.cancel => '',
     };
     ScaffoldMessenger.of(context).showSnackBar(

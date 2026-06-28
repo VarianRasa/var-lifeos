@@ -494,7 +494,7 @@ void main() {
 
   testWidgets('CalendarPage snoozes today recurring routines', (tester) async {
     final today = DateTime(2026, 6, 22);
-    final tomorrow = DateTime(2026, 6, 23);
+    final targetDay = DateTime(2026, 6, 25);
     final repository = InMemoryMindmapRepository();
 
     await _pumpCalendar(tester, repository: repository, today: today);
@@ -504,16 +504,24 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('calendar-snooze-routines')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('25').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
 
     final todayNodes = await repository.listNodes(day: today);
-    final tomorrowNodes = await repository.listNodes(day: tomorrow);
+    final targetNodes = await repository.listNodes(day: targetDay);
     expect(
       todayNodes.map((node) => node.title),
       contains('Snoozed Daily plan'),
     );
-    expect(tomorrowNodes, isEmpty);
+    expect(targetNodes, isEmpty);
+    expect(
+      todayNodes.first.data['automation'],
+      containsPair('snoozedTo', '2026-06-25'),
+    );
     expect(find.text('Snoozed routine'), findsWidgets);
-    expect(find.text('Snoozed 4 routines to tomorrow'), findsOneWidget);
+    expect(find.text('Snoozed 4 routines to Jun 25, 2026'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('calendar-routine-apply-banner')),
       findsNothing,
@@ -532,6 +540,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('calendar-snooze-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Undo'));
