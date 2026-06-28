@@ -39,11 +39,13 @@ Check:
 - Week view is usable on desktop and narrow/mobile widths.
 - Focused/selected day remains visually obvious while using keyboard arrows.
 - Header date/range title exposes date picker affordance.
-- Agenda filters (All, Tasks, Events, Habits, Done) show the expected nodes and persist after reload.
+- Agenda filters (All, Tasks, Events, Habits, Routines, Done) show the expected nodes and persist after reload.
 - Agenda empty state and group header CTAs open the intended day.
-- Calendar shortcuts work: `M`, `W`, `A` switch views and `1`-`5` switch Agenda filters.
+- Calendar shortcuts work: `M`, `W`, `A` switch views and `1`-`6` switch Agenda filters.
 - Calendar shortcut help opens from the keyboard icon and lists all view/filter shortcuts.
 - Agenda item move-to-date, Month/Week drag-drop rescheduling, `Shift+Left/Right` Agenda rescheduling, and snackbar undo work.
+- Agenda routine banner appears when recurring routines are due today, previews ready routines, applies them, and then disappears.
+- Agenda routine skip/snooze actions create visible routine markers with badges, and snackbar Undo restores the banner.
 - A day mindmap can create, edit, and delete a node.
 - Command palette opens with `Ctrl+K` and can search/create expected node actions.
 - Graph, insights, and workspaces render sensible empty states when there is no data.
