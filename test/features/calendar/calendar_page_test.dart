@@ -36,7 +36,7 @@ Future<void> _pumpCalendar(
   required DateTime today,
   ProviderContainer? container,
 }) async {
-  final child = const MaterialApp(home: Scaffold(body: CalendarPage()));
+  const child = MaterialApp(home: Scaffold(body: CalendarPage()));
   if (container != null) {
     await tester.pumpWidget(
       UncontrolledProviderScope(container: container, child: child),
@@ -339,6 +339,152 @@ void main() {
     expect(find.text('Moved "Keyboard task" to Jun 20, 2026'), findsOneWidget);
   });
 
+  testWidgets('CalendarPage applies today recurring routines', (tester) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsOneWidget,
+    );
+    expect(find.text('4 routines ready for today'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-dialog')),
+      findsOneWidget,
+    );
+    expect(find.text('Apply routines?'), findsOneWidget);
+    expect(find.text('Daily plan'), findsOneWidget);
+    expect(find.text('Weekly review'), findsOneWidget);
+    expect(await repository.listNodes(day: today), isEmpty);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-confirm-apply-routines')),
+    );
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Daily plan'));
+    expect(nodes.map((node) => node.title), contains('Weekly review'));
+    expect(find.text('Applied 4 routines'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('CalendarPage skips today recurring routines', (tester) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-skip-routines')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Skipped Daily plan'));
+    expect(nodes.map((node) => node.title), isNot(contains('Daily plan')));
+    expect(find.text('Skipped routine'), findsWidgets);
+    expect(find.text('Skipped 4 routines today'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('CalendarPage skip undo restores routine banner', (tester) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-skip-routines')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(
+      nodes.map((node) => node.title),
+      isNot(contains('Skipped Daily plan')),
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('CalendarPage snoozes today recurring routines', (tester) async {
+    final today = DateTime(2026, 6, 22);
+    final tomorrow = DateTime(2026, 6, 23);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-snooze-routines')));
+    await tester.pumpAndSettle();
+
+    final todayNodes = await repository.listNodes(day: today);
+    final tomorrowNodes = await repository.listNodes(day: tomorrow);
+    expect(
+      todayNodes.map((node) => node.title),
+      contains('Snoozed Daily plan'),
+    );
+    expect(tomorrowNodes, isEmpty);
+    expect(find.text('Snoozed routine'), findsWidgets);
+    expect(find.text('Snoozed 4 routines to tomorrow'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('CalendarPage snooze undo restores routine banner', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-snooze-routines')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(
+      nodes.map((node) => node.title),
+      isNot(contains('Snoozed Daily plan')),
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('CalendarPage agenda filters nodes by type', (tester) async {
     final today = DateTime(2026, 6, 19);
     final repository = InMemoryMindmapRepository(
@@ -365,6 +511,17 @@ void main() {
           day: today,
           now: DateTime(2026, 6, 19, 10),
         ),
+        MindmapNode.create(
+          id: 'routine-marker',
+          type: NodeType.note,
+          title: 'Skipped Daily plan',
+          day: today,
+          isArchived: true,
+          data: const {
+            'automation': {'state': 'skipped'},
+          },
+          now: DateTime(2026, 6, 19, 11),
+        ),
       ],
     );
 
@@ -384,6 +541,7 @@ void main() {
     expect(find.text('Agenda task'), findsOneWidget);
     expect(find.text('Launch event'), findsOneWidget);
     expect(find.text('Drink water'), findsOneWidget);
+    expect(find.text('Skipped Daily plan'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('agenda-filter-events')));
     await tester.pumpAndSettle();
@@ -395,6 +553,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Drink water'), findsOneWidget);
     expect(find.text('Launch event'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
+    await tester.pumpAndSettle();
+    expect(find.text('Skipped Daily plan'), findsOneWidget);
+    expect(find.text('Skipped routine'), findsOneWidget);
+    expect(find.text('Drink water'), findsNothing);
   });
 
   testWidgets('CalendarPage shows mobile week strip on narrow screens', (
@@ -575,6 +739,7 @@ void main() {
     expect(find.text('Month view'), findsOneWidget);
     expect(find.text('Agenda view'), findsOneWidget);
     expect(find.text('All agenda items'), findsOneWidget);
+    expect(find.text('Routines'), findsWidgets);
     expect(find.text('Done'), findsWidgets);
     expect(find.text('Shift+←'), findsOneWidget);
     expect(find.text('Shift+→'), findsOneWidget);

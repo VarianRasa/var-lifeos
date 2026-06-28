@@ -18,6 +18,7 @@ enum AgendaFilter {
   tasks('Tasks'),
   events('Events'),
   habits('Habits'),
+  routines('Routines'),
   done('Done');
 
   const AgendaFilter(this.label);

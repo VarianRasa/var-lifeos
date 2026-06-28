@@ -18,9 +18,11 @@ import '../../core/utils/date_utils.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
+import '../mindmap/application/recurring_routine_application.dart';
 import '../mindmap/domain/day_node_summary.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/mindmap_node_data.dart';
+import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/workspace_context.dart';
 import '../onboarding/onboarding_overlay.dart';
 import '../workspace/data/workspace_title_repository.dart';
@@ -29,6 +31,13 @@ import 'domain/calendar_node_payload.dart';
 
 final calendarSearchQueryProvider = StateProvider<String>((ref) => '');
 final selectedAgendaNodeIdProvider = StateProvider<String?>((ref) => null);
+final calendarRoutinePlanProvider = FutureProvider.autoDispose
+    .family<RecurringRoutinePlan, DateTime>((ref, day) async {
+      return previewRecurringRoutines(
+        repository: ref.watch(mindmapRepositoryProvider),
+        day: day,
+      );
+    });
 
 void _showRescheduleSnackBar({
   required BuildContext context,
@@ -198,6 +207,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   const _CalendarViewModeSwitch(),
                   const SizedBox(height: 4),
                   _WeeklySummaryStrip(today: today),
+                  if (viewMode == CalendarViewMode.agenda)
+                    _RoutineApplyBanner(day: today),
                   const SizedBox(height: 8),
                   if (viewMode != CalendarViewMode.agenda) ...[
                     const _WeekdayHeader(),
@@ -351,7 +362,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         LogicalKeyboardKey.digit2 => AgendaFilter.tasks,
         LogicalKeyboardKey.digit3 => AgendaFilter.events,
         LogicalKeyboardKey.digit4 => AgendaFilter.habits,
-        LogicalKeyboardKey.digit5 => AgendaFilter.done,
+        LogicalKeyboardKey.digit5 => AgendaFilter.routines,
+        LogicalKeyboardKey.digit6 => AgendaFilter.done,
         _ => null,
       };
       if (filter != null) {
@@ -484,6 +496,177 @@ class _CalendarEmptyBanner extends ConsumerWidget {
   }
 }
 
+class _RoutineApplyBanner extends ConsumerWidget {
+  const _RoutineApplyBanner({required this.day});
+
+  final DateTime day;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final planAsync = ref.watch(calendarRoutinePlanProvider(day.dateOnly));
+    return planAsync.maybeWhen(
+      data: (plan) {
+        if (plan.readyCount == 0) return const SizedBox.shrink();
+        final theme = Theme.of(context);
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Material(
+            key: const ValueKey('calendar-routine-apply-banner'),
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.auto_awesome_motion_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${plan.readyCount} routines ready for today',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  FilledButton.tonal(
+                    key: const ValueKey('calendar-apply-routines'),
+                    onPressed: () => _showRoutineActions(context, ref, plan),
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
+  Future<void> _showRoutineActions(
+    BuildContext context,
+    WidgetRef ref,
+    RecurringRoutinePlan plan,
+  ) async {
+    final action = await showDialog<_RoutineAction>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('calendar-routine-apply-dialog'),
+        title: const Text('Apply routines?'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${plan.readyCount} routines will be created today.'),
+              const SizedBox(height: 12),
+              for (final node in plan.nodes.take(5))
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.check_circle_outline),
+                  title: Text(node.title),
+                ),
+              if (plan.readyCount > 5)
+                Text('+${plan.readyCount - 5} more routines'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('calendar-skip-routines'),
+            onPressed: () => Navigator.of(context).pop(_RoutineAction.skip),
+            child: const Text('Skip today'),
+          ),
+          TextButton(
+            key: const ValueKey('calendar-snooze-routines'),
+            onPressed: () => Navigator.of(context).pop(_RoutineAction.snooze),
+            child: const Text('Snooze'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_RoutineAction.cancel),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('calendar-confirm-apply-routines'),
+            onPressed: () => Navigator.of(context).pop(_RoutineAction.apply),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+    if (action == null || action == _RoutineAction.cancel || !context.mounted) {
+      return;
+    }
+
+    final repository = ref.read(mindmapRepositoryProvider);
+    final readyRoutines = plan.items
+        .where((item) => item.willCreate)
+        .map((item) => item.routine)
+        .toList(growable: false);
+    final saved = switch (action) {
+      _RoutineAction.apply => await applyRecurringRoutines(
+        repository: repository,
+        day: day,
+        routines: readyRoutines,
+      ),
+      _RoutineAction.skip => await skipRecurringRoutines(
+        repository: repository,
+        day: day,
+        routines: readyRoutines,
+      ),
+      _RoutineAction.snooze => await snoozeRecurringRoutines(
+        repository: repository,
+        day: day,
+        targetDay: day.add(const Duration(days: 1)),
+        routines: readyRoutines,
+      ),
+      _RoutineAction.cancel => <MindmapNode>[],
+    };
+    invalidateMindmapState(ref, day: day);
+    ref.invalidate(calendarRoutinePlanProvider(day.dateOnly));
+    if (!context.mounted) return;
+    final message = switch (action) {
+      _RoutineAction.apply => 'Applied ${saved.length} routines',
+      _RoutineAction.skip => 'Skipped ${saved.length} routines today',
+      _RoutineAction.snooze => 'Snoozed ${saved.length} routines to tomorrow',
+      _RoutineAction.cancel => '',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: switch (action) {
+          _RoutineAction.skip || _RoutineAction.snooze => SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              unawaited(_undoRoutineMarkers(ref, saved));
+            },
+          ),
+          _RoutineAction.apply || _RoutineAction.cancel => null,
+        },
+      ),
+    );
+  }
+
+  Future<void> _undoRoutineMarkers(
+    WidgetRef ref,
+    List<MindmapNode> markers,
+  ) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    for (final marker in markers) {
+      await repository.deleteNode(marker.id);
+    }
+    invalidateMindmapState(ref, day: day);
+    ref.invalidate(calendarRoutinePlanProvider(day.dateOnly));
+  }
+}
+
+enum _RoutineAction { apply, skip, snooze, cancel }
+
 class _CalendarViewModeSwitch extends ConsumerWidget {
   const _CalendarViewModeSwitch();
 
@@ -539,30 +722,33 @@ class _CalendarShortcutHelpDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Calendar shortcuts'),
-      content: SizedBox(
+      content: const SizedBox(
         width: 320,
-        child: ListView(
-          shrinkWrap: true,
-          children: const [
-            _ShortcutHelpRow(keys: 'M', action: 'Month view'),
-            _ShortcutHelpRow(keys: 'W', action: 'Week view'),
-            _ShortcutHelpRow(keys: 'A', action: 'Agenda view'),
-            Divider(),
-            _ShortcutHelpRow(keys: '1', action: 'All agenda items'),
-            _ShortcutHelpRow(keys: '2', action: 'Tasks'),
-            _ShortcutHelpRow(keys: '3', action: 'Events'),
-            _ShortcutHelpRow(keys: '4', action: 'Habits'),
-            _ShortcutHelpRow(keys: '5', action: 'Done'),
-            Divider(),
-            _ShortcutHelpRow(
-              keys: 'Shift+←',
-              action: 'Move selected agenda item back one day',
-            ),
-            _ShortcutHelpRow(
-              keys: 'Shift+→',
-              action: 'Move selected agenda item forward one day',
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ShortcutHelpRow(keys: 'M', action: 'Month view'),
+              _ShortcutHelpRow(keys: 'W', action: 'Week view'),
+              _ShortcutHelpRow(keys: 'A', action: 'Agenda view'),
+              Divider(),
+              _ShortcutHelpRow(keys: '1', action: 'All agenda items'),
+              _ShortcutHelpRow(keys: '2', action: 'Tasks'),
+              _ShortcutHelpRow(keys: '3', action: 'Events'),
+              _ShortcutHelpRow(keys: '4', action: 'Habits'),
+              _ShortcutHelpRow(keys: '5', action: 'Routines'),
+              _ShortcutHelpRow(keys: '6', action: 'Done'),
+              Divider(),
+              _ShortcutHelpRow(
+                keys: 'Shift+←',
+                action: 'Move selected agenda item back one day',
+              ),
+              _ShortcutHelpRow(
+                keys: 'Shift+→',
+                action: 'Move selected agenda item forward one day',
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -713,7 +899,7 @@ class _AgendaCalendarView extends ConsumerWidget {
                   nodes
                       .where(
                         (node) =>
-                            !node.isArchived &&
+                            (!node.isArchived || _isRoutineMarker(node)) &&
                             !node.day.isBefore(start) &&
                             node.day.isBefore(end) &&
                             _matchesFilter(node, filter),
@@ -887,6 +1073,18 @@ class _AgendaCalendarView extends ConsumerWidget {
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                   ),
+                                                  if (_routineMarkerLabel(
+                                                        node,
+                                                      ) !=
+                                                      null) ...[
+                                                    const SizedBox(height: 4),
+                                                    _RoutineMarkerBadge(
+                                                      label:
+                                                          _routineMarkerLabel(
+                                                            node,
+                                                          )!,
+                                                    ),
+                                                  ],
                                                   if (_agendaNodeMetadata(
                                                     node,
                                                   ).isNotEmpty)
@@ -965,6 +1163,7 @@ class _AgendaCalendarView extends ConsumerWidget {
       AgendaFilter.tasks => node.type == NodeType.task,
       AgendaFilter.events => calendarNodePayloadFromData(node.data) != null,
       AgendaFilter.habits => node.type == NodeType.habit,
+      AgendaFilter.routines => _isRoutineMarker(node),
       AgendaFilter.done => node.isDone || node.status == NodeStatus.done,
     };
   }
@@ -984,6 +1183,21 @@ class _AgendaCalendarView extends ConsumerWidget {
     if (node.priority != NodePriority.none) parts.add(node.priority.label);
     if (node.status != NodeStatus.open) parts.add(node.status.label);
     return parts.join(' · ');
+  }
+
+  String? _routineMarkerLabel(MindmapNode node) {
+    final automation = node.data['automation'];
+    if (automation is! Map) return null;
+    final state = automation['state'];
+    return switch (state) {
+      'skipped' => 'Skipped routine',
+      'snoozed' => 'Snoozed routine',
+      _ => null,
+    };
+  }
+
+  bool _isRoutineMarker(MindmapNode node) {
+    return _routineMarkerLabel(node) != null;
   }
 
   String _agendaDayLabel(DateTime day) {
@@ -1116,6 +1330,34 @@ class _AgendaErrorState extends StatelessWidget {
   }
 }
 
+class _RoutineMarkerBadge extends StatelessWidget {
+  const _RoutineMarkerBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      key: ValueKey('calendar-routine-marker-$label'),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSecondaryContainer,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AgendaEmptyState extends StatelessWidget {
   const _AgendaEmptyState({required this.filter, required this.day});
 
@@ -1130,36 +1372,48 @@ class _AgendaEmptyState extends StatelessWidget {
       AgendaFilter.tasks => 'No task items',
       AgendaFilter.events => 'No event items',
       AgendaFilter.habits => 'No habit items',
+      AgendaFilter.routines => 'No routine items',
       AgendaFilter.done => 'No done items',
     };
-    return Center(
-      key: const ValueKey('calendar-agenda-empty'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.event_note_outlined,
-            size: 48,
-            color: theme.colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          Text(label, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            'Create nodes on a day to build your agenda.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tight = constraints.maxHeight < 140;
+        return Center(
+          key: const ValueKey('calendar-agenda-empty'),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!tight) ...[
+                  Icon(
+                    Icons.event_note_outlined,
+                    size: 40,
+                    color: theme.colorScheme.outline,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                Text(label, style: theme.textTheme.titleMedium),
+                if (!tight) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Create nodes on a day to build your agenda.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                SizedBox(height: tight ? 8 : 12),
+                FilledButton.icon(
+                  key: const ValueKey('calendar-agenda-empty-open-day'),
+                  onPressed: () => goToDay(context, day),
+                  icon: const Icon(Icons.add_circle_outline),
+                  label: const Text('Open day'),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            key: const ValueKey('calendar-agenda-empty-open-day'),
-            onPressed: () => goToDay(context, day),
-            icon: const Icon(Icons.add_circle_outline),
-            label: const Text('Open day'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
