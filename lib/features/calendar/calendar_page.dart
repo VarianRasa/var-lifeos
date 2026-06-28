@@ -551,86 +551,163 @@ class _RoutineApplyBanner extends ConsumerWidget {
     WidgetRef ref,
     RecurringRoutinePlan plan,
   ) async {
-    final action = await showDialog<_RoutineAction>(
+    final readyItems = plan.items
+        .where((item) => item.willCreate)
+        .toList(growable: false);
+    final result = await showDialog<_RoutineDialogResult>(
       context: context,
-      builder: (context) => AlertDialog(
-        key: const ValueKey('calendar-routine-apply-dialog'),
-        title: const Text('Apply routines?'),
-        content: SizedBox(
-          width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('${plan.readyCount} routines will be created today.'),
-              const SizedBox(height: 12),
-              for (final node in plan.nodes.take(5))
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.check_circle_outline),
-                  title: Text(node.title),
+      builder: (context) {
+        final selectedRoutineIds = readyItems
+            .map((item) => item.routine.id)
+            .toSet();
+        return StatefulBuilder(
+          builder: (context, setState) {
+            void toggleRoutine(String id, bool selected) {
+              setState(() {
+                if (selected) {
+                  selectedRoutineIds.add(id);
+                } else {
+                  selectedRoutineIds.remove(id);
+                }
+              });
+            }
+
+            void selectAllRoutines() {
+              setState(() {
+                selectedRoutineIds
+                  ..clear()
+                  ..addAll(readyItems.map((item) => item.routine.id));
+              });
+            }
+
+            void clearRoutines() {
+              setState(selectedRoutineIds.clear);
+            }
+
+            void submit(_RoutineAction action) {
+              Navigator.of(context).pop(
+                _RoutineDialogResult(
+                  action: action,
+                  selectedRoutineIds: Set.unmodifiable(selectedRoutineIds),
                 ),
-              if (plan.readyCount > 5)
-                Text('+${plan.readyCount - 5} more routines'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            key: const ValueKey('calendar-skip-routines'),
-            onPressed: () => Navigator.of(context).pop(_RoutineAction.skip),
-            child: const Text('Skip today'),
-          ),
-          TextButton(
-            key: const ValueKey('calendar-snooze-routines'),
-            onPressed: () => Navigator.of(context).pop(_RoutineAction.snooze),
-            child: const Text('Snooze'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(_RoutineAction.cancel),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('calendar-confirm-apply-routines'),
-            onPressed: () => Navigator.of(context).pop(_RoutineAction.apply),
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
+              );
+            }
+
+            final selectedCount = selectedRoutineIds.length;
+            return AlertDialog(
+              key: const ValueKey('calendar-routine-apply-dialog'),
+              title: const Text('Apply routines?'),
+              content: SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$selectedCount of ${readyItems.length} routines selected.',
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        TextButton(
+                          key: const ValueKey('calendar-select-all-routines'),
+                          onPressed: selectedCount == readyItems.length
+                              ? null
+                              : selectAllRoutines,
+                          child: const Text('Select all'),
+                        ),
+                        TextButton(
+                          key: const ValueKey('calendar-clear-routines'),
+                          onPressed: selectedCount == 0 ? null : clearRoutines,
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    for (final item in readyItems)
+                      CheckboxListTile(
+                        key: ValueKey(
+                          'calendar-routine-select-${item.routine.id}',
+                        ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: selectedRoutineIds.contains(item.routine.id),
+                        onChanged: (value) {
+                          toggleRoutine(item.routine.id, value ?? false);
+                        },
+                        title: Text(item.node?.title ?? item.routine.label),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  key: const ValueKey('calendar-skip-routines'),
+                  onPressed: selectedCount == 0
+                      ? null
+                      : () => submit(_RoutineAction.skip),
+                  child: const Text('Skip today'),
+                ),
+                TextButton(
+                  key: const ValueKey('calendar-snooze-routines'),
+                  onPressed: selectedCount == 0
+                      ? null
+                      : () => submit(_RoutineAction.snooze),
+                  child: const Text('Snooze'),
+                ),
+                TextButton(
+                  onPressed: () => submit(_RoutineAction.cancel),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const ValueKey('calendar-confirm-apply-routines'),
+                  onPressed: selectedCount == 0
+                      ? null
+                      : () => submit(_RoutineAction.apply),
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
-    if (action == null || action == _RoutineAction.cancel || !context.mounted) {
+    if (result == null ||
+        result.action == _RoutineAction.cancel ||
+        result.selectedRoutineIds.isEmpty ||
+        !context.mounted) {
       return;
     }
 
     final repository = ref.read(mindmapRepositoryProvider);
-    final readyRoutines = plan.items
-        .where((item) => item.willCreate)
+    final selectedRoutines = readyItems
+        .where((item) => result.selectedRoutineIds.contains(item.routine.id))
         .map((item) => item.routine)
         .toList(growable: false);
-    final saved = switch (action) {
+    final saved = switch (result.action) {
       _RoutineAction.apply => await applyRecurringRoutines(
         repository: repository,
         day: day,
-        routines: readyRoutines,
+        routines: selectedRoutines,
       ),
       _RoutineAction.skip => await skipRecurringRoutines(
         repository: repository,
         day: day,
-        routines: readyRoutines,
+        routines: selectedRoutines,
       ),
       _RoutineAction.snooze => await snoozeRecurringRoutines(
         repository: repository,
         day: day,
         targetDay: day.add(const Duration(days: 1)),
-        routines: readyRoutines,
+        routines: selectedRoutines,
       ),
       _RoutineAction.cancel => <MindmapNode>[],
     };
     invalidateMindmapState(ref, day: day);
     ref.invalidate(calendarRoutinePlanProvider(day.dateOnly));
     if (!context.mounted) return;
-    final message = switch (action) {
+    final message = switch (result.action) {
       _RoutineAction.apply => 'Applied ${saved.length} routines',
       _RoutineAction.skip => 'Skipped ${saved.length} routines today',
       _RoutineAction.snooze => 'Snoozed ${saved.length} routines to tomorrow',
@@ -639,7 +716,7 @@ class _RoutineApplyBanner extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        action: switch (action) {
+        action: switch (result.action) {
           _RoutineAction.skip || _RoutineAction.snooze => SnackBarAction(
             label: 'Undo',
             onPressed: () {
@@ -666,6 +743,16 @@ class _RoutineApplyBanner extends ConsumerWidget {
 }
 
 enum _RoutineAction { apply, skip, snooze, cancel }
+
+final class _RoutineDialogResult {
+  const _RoutineDialogResult({
+    required this.action,
+    required this.selectedRoutineIds,
+  });
+
+  final _RoutineAction action;
+  final Set<String> selectedRoutineIds;
+}
 
 class _CalendarViewModeSwitch extends ConsumerWidget {
   const _CalendarViewModeSwitch();

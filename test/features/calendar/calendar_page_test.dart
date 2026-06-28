@@ -380,6 +380,69 @@ void main() {
     );
   });
 
+  testWidgets('CalendarPage applies selected recurring routines only', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('4 of 4 routines selected.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'Daily journal'));
+    await tester.pumpAndSettle();
+    expect(find.text('3 of 4 routines selected.'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-confirm-apply-routines')),
+    );
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Daily plan'));
+    expect(nodes.map((node) => node.title), isNot(contains('Daily journal')));
+    expect(find.text('Applied 3 routines'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('CalendarPage routine dialog can clear and select all', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-apply-routines')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('calendar-clear-routines')));
+    await tester.pumpAndSettle();
+    expect(find.text('0 of 4 routines selected.'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('calendar-confirm-apply-routines')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-select-all-routines')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('4 of 4 routines selected.'), findsOneWidget);
+  });
+
   testWidgets('CalendarPage skips today recurring routines', (tester) async {
     final today = DateTime(2026, 6, 22);
     final repository = InMemoryMindmapRepository();
