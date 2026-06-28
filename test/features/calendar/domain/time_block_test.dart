@@ -1,0 +1,75 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:var_app/features/calendar/domain/time_block.dart';
+
+void main() {
+  group('parseTimeBlock', () {
+    test('null is unscheduled', () {
+      final result = parseTimeBlock(null);
+      expect(result.status, TimeBlockStatus.unscheduled);
+      expect(result.isUnscheduled, isTrue);
+    });
+
+    test('absent key returns invalid', () {
+      final result = parseTimeBlock('not a map');
+      expect(result.isInvalid, isTrue);
+    });
+
+    test('valid start/end string map returns valid', () {
+      final result = parseTimeBlock({'startTime': '09:00', 'endTime': '10:00'});
+      expect(result.isValid, isTrue);
+      expect(result.block!.startMinute, 9 * 60);
+      expect(result.block!.endMinute, 10 * 60);
+      expect(result.block!.rangeLabel, '09:00 - 10:00');
+    });
+
+    test('valid startMinute/endMinute int map', () {
+      final result = parseTimeBlock({'startMinute': 540, 'endMinute': 600});
+      expect(result.isValid, isTrue);
+      expect(result.block!.startLabel, '09:00');
+      expect(result.block!.durationMinutes, 60);
+    });
+
+    test('reversed start/end returns invalid', () {
+      final result = parseTimeBlock({'startTime': '10:00', 'endTime': '09:00'});
+      expect(result.isInvalid, isTrue);
+    });
+
+    test('out-of-range hour returns invalid', () {
+      final result = parseTimeBlock({'startTime': '25:00', 'endTime': '26:00'});
+      expect(result.isInvalid, isTrue);
+    });
+
+    test('bad format string returns invalid', () {
+      final result = parseTimeBlock({'startTime': 'abc', 'endTime': 'def'});
+      expect(result.isInvalid, isTrue);
+    });
+
+    test('toJson round-trip produces re-parseable map', () {
+      const block = TimeBlock(startMinute: 9 * 60, endMinute: 10 * 60);
+      final json = block.toJson();
+      final parsed = parseTimeBlock(json);
+      expect(parsed.isValid, isTrue);
+      expect(parsed.block!.startMinute, 9 * 60);
+      expect(parsed.block!.endMinute, 10 * 60);
+    });
+  });
+
+  group('formatTimeOfDay', () {
+    test('midnight is 00:00', () {
+      expect(formatTimeOfDay(0), '00:00');
+    });
+
+    test('noon is 12:00', () {
+      expect(formatTimeOfDay(720), '12:00');
+    });
+
+    test('last minute is 23:59', () {
+      expect(formatTimeOfDay(1439), '23:59');
+    });
+
+    test('clamps out of range', () {
+      expect(formatTimeOfDay(-1), '00:00');
+      expect(formatTimeOfDay(1441), '00:01');
+    });
+  });
+}
