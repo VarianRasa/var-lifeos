@@ -1271,4 +1271,151 @@ void main() {
       isNotEmpty,
     );
   });
+
+  testWidgets('CalendarPage day cell opens preview instead of routing', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+    final router = GoRouter(
+      initialLocation: '/calendar',
+      routes: [
+        GoRoute(
+          path: '/calendar',
+          builder: (context, state) => const CalendarPage(),
+        ),
+        GoRoute(
+          path: '/calendar/:date',
+          builder: (context, state) =>
+              Text('day=${state.pathParameters['date']}'),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
+    expect(find.text('day=2026-06-19'), findsNothing);
+  });
+
+  testWidgets('CalendarPage preview open full day routes to day', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+    final router = GoRouter(
+      initialLocation: '/calendar',
+      routes: [
+        GoRoute(
+          path: '/calendar',
+          builder: (context, state) => const CalendarPage(),
+        ),
+        GoRoute(
+          path: '/calendar/:date',
+          builder: (context, state) =>
+              Text('day=${state.pathParameters['date']}'),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-open-day')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('day=2026-06-19'), findsOneWidget);
+  });
+
+  testWidgets('CalendarPage keyboard opens and closes day preview', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsNothing);
+  });
+
+  testWidgets('CalendarPage preview lists nodes and summary', (tester) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        _taskNode(id: 'preview-task', title: 'Preview task', day: today),
+        MindmapNode.create(
+          id: 'preview-high',
+          type: NodeType.task,
+          title: 'High preview task',
+          day: today,
+          priority: NodePriority.high,
+          now: DateTime(2026, 6, 19, 9),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-node-preview-task')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-node-preview-high')),
+      findsOneWidget,
+    );
+    expect(find.text('2 nodes'), findsWidgets);
+    expect(find.text('1 high'), findsWidgets);
+  });
+
+  testWidgets('CalendarPage preview close hides panel', (tester) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-day-preview-close')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsNothing);
+  });
 }

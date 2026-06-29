@@ -56,9 +56,46 @@ Completed scope:
 - Added tests for marker action menus, marker deletion, apply-now, and resnooze behavior.
 - Updated `docs/phase_3_closeout.md`, `docs/release/beta_release_checklist.md`, and `CLAUDE.md` after implementation.
 
-## Phase 5 - Beta release hardening
+## Phase 5 - Page-by-page feature and UI/UX enhancement
 
-Status: planned.
+Status: active.
+
+Goal: pause beta-hardening as the primary track and let the user direct feature and UI/UX polish per page until each surface reaches the desired product feel.
+
+Working loop for each page:
+
+1. User chooses the page and describes the desired feature/UI/UX direction.
+2. Audit the current page implementation, state/data dependencies, tests, and visual constraints.
+3. Propose a small implementation plan before code changes.
+4. Implement one focused batch without unrelated edits.
+5. Run targeted tests plus `flutter analyze` when code changes.
+6. User reviews the result and either iterates or marks the page done.
+7. Move to the next page only after user approval.
+
+Recommended page order:
+
+- Calendar and Agenda.
+- Day Mindmap canvas and node editor.
+- Command Palette.
+- Insights.
+- Graph.
+- Workspaces.
+- Settings.
+- Backup/Sync.
+
+## Phase 6 - Accessibility and performance pass
+
+Status: planned after page polish.
+
+- Keyboard/focus traversal audit across Calendar, Agenda, Day mindmap, dialogs, and command palette.
+- Screen-reader labels for routine actions, marker action menus, drag/drop, shortcut help, and node editor flows.
+- Contrast/visual density pass for dark-first UI.
+- Performance pass for dense calendars, large mindmaps, graph rendering, and Sembast hotspots.
+- Add targeted regression tests or benchmarks where practical.
+
+## Phase 7 - Beta release hardening
+
+Status: planned after user-led page polish.
 
 - Run full release preflight from `docs/release/beta_release_checklist.md`.
 - Keep `README.md`, closeout docs, and this roadmap aligned.
@@ -66,17 +103,7 @@ Status: planned.
 - Add/refresh docs for known caveats and release blockers.
 - Run full `flutter test`, `flutter analyze`, and web release build before sharing beta.
 
-## Phase 6 - Accessibility and performance
-
-Status: planned.
-
-- Keyboard/focus traversal audit across Calendar, Agenda, Day mindmap, dialogs, and command palette.
-- Screen-reader labels for routine actions, drag/drop, shortcut help, and node editor flows.
-- Contrast/visual density pass for dark-first UI.
-- Performance pass for dense calendars, large mindmaps, graph rendering, and Sembast hotspots.
-- Add targeted regression tests or benchmarks where practical.
-
-## Phase 7 - Sync productization
+## Phase 8 - Sync productization
 
 Status: planned.
 

@@ -181,5 +181,7 @@ Result: all pass. Calendar test suite: 30 tests. Full test suite: 363 tests.
 
 ### Suggested next work
 
-- Add source routine/template navigation for marker detail actions where routing supports it.
-- Run full `flutter test` before release/handoff commit.
+- Phase 5 is now user-led page-by-page feature and UI/UX enhancement.
+- Start by asking which page the user wants to polish first, then audit that page and propose a small implementation plan before code changes.
+- Recommended order: Calendar/Agenda, Day Mindmap, Command Palette, Insights, Graph, Workspaces, Settings, Backup/Sync.
+- Keep changes focused to the selected page unless the user approves broader refactors.

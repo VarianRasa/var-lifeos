@@ -80,6 +80,7 @@ class CalendarPage extends ConsumerStatefulWidget {
 class _CalendarPageState extends ConsumerState<CalendarPage> {
   late DateTime _visibleMonth;
   late DateTime _focusedDay;
+  DateTime? _previewDay;
   bool _slideForward = true;
   final Set<String> _dismissedMonths = {};
   final _searchController = TextEditingController();
@@ -182,7 +183,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     nextDay = _focusedDay.add(const Duration(days: 7));
                   } else if (event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
-                    goToDay(context, _focusedDay);
+                    _openDayPreview(_focusedDay);
+                    return KeyEventResult.handled;
+                  } else if (event.logicalKey == LogicalKeyboardKey.escape &&
+                      _previewDay != null) {
+                    _closeDayPreview();
                     return KeyEventResult.handled;
                   }
 
@@ -193,89 +198,125 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 }
                 return KeyEventResult.ignored;
               },
-              child: Column(
-                children: [
-                  _MonthHeader(
-                    month: _visibleMonth,
-                    focusedDay: _focusedDay,
-                    viewMode: viewMode,
-                    onPrevious: () => _showPreviousPeriod(viewMode),
-                    onNext: () => _showNextPeriod(viewMode),
-                    onJumpToDate: _showDatePicker,
-                  ),
-                  const SizedBox(height: 8),
-                  const _CalendarViewModeSwitch(),
-                  const SizedBox(height: 4),
-                  _WeeklySummaryStrip(today: today),
-                  if (viewMode == CalendarViewMode.agenda)
-                    _RoutineApplyBanner(day: today),
-                  const SizedBox(height: 8),
-                  if (viewMode != CalendarViewMode.agenda) ...[
-                    const _WeekdayHeader(),
-                    const SizedBox(height: 6),
-                  ],
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          transitionBuilder:
-                              (Widget child, Animation<double> animation) {
-                                final offset = _slideForward
-                                    ? Tween<Offset>(
-                                        begin: const Offset(0.3, 0.0),
-                                        end: Offset.zero,
-                                      )
-                                    : Tween<Offset>(
-                                        begin: const Offset(-0.3, 0.0),
-                                        end: Offset.zero,
-                                      );
-                                return SlideTransition(
-                                  position: offset.animate(
-                                    CurvedAnimation(
-                                      parent: animation,
-                                      curve: Curves.easeInOutCubic,
-                                    ),
-                                  ),
-                                  child: FadeTransition(
-                                    opacity: animation,
-                                    child: child,
-                                  ),
-                                );
-                              },
-                          child: KeyedSubtree(
-                            key: ValueKey(
-                              '${_visibleMonth.toIso8601String()}-${viewMode.name}',
-                            ),
-                            child: switch (viewMode) {
-                              CalendarViewMode.month => _MonthGrid(
-                                visibleMonth: _visibleMonth,
-                                today: today,
-                                focusedDay: _focusedDay,
-                              ),
-                              CalendarViewMode.week => _WeekCalendarView(
-                                focusedDay: _focusedDay,
-                                today: today,
-                              ),
-                              CalendarViewMode.agenda => _AgendaCalendarView(
-                                focusedDay: _focusedDay,
-                                today: today,
-                              ),
-                            },
-                          ),
-                        ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final previewDay = _previewDay;
+                  final calendarContent = Column(
+                    children: [
+                      _MonthHeader(
+                        month: _visibleMonth,
+                        focusedDay: _focusedDay,
+                        viewMode: viewMode,
+                        onPrevious: () => _showPreviousPeriod(viewMode),
+                        onNext: () => _showNextPeriod(viewMode),
+                        onJumpToDate: _showDatePicker,
+                      ),
+                      const SizedBox(height: 8),
+                      const _CalendarViewModeSwitch(),
+                      const SizedBox(height: 4),
+                      _WeeklySummaryStrip(today: today),
+                      if (viewMode == CalendarViewMode.agenda)
+                        _RoutineApplyBanner(day: today),
+                      const SizedBox(height: 8),
+                      if (viewMode != CalendarViewMode.agenda) ...[
+                        const _WeekdayHeader(),
+                        const SizedBox(height: 6),
                       ],
-                    ),
-                  ),
-                  _CalendarEmptyBanner(
-                    visibleMonth: _visibleMonth,
-                    today: today,
-                    isDismissed: _dismissedMonths.contains(_monthKey),
-                    onDismiss: () {
-                      setState(() => _dismissedMonths.add(_monthKey));
-                    },
-                  ),
-                ],
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              transitionBuilder:
+                                  (Widget child, Animation<double> animation) {
+                                    final offset = _slideForward
+                                        ? Tween<Offset>(
+                                            begin: const Offset(0.3, 0.0),
+                                            end: Offset.zero,
+                                          )
+                                        : Tween<Offset>(
+                                            begin: const Offset(-0.3, 0.0),
+                                            end: Offset.zero,
+                                          );
+                                    return SlideTransition(
+                                      position: offset.animate(
+                                        CurvedAnimation(
+                                          parent: animation,
+                                          curve: Curves.easeInOutCubic,
+                                        ),
+                                      ),
+                                      child: FadeTransition(
+                                        opacity: animation,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                              child: KeyedSubtree(
+                                key: ValueKey(
+                                  '${_visibleMonth.toIso8601String()}-${viewMode.name}',
+                                ),
+                                child: switch (viewMode) {
+                                  CalendarViewMode.month => _MonthGrid(
+                                    visibleMonth: _visibleMonth,
+                                    today: today,
+                                    focusedDay: _focusedDay,
+                                    onDayPreview: _openDayPreview,
+                                  ),
+                                  CalendarViewMode.week => _WeekCalendarView(
+                                    focusedDay: _focusedDay,
+                                    today: today,
+                                    onDayPreview: _openDayPreview,
+                                  ),
+                                  CalendarViewMode.agenda =>
+                                    _AgendaCalendarView(
+                                      focusedDay: _focusedDay,
+                                      today: today,
+                                    ),
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _CalendarEmptyBanner(
+                        visibleMonth: _visibleMonth,
+                        today: today,
+                        isDismissed: _dismissedMonths.contains(_monthKey),
+                        onDismiss: () {
+                          setState(() => _dismissedMonths.add(_monthKey));
+                        },
+                      ),
+                    ],
+                  );
+
+                  if (previewDay == null ||
+                      constraints.maxWidth <
+                          LayoutConstants.desktopBreakpoint) {
+                    return calendarContent;
+                  }
+
+                  final panelWidth = (constraints.maxWidth * 0.3).clamp(
+                    340.0,
+                    420.0,
+                  );
+                  return Row(
+                    children: [
+                      Expanded(child: calendarContent),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: panelWidth,
+                        child: _DayPreviewPanel(
+                          day: previewDay,
+                          today: today,
+                          onClose: _closeDayPreview,
+                          onOpenDay: () => _openFullDay(previewDay),
+                          onOpenNode: (nodeId) =>
+                              _openFullDay(previewDay, highlightNodeId: nodeId),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -323,6 +364,59 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       _focusedDay = normalized;
       _visibleMonth = normalized.firstOfMonth;
     });
+  }
+
+  void _openDayPreview(DateTime day) {
+    final normalized = day.dateOnly;
+    final isNarrow =
+        MediaQuery.sizeOf(context).width < LayoutConstants.desktopBreakpoint;
+    setState(() {
+      _slideForward = normalized.isAfter(_focusedDay);
+      _focusedDay = normalized;
+      _visibleMonth = normalized.firstOfMonth;
+      _previewDay = normalized;
+    });
+
+    if (isNarrow) {
+      unawaited(_showDayPreviewSheet(normalized));
+    }
+  }
+
+  void _closeDayPreview() {
+    setState(() => _previewDay = null);
+  }
+
+  void _openFullDay(DateTime day, {String? highlightNodeId}) {
+    goToDay(context, day, highlightNodeId: highlightNodeId);
+  }
+
+  Future<void> _showDayPreviewSheet(DateTime day) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.72,
+              child: _DayPreviewPanel(
+                day: day,
+                today: ref.read(currentDateProvider),
+                onClose: () => Navigator.of(context).pop(),
+                onOpenDay: () => goToDay(context, day),
+                onOpenNode: (nodeId) =>
+                    goToDay(context, day, highlightNodeId: nodeId),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (mounted && _previewDay?.isSameDay(day) == true) {
+      setState(() => _previewDay = null);
+    }
   }
 
   KeyEventResult _handleCalendarShortcut(
@@ -493,6 +587,306 @@ class _CalendarEmptyBanner extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+class _DayPreviewPanel extends ConsumerWidget {
+  const _DayPreviewPanel({
+    required this.day,
+    required this.today,
+    required this.onClose,
+    required this.onOpenDay,
+    required this.onOpenNode,
+  });
+
+  final DateTime day;
+  final DateTime today;
+  final VoidCallback onClose;
+  final VoidCallback onOpenDay;
+  final ValueChanged<String> onOpenNode;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final normalizedDay = day.dateOnly;
+    final nodesAsync = ref.watch(nodesForDayProvider(normalizedDay));
+    final searchQuery = ref.watch(calendarSearchQueryProvider).trim();
+    final normalizedQuery = searchQuery.toLowerCase();
+    final titleMap = ref.watch(workspaceTitleProvider);
+    final titleKey =
+        '${WorkspaceContextType.daily.name}_${dayKey(normalizedDay)}';
+    final customTitle = titleMap[titleKey];
+    final hasCustomTitle = customTitle != null && customTitle.isNotEmpty;
+    final title = hasCustomTitle
+        ? customTitle
+        : DateFormat('EEEE, MMMM d').format(normalizedDay);
+
+    return Card(
+      key: const ValueKey('calendar-day-preview'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (normalizedDay.isSameDay(today)) ...[
+                            const SizedBox(width: 8),
+                            const _PulsingDot(),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        DateFormat('EEE, MMM d, y').format(normalizedDay),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('calendar-day-preview-close'),
+                  tooltip: 'Close preview',
+                  icon: const Icon(Icons.close),
+                  onPressed: onClose,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            nodesAsync.when(
+              loading: () => const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (error, stackTrace) => Expanded(
+                child: Center(
+                  child: Text(
+                    'Unable to load day preview',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+              ),
+              data: (nodes) {
+                final visibleNodes = normalizedQuery.isEmpty
+                    ? nodes
+                    : nodes
+                          .where((node) => _nodeMatches(node, normalizedQuery))
+                          .toList();
+                final summary = DayNodeSummary.fromNodes(
+                  normalizedDay,
+                  visibleNodes,
+                );
+                return Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          _SummaryChip(
+                            label: _countLabel(summary.totalCount),
+                            color: theme.colorScheme.primary,
+                          ),
+                          if (summary.doneCount > 0)
+                            _SummaryChip(
+                              label: '${summary.doneCount} done',
+                              color: theme.colorScheme.tertiary,
+                            ),
+                          if (summary.highPriorityCount > 0)
+                            _SummaryChip(
+                              label: '${summary.highPriorityCount} high',
+                              color: theme.colorScheme.secondary,
+                            ),
+                          if (summary.overdueCount > 0)
+                            _SummaryChip(
+                              label: '${summary.overdueCount} overdue',
+                              color: theme.colorScheme.error,
+                            ),
+                        ],
+                      ),
+                      if (searchQuery.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Matching "$searchQuery"',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: visibleNodes.isEmpty
+                            ? _DayPreviewEmptyState(
+                                hasQuery: searchQuery.isNotEmpty,
+                              )
+                            : ListView.separated(
+                                itemCount: visibleNodes.length,
+                                separatorBuilder: (_, separatorIndex) =>
+                                    const SizedBox(height: 8),
+                                itemBuilder: (context, index) {
+                                  final node = visibleNodes[index];
+                                  return _DayPreviewNodeTile(
+                                    node: node,
+                                    onTap: () => onOpenNode(node.id),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const ValueKey('calendar-day-preview-open-day'),
+                onPressed: onOpenDay,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Open full day'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DayPreviewEmptyState extends StatelessWidget {
+  const _DayPreviewEmptyState({required this.hasQuery});
+
+  final bool hasQuery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.event_note_outlined,
+            size: 42,
+            color: theme.colorScheme.outline,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            hasQuery ? 'No matching nodes' : 'No nodes yet for this day',
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            hasQuery
+                ? 'Clear search to see all nodes for this day.'
+                : 'Open the full day to start planning.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayPreviewNodeTile extends StatelessWidget {
+  const _DayPreviewNodeTile({required this.node, required this.onTap});
+
+  final MindmapNode node;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final metadata = _previewNodeMetadata(node);
+    return Material(
+      color: _nodeColor(node.type).withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        key: ValueKey('calendar-day-preview-node-${node.id}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              Icon(
+                _nodeIcon(node.type),
+                size: 18,
+                color: _nodeColor(node.type),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      node.title.trim().isEmpty
+                          ? 'Untitled ${node.type.name}'
+                          : node.title.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (metadata.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        metadata,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _previewNodeMetadata(MindmapNode node) {
+    final parts = <String>[node.type.label];
+    if (node.priority != NodePriority.none) parts.add(node.priority.label);
+    if (node.status != NodeStatus.open) parts.add(node.status.label);
+    return parts.join(' · ');
   }
 }
 
@@ -898,10 +1292,15 @@ class _ShortcutHelpRow extends StatelessWidget {
 }
 
 class _WeekCalendarView extends StatelessWidget {
-  const _WeekCalendarView({required this.focusedDay, required this.today});
+  const _WeekCalendarView({
+    required this.focusedDay,
+    required this.today,
+    required this.onDayPreview,
+  });
 
   final DateTime focusedDay;
   final DateTime today;
+  final ValueChanged<DateTime> onDayPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -933,6 +1332,7 @@ class _WeekCalendarView extends StatelessWidget {
                   rowIndex: 0,
                   colIndex: index,
                   totalRows: 1,
+                  onPreview: onDayPreview,
                 ),
               );
             },
@@ -965,6 +1365,7 @@ class _WeekCalendarView extends StatelessWidget {
               rowIndex: 0,
               colIndex: index,
               totalRows: 1,
+              onPreview: onDayPreview,
             );
           },
         );
@@ -1863,11 +2264,13 @@ class _MonthGrid extends StatelessWidget {
     required this.visibleMonth,
     required this.today,
     required this.focusedDay,
+    required this.onDayPreview,
   });
 
   final DateTime visibleMonth;
   final DateTime today;
   final DateTime focusedDay;
+  final ValueChanged<DateTime> onDayPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -1906,6 +2309,7 @@ class _MonthGrid extends StatelessWidget {
               rowIndex: rowIndex,
               colIndex: colIndex,
               totalRows: rowCount,
+              onPreview: onDayPreview,
             );
           },
         );
@@ -1923,6 +2327,7 @@ class _DayCell extends ConsumerStatefulWidget {
     required this.rowIndex,
     required this.colIndex,
     required this.totalRows,
+    required this.onPreview,
   });
 
   final DateTime day;
@@ -1932,6 +2337,7 @@ class _DayCell extends ConsumerStatefulWidget {
   final int rowIndex;
   final int colIndex;
   final int totalRows;
+  final ValueChanged<DateTime> onPreview;
 
   @override
   ConsumerState<_DayCell> createState() => _DayCellState();
@@ -2429,7 +2835,7 @@ class _DayCellState extends ConsumerState<_DayCell> {
               key: ValueKey('calendar-cell-${dayKey(widget.day)}'),
               onTap: () {
                 _hideOverlay();
-                goToDay(context, widget.day);
+                widget.onPreview(widget.day);
               },
               child: cellWidget,
             ),
@@ -2444,7 +2850,7 @@ class _DayCellState extends ConsumerState<_DayCell> {
       selected: isFocused,
       onTap: () {
         _hideOverlay();
-        goToDay(context, widget.day);
+        widget.onPreview(widget.day);
       },
       child: draggableCell,
     );
