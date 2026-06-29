@@ -634,6 +634,64 @@ void main() {
     expect(find.text('Drink water'), findsNothing);
   });
 
+  testWidgets('CalendarPage agenda search filters visible nodes', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'task-node',
+          type: NodeType.task,
+          title: 'Agenda task',
+          day: today,
+          now: DateTime(2026, 6, 19, 8),
+        ),
+        MindmapNode.create(
+          id: 'event-node',
+          type: NodeType.note,
+          title: 'Launch event',
+          body: 'Release kickoff',
+          day: today,
+          data: const {'calendar_kind': 'event'},
+          now: DateTime(2026, 6, 19, 9),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Agenda task'), findsOneWidget);
+    expect(find.text('Launch event'), findsOneWidget);
+
+    final searchEditable = find.descendant(
+      of: find.byKey(const ValueKey('calendar-search-field')),
+      matching: find.byType(EditableText),
+    );
+    await tester.enterText(searchEditable, 'launch');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Launch event'), findsOneWidget);
+    expect(find.text('Agenda task'), findsNothing);
+
+    await tester.enterText(searchEditable, 'missing');
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-agenda-empty')), findsOneWidget);
+    expect(find.text('No matching agenda items'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-empty-clear-search')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Launch event'), findsOneWidget);
+    expect(find.text('Agenda task'), findsOneWidget);
+    expect(find.text('No matching agenda items'), findsNothing);
+  });
+
   testWidgets('CalendarPage shows mobile week strip on narrow screens', (
     tester,
   ) async {
@@ -922,6 +980,72 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('day=2026-06-19 highlight='), findsOneWidget);
+  });
+
+  testWidgets('CalendarPage agenda group add creates node for that day', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'agenda-task',
+          type: NodeType.task,
+          title: 'Agenda task',
+          day: today,
+          now: DateTime(2026, 6, 19, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-add-2026-06-19')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('add-node-title-field')),
+      'Agenda-created task',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Agenda-created task'));
+    expect(find.text('Agenda-created task'), findsOneWidget);
+    expect(
+      find.text('Added "Agenda-created task" to Jun 19, 2026'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('CalendarPage agenda empty add creates node for focused day', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-empty-add-node')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('add-node-title-field')),
+      'Empty agenda task',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Empty agenda task'));
+    expect(find.text('Empty agenda task'), findsOneWidget);
   });
 
   testWidgets('CalendarPage agenda sorts timed high-priority items first', (
@@ -1417,5 +1541,66 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('calendar-day-preview')), findsNothing);
+  });
+
+  testWidgets('CalendarPage preview add creates node for selected day', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final targetDay = DateTime(2026, 6, 20);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-20')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-add-node')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('add-node-title-field')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('add-node-title-field')),
+      'Preview-created task',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: targetDay);
+    expect(nodes, hasLength(1));
+    expect(nodes.single.title, 'Preview-created task');
+    expect(nodes.single.day, targetDay);
+    expect(find.text('Preview-created task'), findsWidgets);
+    expect(
+      find.text('Added "Preview-created task" to Jun 20, 2026'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('CalendarPage preview add validates title before saving', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-20')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-add-node')),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Title is required'), findsOneWidget);
+    expect(await repository.listNodes(day: DateTime(2026, 6, 20)), isEmpty);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
   });
 }

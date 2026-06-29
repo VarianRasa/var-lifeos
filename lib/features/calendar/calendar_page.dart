@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
@@ -24,6 +25,7 @@ import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/mindmap_node_data.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/workspace_context.dart';
+import '../mindmap/presentation/add_node_dialog.dart';
 import '../onboarding/onboarding_overlay.dart';
 import '../workspace/data/workspace_title_repository.dart';
 import 'application/calendar_view_controller.dart';
@@ -97,6 +99,12 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _clearCalendarSearch() {
+    _searchController.clear();
+    ref.read(calendarSearchQueryProvider.notifier).state = '';
+    setState(() {});
   }
 
   @override
@@ -271,6 +279,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                                     _AgendaCalendarView(
                                       focusedDay: _focusedDay,
                                       today: today,
+                                      onAddNode: _addNodeForDay,
+                                      onClearSearch: _clearCalendarSearch,
                                     ),
                                 },
                               ),
@@ -309,6 +319,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                           day: previewDay,
                           today: today,
                           onClose: _closeDayPreview,
+                          onAddNode: () => _addNodeForDay(previewDay),
                           onOpenDay: () => _openFullDay(previewDay),
                           onOpenNode: (nodeId) =>
                               _openFullDay(previewDay, highlightNodeId: nodeId),
@@ -390,6 +401,52 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     goToDay(context, day, highlightNodeId: highlightNodeId);
   }
 
+  Future<void> _addNodeForDay(DateTime day) async {
+    final draft = await showAddNodeDialog(context);
+    if (draft == null || !mounted) return;
+
+    final normalizedDay = day.dateOnly;
+    final node = MindmapNode.create(
+      id: const Uuid().v4(),
+      type: draft.type,
+      title: draft.title,
+      body: draft.body,
+      day: normalizedDay,
+      status: draft.status,
+      priority: draft.priority,
+      project: draft.project,
+      area: draft.area,
+      tags: draft.tags,
+      dueDate: draft.dueDate,
+      progress: draft.progress,
+      isPinned: draft.isPinned,
+      isArchived: draft.isArchived,
+      checklist: draft.checklist,
+      relatedNodeIds: draft.relatedNodeIds,
+      data: draft.data,
+      now: DateTime.now(),
+    );
+
+    try {
+      final saved = await ref
+          .read(mindmapMutationControllerProvider)
+          .saveNode(node);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Added "${saved.title}" to ${DateFormat('MMM d, y').format(normalizedDay)}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to add node: $error')));
+    }
+  }
+
   Future<void> _showDayPreviewSheet(DateTime day) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -405,6 +462,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 day: day,
                 today: ref.read(currentDateProvider),
                 onClose: () => Navigator.of(context).pop(),
+                onAddNode: () => _addNodeForDay(day),
                 onOpenDay: () => goToDay(context, day),
                 onOpenNode: (nodeId) =>
                     goToDay(context, day, highlightNodeId: nodeId),
@@ -595,6 +653,7 @@ class _DayPreviewPanel extends ConsumerWidget {
     required this.day,
     required this.today,
     required this.onClose,
+    required this.onAddNode,
     required this.onOpenDay,
     required this.onOpenNode,
   });
@@ -602,6 +661,7 @@ class _DayPreviewPanel extends ConsumerWidget {
   final DateTime day;
   final DateTime today;
   final VoidCallback onClose;
+  final Future<void> Function() onAddNode;
   final VoidCallback onOpenDay;
   final ValueChanged<String> onOpenNode;
 
@@ -760,14 +820,28 @@ class _DayPreviewPanel extends ConsumerWidget {
               },
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const ValueKey('calendar-day-preview-open-day'),
-                onPressed: onOpenDay,
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Open full day'),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    key: const ValueKey('calendar-day-preview-add-node'),
+                    onPressed: () {
+                      unawaited(onAddNode());
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add node'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const ValueKey('calendar-day-preview-open-day'),
+                    onPressed: onOpenDay,
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Open full day'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -802,7 +876,7 @@ class _DayPreviewEmptyState extends StatelessWidget {
           Text(
             hasQuery
                 ? 'Clear search to see all nodes for this day.'
-                : 'Open the full day to start planning.',
+                : 'Add a node or open the full day to start planning.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -1375,15 +1449,23 @@ class _WeekCalendarView extends StatelessWidget {
 }
 
 class _AgendaCalendarView extends ConsumerWidget {
-  const _AgendaCalendarView({required this.focusedDay, required this.today});
+  const _AgendaCalendarView({
+    required this.focusedDay,
+    required this.today,
+    required this.onAddNode,
+    required this.onClearSearch,
+  });
 
   final DateTime focusedDay;
   final DateTime today;
+  final Future<void> Function(DateTime day) onAddNode;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nodesAsync = ref.watch(allMindmapNodesProvider);
     final filter = ref.watch(agendaFilterProvider);
+    final searchQuery = ref.watch(calendarSearchQueryProvider).trim().toLowerCase();
     final theme = Theme.of(context);
     return Column(
       children: [
@@ -1403,6 +1485,8 @@ class _AgendaCalendarView extends ConsumerWidget {
                             (!node.isArchived || _isRoutineMarker(node)) &&
                             !node.day.isBefore(start) &&
                             node.day.isBefore(end) &&
+                            (searchQuery.isEmpty ||
+                                _nodeMatches(node, searchQuery)) &&
                             _matchesFilter(node, filter),
                       )
                       .toList()
@@ -1426,7 +1510,13 @@ class _AgendaCalendarView extends ConsumerWidget {
                 grouped.putIfAbsent(node.day.dateOnly, () => []).add(node);
               }
               return agendaNodes.isEmpty
-                  ? _AgendaEmptyState(filter: filter, day: focusedDay)
+                  ? _AgendaEmptyState(
+                      filter: filter,
+                      day: focusedDay,
+                      searchQuery: searchQuery,
+                      onAddNode: () => onAddNode(focusedDay),
+                      onClearSearch: onClearSearch,
+                    )
                   : ListView.separated(
                       key: const ValueKey('calendar-agenda-list'),
                       padding: const EdgeInsets.only(bottom: 24),
@@ -1463,12 +1553,26 @@ class _AgendaCalendarView extends ConsumerWidget {
                                       const SizedBox(width: 4),
                                       IconButton(
                                         key: ValueKey(
-                                          'calendar-agenda-open-${dayKey(day)}',
+                                          'calendar-agenda-add-${dayKey(day)}',
                                         ),
-                                        tooltip: 'Open day to add node',
+                                        tooltip: 'Add node to day',
                                         visualDensity: VisualDensity.compact,
                                         icon: const Icon(
                                           Icons.add_circle_outline,
+                                          size: 18,
+                                        ),
+                                        onPressed: () {
+                                          unawaited(onAddNode(day));
+                                        },
+                                      ),
+                                      IconButton(
+                                        key: ValueKey(
+                                          'calendar-agenda-open-${dayKey(day)}',
+                                        ),
+                                        tooltip: 'Open day',
+                                        visualDensity: VisualDensity.compact,
+                                        icon: const Icon(
+                                          Icons.open_in_new,
                                           size: 18,
                                         ),
                                         onPressed: () => goToDay(context, day),
@@ -2081,22 +2185,34 @@ class _RoutineMarkerActionsMenuState
 enum _MarkerAction { delete, resnooze, applyNow }
 
 class _AgendaEmptyState extends StatelessWidget {
-  const _AgendaEmptyState({required this.filter, required this.day});
+  const _AgendaEmptyState({
+    required this.filter,
+    required this.day,
+    required this.searchQuery,
+    required this.onAddNode,
+    required this.onClearSearch,
+  });
 
   final AgendaFilter filter;
   final DateTime day;
+  final String searchQuery;
+  final Future<void> Function() onAddNode;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label = switch (filter) {
-      AgendaFilter.all => 'No agenda items',
-      AgendaFilter.tasks => 'No task items',
-      AgendaFilter.events => 'No event items',
-      AgendaFilter.habits => 'No habit items',
-      AgendaFilter.routines => 'No routine items',
-      AgendaFilter.done => 'No done items',
-    };
+    final hasSearch = searchQuery.isNotEmpty;
+    final label = hasSearch
+        ? 'No matching agenda items'
+        : switch (filter) {
+            AgendaFilter.all => 'No agenda items',
+            AgendaFilter.tasks => 'No task items',
+            AgendaFilter.events => 'No event items',
+            AgendaFilter.habits => 'No habit items',
+            AgendaFilter.routines => 'No routine items',
+            AgendaFilter.done => 'No done items',
+          };
     return LayoutBuilder(
       builder: (context, constraints) {
         final tight = constraints.maxHeight < 140;
@@ -2118,18 +2234,44 @@ class _AgendaEmptyState extends StatelessWidget {
                 if (!tight) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'Create nodes on a day to build your agenda.',
+                    hasSearch
+                        ? 'Try another search or clear the search field.'
+                        : 'Create nodes on a day to build your agenda.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
                 SizedBox(height: tight ? 8 : 12),
-                FilledButton.icon(
-                  key: const ValueKey('calendar-agenda-empty-open-day'),
-                  onPressed: () => goToDay(context, day),
-                  icon: const Icon(Icons.add_circle_outline),
-                  label: const Text('Open day'),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (hasSearch)
+                      FilledButton.icon(
+                        key: const ValueKey(
+                          'calendar-agenda-empty-clear-search',
+                        ),
+                        onPressed: onClearSearch,
+                        icon: const Icon(Icons.search_off),
+                        label: const Text('Clear search'),
+                      ),
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('calendar-agenda-empty-add-node'),
+                      onPressed: () {
+                        unawaited(onAddNode());
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add node'),
+                    ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('calendar-agenda-empty-open-day'),
+                      onPressed: () => goToDay(context, day),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('Open day'),
+                    ),
+                  ],
                 ),
               ],
             ),
