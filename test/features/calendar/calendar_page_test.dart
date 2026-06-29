@@ -1543,6 +1543,58 @@ void main() {
     expect(find.byKey(const ValueKey('calendar-day-preview')), findsNothing);
   });
 
+  testWidgets('CalendarPage preview clear search restores hidden nodes', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final targetDay = DateTime(2026, 6, 20);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'preview-search-task',
+          type: NodeType.task,
+          title: 'Preview search task',
+          day: targetDay,
+          now: DateTime(2026, 6, 20, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-20')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        const ValueKey('calendar-day-preview-node-preview-search-task'),
+      ),
+      findsOneWidget,
+    );
+
+    final searchEditable = find.descendant(
+      of: find.byKey(const ValueKey('calendar-search-field')),
+      matching: find.byType(EditableText),
+    );
+    await tester.enterText(searchEditable, 'missing');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear search to see all nodes for this day.'), findsOneWidget);
+    expect(find.text('Preview search task'), findsNothing);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-clear-search')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        const ValueKey('calendar-day-preview-node-preview-search-task'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('CalendarPage preview add creates node for selected day', (
     tester,
   ) async {

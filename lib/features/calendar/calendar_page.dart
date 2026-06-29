@@ -320,6 +320,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                           today: today,
                           onClose: _closeDayPreview,
                           onAddNode: () => _addNodeForDay(previewDay),
+                          onClearSearch: _clearCalendarSearch,
                           onOpenDay: () => _openFullDay(previewDay),
                           onOpenNode: (nodeId) =>
                               _openFullDay(previewDay, highlightNodeId: nodeId),
@@ -463,6 +464,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 today: ref.read(currentDateProvider),
                 onClose: () => Navigator.of(context).pop(),
                 onAddNode: () => _addNodeForDay(day),
+                onClearSearch: _clearCalendarSearch,
                 onOpenDay: () => goToDay(context, day),
                 onOpenNode: (nodeId) =>
                     goToDay(context, day, highlightNodeId: nodeId),
@@ -654,6 +656,7 @@ class _DayPreviewPanel extends ConsumerWidget {
     required this.today,
     required this.onClose,
     required this.onAddNode,
+    required this.onClearSearch,
     required this.onOpenDay,
     required this.onOpenNode,
   });
@@ -662,6 +665,7 @@ class _DayPreviewPanel extends ConsumerWidget {
   final DateTime today;
   final VoidCallback onClose;
   final Future<void> Function() onAddNode;
+  final VoidCallback onClearSearch;
   final VoidCallback onOpenDay;
   final ValueChanged<String> onOpenNode;
 
@@ -800,6 +804,7 @@ class _DayPreviewPanel extends ConsumerWidget {
                         child: visibleNodes.isEmpty
                             ? _DayPreviewEmptyState(
                                 hasQuery: searchQuery.isNotEmpty,
+                                onClearSearch: onClearSearch,
                               )
                             : ListView.separated(
                                 itemCount: visibleNodes.length,
@@ -851,9 +856,13 @@ class _DayPreviewPanel extends ConsumerWidget {
 }
 
 class _DayPreviewEmptyState extends StatelessWidget {
-  const _DayPreviewEmptyState({required this.hasQuery});
+  const _DayPreviewEmptyState({
+    required this.hasQuery,
+    required this.onClearSearch,
+  });
 
   final bool hasQuery;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -882,6 +891,15 @@ class _DayPreviewEmptyState extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          if (hasQuery) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const ValueKey('calendar-day-preview-clear-search'),
+              onPressed: onClearSearch,
+              icon: const Icon(Icons.search_off),
+              label: const Text('Clear search'),
+            ),
+          ],
         ],
       ),
     );
