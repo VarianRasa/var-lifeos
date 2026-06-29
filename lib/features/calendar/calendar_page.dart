@@ -492,6 +492,10 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     KeyDownEvent event,
     CalendarViewMode viewMode,
   ) {
+    if (event.logicalKey == LogicalKeyboardKey.keyN) {
+      unawaited(_addNodeForDay(_previewDay ?? _focusedDay));
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyM) {
       ref
           .read(calendarViewModeProvider.notifier)
@@ -1326,6 +1330,7 @@ class _CalendarShortcutHelpDialog extends StatelessWidget {
               _ShortcutHelpRow(keys: 'M', action: 'Month view'),
               _ShortcutHelpRow(keys: 'W', action: 'Week view'),
               _ShortcutHelpRow(keys: 'A', action: 'Agenda view'),
+              _ShortcutHelpRow(keys: 'N', action: 'Add node to focused day'),
               Divider(),
               _ShortcutHelpRow(keys: '1', action: 'All agenda items'),
               _ShortcutHelpRow(keys: '2', action: 'Tasks'),

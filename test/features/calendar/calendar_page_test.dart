@@ -856,6 +856,61 @@ void main() {
     expect(find.byKey(const ValueKey('calendar-month-grid')), findsOneWidget);
   });
 
+  testWidgets('CalendarPage keyboard add shortcut creates focused-day node', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('add-node-title-field')),
+      'Keyboard-created task',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes.map((node) => node.title), contains('Keyboard-created task'));
+    expect(
+      find.text('Added "Keyboard-created task" to Jun 19, 2026'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('CalendarPage keyboard add shortcut uses preview day', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 6, 19);
+    final targetDay = DateTime(2026, 6, 20);
+    final repository = InMemoryMindmapRepository(seedNodes: []);
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-20')));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('add-node-title-field')),
+      'Preview keyboard task',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await tester.pumpAndSettle();
+
+    expect(await repository.listNodes(day: today), isEmpty);
+    final nodes = await repository.listNodes(day: targetDay);
+    expect(nodes.map((node) => node.title), contains('Preview keyboard task'));
+    expect(
+      find.text('Added "Preview keyboard task" to Jun 20, 2026'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('CalendarPage exposes shortcut help', (tester) async {
     final today = DateTime(2026, 6, 19);
     final repository = InMemoryMindmapRepository(seedNodes: []);
@@ -877,6 +932,8 @@ void main() {
     expect(find.text('Calendar shortcuts'), findsOneWidget);
     expect(find.text('Month view'), findsOneWidget);
     expect(find.text('Agenda view'), findsOneWidget);
+    expect(find.text('N'), findsOneWidget);
+    expect(find.text('Add node to focused day'), findsOneWidget);
     expect(find.text('All agenda items'), findsOneWidget);
     expect(find.text('Routines'), findsWidgets);
     expect(find.text('Done'), findsWidgets);
