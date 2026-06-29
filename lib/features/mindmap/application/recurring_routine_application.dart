@@ -20,6 +20,7 @@ Future<RecurringRoutinePlan> previewRecurringRoutines({
   required DateTime day,
   Iterable<RecurringNodeRoutine>? routines,
   DateTime? now,
+  bool forceDue = false,
 }) async {
   final normalizedDay = day.dateOnly;
   final existingNodes = await repository.listNodes();
@@ -30,6 +31,7 @@ Future<RecurringRoutinePlan> previewRecurringRoutines({
     existingNodes: existingNodes,
     routines: availableRoutines,
     now: now,
+    forceDue: forceDue,
   );
 }
 
@@ -38,12 +40,14 @@ Future<List<MindmapNode>> applyRecurringRoutines({
   required DateTime day,
   Iterable<RecurringNodeRoutine>? routines,
   DateTime? now,
+  bool forceDue = false,
 }) async {
   final plan = await previewRecurringRoutines(
     repository: repository,
     day: day,
     routines: routines,
     now: now,
+    forceDue: forceDue,
   );
   final savedNodes = <MindmapNode>[];
   for (final node in plan.nodes) {

@@ -28,7 +28,7 @@ flutter test
 Result:
 
 - `flutter analyze`: no issues found.
-- `flutter test`: all tests passed, 358 total.
+- `flutter test`: all tests passed, 363 total.
 
 ## Commit snapshot
 
@@ -43,7 +43,31 @@ Result:
 - Skip/snooze markers are archived but intentionally surfaced in Agenda when they contain routine automation state.
 - Calendar routine execution is local-first and depends on existing routine definitions from mindmap automation data.
 
+## Phase 4 follow-up
+
+Routine marker management is now implemented on top of the Phase 3 Agenda flow:
+
+- Agenda routine marker rows expose an action menu.
+- Skip/snooze markers can be deleted directly from Agenda.
+- Snoozed markers can be resnoozed to another date.
+- Skipped/snoozed routines can be applied immediately from their marker, even when the routine is not due today.
+- Calendar widget coverage now includes marker deletion, resnooze, and apply-now actions.
+
+Latest validation from repo root:
+
+```bash
+flutter analyze
+flutter test test/features/calendar/calendar_page_test.dart
+flutter test
+```
+
+Result:
+
+- `flutter analyze`: no issues found.
+- Calendar test suite: 30 tests passed.
+- Full test suite: 363 tests passed.
+
 ## Suggested next phase
 
-- Add routine marker detail actions for undo/delete/open-source routine.
-- Expand release smoke checks around routine execution, filters, and keyboard shortcuts.
+- Add source routine/template navigation for marker detail actions where routing supports it.
+- Expand release smoke checks around routine execution, marker management, filters, and keyboard shortcuts.

@@ -43,19 +43,18 @@ Closeout: `docs/phase_3_closeout.md`.
 
 ## Phase 4 - Routine marker management
 
-Status: next.
+Status: done.
 
 Goal: make skip/snooze markers actionable, auditable, and easy to correct after creation.
 
-Planned scope:
+Completed scope:
 
-- Add routine marker detail actions from Agenda rows.
-- Allow deleting skip/snooze markers outside snackbar Undo.
-- Add action to open the source routine/template where possible.
-- Add action to resnooze a snoozed marker to another date.
-- Add action to apply a skipped/snoozed routine immediately.
-- Add tests for marker action menus, marker deletion, reapply, and resnooze behavior.
-- Update `docs/phase_3_closeout.md`, `docs/release/beta_release_checklist.md`, and `CLAUDE.md` after implementation.
+- Added routine marker action menus from Agenda rows.
+- Allowed deleting skip/snooze markers outside snackbar Undo.
+- Added resnooze action for snoozed markers to pick another date.
+- Added apply-now action for skipped/snoozed markers, including routines that are not due today.
+- Added tests for marker action menus, marker deletion, apply-now, and resnooze behavior.
+- Updated `docs/phase_3_closeout.md`, `docs/release/beta_release_checklist.md`, and `CLAUDE.md` after implementation.
 
 ## Phase 5 - Beta release hardening
 
@@ -88,21 +87,17 @@ Status: planned.
 
 ## Current validation snapshot
 
-Latest focused validation after Phase 3 routine work:
+Latest validation after Phase 4 routine marker work:
 
 ```bash
-flutter test test/features/calendar/calendar_page_test.dart
 flutter analyze
+flutter test test/features/calendar/calendar_page_test.dart
+flutter test
 ```
 
 Result:
 
-- Calendar test suite: pass, 27 tests.
 - Analyzer: no issues found.
-
-Before release or cross-agent handoff, also run:
-
-```bash
-flutter test
-```
+- Calendar test suite: pass, 30 tests.
+- Full test suite: pass, 363 tests.
 

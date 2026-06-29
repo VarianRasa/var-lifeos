@@ -157,6 +157,7 @@ Feature modules follow layered boundaries where practical:
 - Skip/snooze markers intentionally surface in Agenda with `Skipped routine` / `Snoozed routine` badges.
 - Agenda has a persisted `Routines` filter. Shortcuts: `1` All, `2` Tasks, `3` Events, `4` Habits, `5` Routines, `6` Done.
 - Skip/snooze snackbars support Undo by deleting generated marker nodes and invalidating Calendar/Mindmap providers.
+- Routine marker rows now have action menus for delete, resnooze snoozed markers, and apply now. Apply now can force-create a routine even when it is not due today.
 
 ### Important files
 
@@ -171,14 +172,14 @@ Feature modules follow layered boundaries where practical:
 ### Last validation
 
 ```bash
-flutter test test/features/calendar/calendar_page_test.dart
 flutter analyze
+flutter test test/features/calendar/calendar_page_test.dart
+flutter test
 ```
 
-Result: both pass. Calendar test suite: 27 tests.
+Result: all pass. Calendar test suite: 30 tests. Full test suite: 363 tests.
 
 ### Suggested next work
 
-- Add routine marker detail actions: delete marker, open source routine/template, or reapply/snooze again.
-- Update Phase 3 docs/beta checklist whenever marker-detail work lands.
+- Add source routine/template navigation for marker detail actions where routing supports it.
 - Run full `flutter test` before release/handoff commit.

@@ -140,6 +140,7 @@ final class RecurringRoutinePlan {
     required Iterable<MindmapNode> existingNodes,
     required Iterable<RecurringNodeRoutine> routines,
     DateTime? now,
+    bool forceDue = false,
   }) {
     final normalizedDay = day.dateOnly;
     final timestamp = now ?? DateTime.now();
@@ -149,6 +150,7 @@ final class RecurringRoutinePlan {
 
     for (final routine in routines) {
       final isDue =
+          forceDue ||
           routine.isDueOn(normalizedDay) ||
           _isSnoozedIntoDay(existing, routine, normalizedDay);
       if (!isDue) {

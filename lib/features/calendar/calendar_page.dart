@@ -1231,6 +1231,11 @@ class _AgendaCalendarView extends ConsumerWidget {
                                                 );
                                               },
                                             ),
+                                            if (_isRoutineMarker(node))
+                                              _RoutineMarkerActionsMenu(
+                                                node: node,
+                                                today: today,
+                                              ),
                                           ],
                                         ),
                                       ),
@@ -1457,6 +1462,222 @@ class _RoutineMarkerBadge extends StatelessWidget {
     );
   }
 }
+
+class _RoutineMarkerActionsMenu extends ConsumerStatefulWidget {
+  const _RoutineMarkerActionsMenu({required this.node, required this.today});
+
+  final MindmapNode node;
+  final DateTime today;
+
+  @override
+  ConsumerState<_RoutineMarkerActionsMenu> createState() =>
+      _RoutineMarkerActionsMenuState();
+}
+
+class _RoutineMarkerActionsMenuState
+    extends ConsumerState<_RoutineMarkerActionsMenu> {
+  @override
+  Widget build(BuildContext context) {
+    final automation = widget.node.data['automation'];
+    if (automation is! Map) return const SizedBox.shrink();
+    final state = automation['state'] as String?;
+    final isSnoozed = state == 'snoozed';
+
+    return PopupMenuButton<_MarkerAction>(
+      key: ValueKey('calendar-routine-marker-actions-${widget.node.id}'),
+      tooltip: 'Marker actions',
+      icon: const Icon(Icons.more_horiz, size: 18),
+      onSelected: _handleAction,
+      itemBuilder: (context) => [
+        const PopupMenuItem<_MarkerAction>(
+          value: _MarkerAction.delete,
+          child: Text('Delete marker'),
+        ),
+        if (isSnoozed)
+          const PopupMenuItem<_MarkerAction>(
+            value: _MarkerAction.resnooze,
+            child: Text('Resnooze'),
+          ),
+        const PopupMenuItem<_MarkerAction>(
+          value: _MarkerAction.applyNow,
+          child: Text('Apply now'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleAction(_MarkerAction action) async {
+    switch (action) {
+      case _MarkerAction.delete:
+        await _deleteMarker();
+      case _MarkerAction.resnooze:
+        await _resnoozeMarker();
+      case _MarkerAction.applyNow:
+        await _applyFromMarker();
+    }
+  }
+
+  Future<void> _deleteMarker() async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final savedJson = widget.node.toJson();
+    await repository.deleteNode(widget.node.id);
+    invalidateMindmapState(ref, day: widget.node.day);
+    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Routine marker deleted'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(_undoDeleteMarker(savedJson));
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undoDeleteMarker(Map<String, Object?> savedJson) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final marker = MindmapNode.fromJson(savedJson);
+    await repository.saveNode(marker);
+    invalidateMindmapState(ref, day: marker.day);
+    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
+  }
+
+  Future<void> _resnoozeMarker() async {
+    final originalJson = widget.node.toJson();
+    final automation = widget.node.data['automation'];
+    if (automation is! Map) return;
+    final currentSnoozedTo = automation['snoozedTo'] as String?;
+    final initialDate = currentSnoozedTo != null
+        ? DateTime.parse(currentSnoozedTo)
+        : widget.today.add(const Duration(days: 1));
+
+    final newDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: widget.today,
+      lastDate: widget.today.add(const Duration(days: 365)),
+    );
+    if (newDate == null || !mounted) return;
+
+    final newDayKey = dayKey(newDate.dateOnly);
+    final updatedData = <String, Object?>{
+      ...widget.node.data,
+      'automation': <String, Object?>{
+        ...Map<String, Object?>.from(widget.node.data['automation'] as Map),
+        'snoozedTo': newDayKey,
+      },
+    };
+
+    final repository = ref.read(mindmapRepositoryProvider);
+    await repository.saveNode(
+      widget.node.copyWith(data: updatedData, updatedAt: DateTime.now()),
+    );
+    invalidateMindmapState(ref, day: widget.node.day);
+    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Resnoozed to ${DateFormat('MMM d, y').format(newDate.dateOnly)}',
+        ),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(_undoResnooze(originalJson));
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undoResnooze(Map<String, Object?> originalJson) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final marker = MindmapNode.fromJson(originalJson);
+    await repository.saveNode(marker);
+    invalidateMindmapState(ref, day: marker.day);
+    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
+  }
+
+  Future<void> _applyFromMarker() async {
+    final savedJson = widget.node.toJson();
+    final repository = ref.read(mindmapRepositoryProvider);
+    final automation = widget.node.data['automation'];
+    if (automation is! Map) return;
+    final routineId = automation['routineId'] as String?;
+    if (routineId == null) return;
+
+    // Find the routine definition
+    final allRoutines = await loadRecurringRoutines(repository: repository);
+    RecurringNodeRoutine? routine;
+    for (final r in allRoutines) {
+      if (r.id == routineId) {
+        routine = r;
+        break;
+      }
+    }
+    if (routine == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Routine "$routineId" not found')),
+        );
+      }
+      return;
+    }
+
+    // Delete marker then apply routine for today
+    await repository.deleteNode(widget.node.id);
+    final nodes = await applyRecurringRoutines(
+      repository: repository,
+      day: widget.today,
+      routines: [routine],
+      forceDue: true,
+    );
+
+    invalidateMindmapState(ref, day: widget.node.day, extraDay: widget.today);
+    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
+    ref.invalidate(calendarRoutinePlanProvider(widget.today.dateOnly));
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Applied "${routine.label}"'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(_undoApplyNow(savedJson, nodes));
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undoApplyNow(
+    Map<String, Object?> savedMarkerJson,
+    List<MindmapNode> createdNodes,
+  ) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+
+    // Delete created routine nodes
+    for (final node in createdNodes) {
+      await repository.deleteNode(node.id);
+    }
+
+    // Restore marker
+    final marker = MindmapNode.fromJson(savedMarkerJson);
+    await repository.saveNode(marker);
+
+    invalidateMindmapState(ref, day: marker.day, extraDay: widget.today);
+    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
+    ref.invalidate(calendarRoutinePlanProvider(widget.today.dateOnly));
+  }
+}
+
+enum _MarkerAction { delete, resnooze, applyNow }
 
 class _AgendaEmptyState extends StatelessWidget {
   const _AgendaEmptyState({required this.filter, required this.day});

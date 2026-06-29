@@ -1091,4 +1091,184 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets('CalendarPage deletes routine marker from actions menu', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'skip-marker-1',
+          type: NodeType.note,
+          title: 'Skipped Daily plan',
+          day: today,
+          isArchived: true,
+          tags: const ['routine', 'automation-skip'],
+          data: {
+            'automation': {
+              'routineId': 'daily-plan',
+              'templateId': 'daily-plan',
+              'recurrence': 'daily',
+              'state': 'skipped',
+            },
+          },
+          now: DateTime(today.year, today.month, today.day, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Skipped Daily plan'), findsOneWidget);
+    expect(find.text('Skipped routine'), findsOneWidget);
+
+    // Open marker actions menu and tap Delete
+    await tester.tap(
+      find.byKey(
+        const ValueKey('calendar-routine-marker-actions-skip-marker-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete marker'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Skipped Daily plan'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('calendar-routine-apply-banner')),
+      findsOneWidget,
+    );
+
+    final nodes = await repository.listNodes();
+    expect(
+      nodes.map((node) => node.title),
+      isNot(contains('Skipped Daily plan')),
+    );
+  });
+
+  testWidgets('CalendarPage resnoozes routine marker from actions menu', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'snooze-marker-1',
+          type: NodeType.note,
+          title: 'Snoozed Daily plan',
+          day: today,
+          isArchived: true,
+          tags: const ['routine', 'automation-snooze'],
+          data: {
+            'automation': {
+              'routineId': 'daily-plan',
+              'templateId': 'daily-plan',
+              'recurrence': 'daily',
+              'state': 'snoozed',
+              'snoozedTo': '2026-06-30',
+            },
+          },
+          now: DateTime(today.year, today.month, today.day, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Snoozed Daily plan'), findsOneWidget);
+    expect(find.text('Snoozed routine'), findsOneWidget);
+
+    // Open marker actions menu and tap Resnooze
+    await tester.tap(
+      find.byKey(
+        const ValueKey('calendar-routine-marker-actions-snooze-marker-1'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resnooze'));
+    await tester.pumpAndSettle();
+
+    // Date picker opens — pick a different future date
+    await tester.tap(find.text('29').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // Marker exists and snoozedTo was updated
+    expect(find.text('Snoozed Daily plan'), findsOneWidget);
+    final nodes = await repository.listNodes();
+    final marker = nodes.firstWhere((n) => n.id == 'snooze-marker-1');
+    final updatedSnoozedTo =
+        (marker.data['automation'] as Map)['snoozedTo'] as String;
+    expect(updatedSnoozedTo, isNot('2026-06-30'));
+  });
+
+  testWidgets('CalendarPage applies routine from skipped marker actions menu', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 23);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'skip-marker-2',
+          type: NodeType.note,
+          title: 'Skipped Weekly review',
+          day: today,
+          isArchived: true,
+          tags: const ['routine', 'automation-skip'],
+          data: {
+            'automation': {
+              'routineId': 'weekly-review',
+              'templateId': 'weekly-review',
+              'recurrence': 'weekly',
+              'state': 'skipped',
+            },
+          },
+          now: DateTime(today.year, today.month, today.day, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Skipped Weekly review'), findsOneWidget);
+
+    // Open marker actions menu and tap Apply now
+    await tester.tap(
+      find.byKey(
+        const ValueKey('calendar-routine-marker-actions-skip-marker-2'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply now'));
+    await tester.pumpAndSettle();
+
+    // Marker deleted, routine applied — switch to All to see it
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-all')));
+    await tester.pumpAndSettle();
+    expect(find.text('Weekly review'), findsOneWidget);
+    expect(find.text('Applied "Weekly review"'), findsOneWidget);
+
+    final nodesAfter = await repository.listNodes();
+    expect(
+      nodesAfter.where((n) => n.title == 'Skipped Weekly review'),
+      isEmpty,
+    );
+    expect(
+      nodesAfter.where((n) => n.title == 'Weekly review' && !n.isArchived),
+      isNotEmpty,
+    );
+  });
 }
