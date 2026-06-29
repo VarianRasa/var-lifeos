@@ -55,6 +55,29 @@ void main() {
     },
   );
 
+  testWidgets('MindmapCanvas exposes toolbar state and shortcut help', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: const Scaffold(body: MindmapCanvas(nodes: [])),
+      ),
+    );
+
+    expect(find.text('Grid on'), findsOneWidget);
+    expect(find.text('Snap off'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('mindmap-shortcut-help')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mindmap shortcuts'), findsOneWidget);
+    expect(find.text('Ctrl+F'), findsOneWidget);
+    expect(find.text('Focus search'), findsOneWidget);
+    expect(find.text('Ctrl+G'), findsOneWidget);
+    expect(find.text('Toggle grid'), findsOneWidget);
+  });
+
   testWidgets('MindmapCanvas reports a dragged node position', (tester) async {
     final day = DateTime(2026, 6, 18);
     final node = MindmapNode.create(
@@ -531,6 +554,15 @@ void main() {
     );
     expect(find.text('No nodes match “missing”'), findsOneWidget);
     expect(find.byKey(const ValueKey('mindmap-node-note-1')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('mindmap-search-clear-empty')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('mindmap-search-empty-state')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('mindmap-node-note-1')), findsOneWidget);
   });
 
   testWidgets('MindmapCanvas renders relation count metadata', (tester) async {

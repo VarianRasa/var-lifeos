@@ -911,6 +911,35 @@ class _DayPageState extends ConsumerState<DayPage> {
                                         },
                                       ),
                                     ),
+                                    if (canvasNodes.isEmpty)
+                                      Center(
+                                        child: _EmptyMindmapQuickStart(
+                                          onCreateTask: () => _createNodeOfType(
+                                            context,
+                                            ref,
+                                            normalizedDate,
+                                            canvasNodes,
+                                            NodeType.task,
+                                            null,
+                                          ),
+                                          onCreateNote: () => _createNodeOfType(
+                                            context,
+                                            ref,
+                                            normalizedDate,
+                                            canvasNodes,
+                                            NodeType.note,
+                                            null,
+                                          ),
+                                          onCreateKanban: () => _createNodeOfType(
+                                            context,
+                                            ref,
+                                            normalizedDate,
+                                            canvasNodes,
+                                            NodeType.kanban,
+                                            null,
+                                          ),
+                                        ),
+                                      ),
                                     if (widget.highlightNodeId != null)
                                       Positioned(
                                         left: 16,
@@ -1762,6 +1791,94 @@ class _NodeRelationsDock extends ConsumerWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _EmptyMindmapQuickStart extends StatelessWidget {
+  const _EmptyMindmapQuickStart({
+    required this.onCreateTask,
+    required this.onCreateNote,
+    required this.onCreateKanban,
+  });
+
+  final VoidCallback onCreateTask;
+  final VoidCallback onCreateNote;
+  final VoidCallback onCreateKanban;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        key: const ValueKey('day-mindmap-empty-quick-start'),
+        width: 360,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.hub_outlined,
+              size: 36,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Start today\'s mindmap',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Drop a node from the palette, or start with one of these.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const ValueKey('day-mindmap-empty-add-task'),
+                  onPressed: onCreateTask,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Task'),
+                ),
+                FilledButton.tonalIcon(
+                  key: const ValueKey('day-mindmap-empty-add-note'),
+                  onPressed: onCreateNote,
+                  icon: const Icon(Icons.notes_outlined),
+                  label: const Text('Note'),
+                ),
+                OutlinedButton.icon(
+                  key: const ValueKey('day-mindmap-empty-add-kanban'),
+                  onPressed: onCreateKanban,
+                  icon: const Icon(Icons.view_kanban_outlined),
+                  label: const Text('Kanban'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -62,6 +62,34 @@ void main() {
     },
   );
 
+  testWidgets('DayPage empty mindmap quick-start creates starter node', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 6, 18);
+    final repository = InMemoryMindmapRepository(seedNodes: const []);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(home: DayPage(date: day)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('day-mindmap-empty-quick-start')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('day-mindmap-empty-add-note')));
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: day);
+    expect(nodes, hasLength(1));
+    expect(nodes.single.type, NodeType.note);
+    expect(nodes.single.title, 'New ${NodeType.note.label}');
+  });
+
   testWidgets('DayPage quick create uses typed title instead of "New <type>"', (
     tester,
   ) async {

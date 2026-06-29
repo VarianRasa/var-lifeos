@@ -169,6 +169,18 @@ class MindmapCanvasState extends State<MindmapCanvas> {
   void _zoomIn() => _zoom(1.2);
   void _zoomOut() => _zoom(1 / 1.2);
 
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() => _searchQuery = '');
+  }
+
+  void _showShortcutHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => const _MindmapShortcutHelpDialog(),
+    );
+  }
+
   void _zoomReset() {
     final viewportSize = context.size;
     if (viewportSize == null) return;
@@ -347,9 +359,7 @@ class MindmapCanvasState extends State<MindmapCanvas> {
                                 suffixIcon: _searchQuery.isNotEmpty
                                     ? IconButton(
                                         icon: const Icon(Icons.clear, size: 16),
-                                        onPressed: () {
-                                          _searchController.clear();
-                                        },
+                                        onPressed: _clearSearch,
                                       )
                                     : null,
                                 border: InputBorder.none,
@@ -498,7 +508,10 @@ class MindmapCanvasState extends State<MindmapCanvas> {
                       ),
                       if (_searchQuery.isNotEmpty && filteredNodes.isEmpty)
                         Center(
-                          child: _CanvasSearchEmptyState(query: _searchQuery),
+                          child: _CanvasSearchEmptyState(
+                            query: _searchQuery,
+                            onClearSearch: _clearSearch,
+                          ),
                         ),
 
                       // Zoom & Grid Toolbar Overlay
@@ -617,6 +630,19 @@ class MindmapCanvasState extends State<MindmapCanvas> {
                 });
               },
             ),
+            _ToolbarPill(label: _showGrid ? 'Grid on' : 'Grid off'),
+            const SizedBox(width: 6),
+            _ToolbarPill(label: _snapToGrid ? 'Snap on' : 'Snap off'),
+            const SizedBox(
+              height: 24,
+              child: VerticalDivider(width: 16, thickness: 1),
+            ),
+            IconButton(
+              key: const ValueKey('mindmap-shortcut-help'),
+              tooltip: 'Mindmap shortcuts',
+              icon: const Icon(Icons.keyboard_alt_outlined, size: 20),
+              onPressed: _showShortcutHelp,
+            ),
           ],
         ),
       ),
@@ -710,10 +736,103 @@ class MindmapCanvasState extends State<MindmapCanvas> {
   }
 }
 
+class _ToolbarPill extends StatelessWidget {
+  const _ToolbarPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(label, style: theme.textTheme.labelSmall),
+      ),
+    );
+  }
+}
+
+class _MindmapShortcutHelpDialog extends StatelessWidget {
+  const _MindmapShortcutHelpDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Mindmap shortcuts'),
+      content: const SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _MindmapShortcutRow(keys: 'Ctrl+F', action: 'Focus search'),
+            _MindmapShortcutRow(keys: 'Ctrl++', action: 'Zoom in'),
+            _MindmapShortcutRow(keys: 'Ctrl+-', action: 'Zoom out'),
+            _MindmapShortcutRow(keys: 'Ctrl+0', action: 'Reset zoom'),
+            _MindmapShortcutRow(keys: 'Ctrl+G', action: 'Toggle grid'),
+            _MindmapShortcutRow(keys: 'Ctrl+S', action: 'Toggle snap-to-grid'),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MindmapShortcutRow extends StatelessWidget {
+  const _MindmapShortcutRow({required this.keys, required this.action});
+
+  final String keys;
+  final String action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            constraints: const BoxConstraints(minWidth: 64),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+            child: Text(
+              keys,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(action)),
+        ],
+      ),
+    );
+  }
+}
+
 class _CanvasSearchEmptyState extends StatelessWidget {
-  const _CanvasSearchEmptyState({required this.query});
+  const _CanvasSearchEmptyState({
+    required this.query,
+    required this.onClearSearch,
+  });
 
   final String query;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -741,6 +860,13 @@ class _CanvasSearchEmptyState extends StatelessWidget {
             Icon(Icons.search_off, color: theme.colorScheme.primary),
             const SizedBox(width: 10),
             Text('No nodes match “$query”', style: theme.textTheme.bodyMedium),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              key: const ValueKey('mindmap-search-clear-empty'),
+              onPressed: onClearSearch,
+              icon: const Icon(Icons.search_off, size: 16),
+              label: const Text('Clear search'),
+            ),
           ],
         ),
       ),
