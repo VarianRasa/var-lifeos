@@ -281,6 +281,15 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                                       today: today,
                                       onAddNode: _addNodeForDay,
                                       onClearSearch: _clearCalendarSearch,
+                                      onShowAllFilter: () {
+                                        unawaited(
+                                          ref
+                                              .read(
+                                                agendaFilterProvider.notifier,
+                                              )
+                                              .setFilter(AgendaFilter.all),
+                                        );
+                                      },
                                     ),
                                 },
                               ),
@@ -1472,12 +1481,14 @@ class _AgendaCalendarView extends ConsumerWidget {
     required this.today,
     required this.onAddNode,
     required this.onClearSearch,
+    required this.onShowAllFilter,
   });
 
   final DateTime focusedDay;
   final DateTime today;
   final Future<void> Function(DateTime day) onAddNode;
   final VoidCallback onClearSearch;
+  final VoidCallback onShowAllFilter;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1534,6 +1545,7 @@ class _AgendaCalendarView extends ConsumerWidget {
                       searchQuery: searchQuery,
                       onAddNode: () => onAddNode(focusedDay),
                       onClearSearch: onClearSearch,
+                      onShowAllFilter: onShowAllFilter,
                     )
                   : ListView.separated(
                       key: const ValueKey('calendar-agenda-list'),
@@ -2209,6 +2221,7 @@ class _AgendaEmptyState extends StatelessWidget {
     required this.searchQuery,
     required this.onAddNode,
     required this.onClearSearch,
+    required this.onShowAllFilter,
   });
 
   final AgendaFilter filter;
@@ -2216,6 +2229,7 @@ class _AgendaEmptyState extends StatelessWidget {
   final String searchQuery;
   final Future<void> Function() onAddNode;
   final VoidCallback onClearSearch;
+  final VoidCallback onShowAllFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -2274,6 +2288,15 @@ class _AgendaEmptyState extends StatelessWidget {
                         onPressed: onClearSearch,
                         icon: const Icon(Icons.search_off),
                         label: const Text('Clear search'),
+                      ),
+                    if (filter != AgendaFilter.all)
+                      FilledButton.tonalIcon(
+                        key: const ValueKey(
+                          'calendar-agenda-empty-show-all',
+                        ),
+                        onPressed: onShowAllFilter,
+                        icon: const Icon(Icons.filter_alt_off),
+                        label: const Text('Show all'),
                       ),
                     FilledButton.tonalIcon(
                       key: const ValueKey('calendar-agenda-empty-add-node'),

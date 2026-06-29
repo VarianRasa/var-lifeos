@@ -752,6 +752,14 @@ void main() {
 
     expect(find.byKey(const ValueKey('calendar-agenda-empty')), findsOneWidget);
     expect(find.text('No event items'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-empty-show-all')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Agenda task'), findsOneWidget);
+    expect(find.text('No event items'), findsNothing);
   });
 
   testWidgets('CalendarPage agenda empty CTA opens focused day', (
