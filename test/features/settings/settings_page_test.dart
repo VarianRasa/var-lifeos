@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:var_app/core/constants/app_constants.dart';
@@ -17,6 +20,7 @@ import 'package:var_app/features/sync/data/in_memory_sync_restore_point_store.da
 import 'package:var_app/features/sync/data/in_memory_sync_state_store.dart';
 import 'package:var_app/features/sync/data/local_sync_auth_gateway.dart';
 import 'package:var_app/features/sync/domain/mindmap_backup_document.dart';
+import 'package:var_app/features/sync/domain/sync_account.dart';
 import 'package:var_app/features/sync/domain/sync_activity.dart';
 import 'package:var_app/features/sync/domain/sync_restore_point.dart';
 
@@ -35,6 +39,80 @@ void main() {
     final view = binding.platformDispatcher.views.first;
     view.resetPhysicalSize();
     view.resetDevicePixelRatio();
+  });
+
+  testWidgets('persists saved view defaults from Settings controls', (
+    tester,
+  ) async {
+    final preferences = SharedPreferencesAsync();
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+
+    await _tapKey(tester, 'settings-day-view-table');
+    await _tapKey(tester, 'settings-table-quick-view-priority');
+    await _tapKey(tester, 'settings-table-sort-mode');
+    await tester.tap(find.text('Due').last);
+    await tester.pumpAndSettle();
+
+    expect(await preferences.getString('day_view_mode'), 'table');
+    expect(await preferences.getString('day_table_quick_view'), 'priority');
+    expect(await preferences.getString('day_table_sort_mode'), 'dueAsc');
+    expect(
+      find.text('Current default: Table / Priority / Sort: Due'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('edits custom saved view fields in Settings', (tester) async {
+    final preferences = SharedPreferencesAsync();
+    await preferences.setString(
+      'custom_saved_views',
+      jsonEncode([
+        {
+          'id': 'focus-view',
+          'label': 'Focus view',
+          'dayView': 'table',
+          'tableView': 'priority',
+          'tableSort': 'priorityDesc',
+        },
+      ]),
+    );
+
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+
+    await _tapKey(tester, 'settings-custom-view-menu-focus-view');
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('saved-view-label-field')),
+      'Due focus',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('saved-view-dialog-day-view-board')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('saved-view-dialog-table-view-due')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('saved-view-dialog-table-sort')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Due').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final raw = await preferences.getString('custom_saved_views');
+    final decoded = jsonDecode(raw!) as List<Object?>;
+    final view = decoded.single! as Map<Object?, Object?>;
+    expect(view['id'], 'focus-view');
+    expect(view['label'], 'Due focus');
+    expect(view['dayView'], 'board');
+    expect(view['tableView'], 'due');
+    expect(view['tableSort'], 'dueAsc');
+    expect(find.text('Due focus'), findsOneWidget);
   });
 
   testWidgets('loads stored recent sync activity when Settings opens', (
@@ -142,10 +220,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('sync-sign-in-button')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('sync-now-button')));
-    await tester.tap(find.byKey(const ValueKey('sync-now-button')));
+    await _expandSyncSections(tester);
+    await _tapKey(tester, 'sync-sign-in-button');
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-email-field')),
+      'local@var.app',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-password-field')),
+      'password',
+    );
+    await _tapKey(tester, 'sync-auth-sign-in-submit-button');
     await tester.pumpAndSettle();
 
     final account = await authGateway.currentState();
@@ -156,6 +241,65 @@ void main() {
     expect(find.text('Sync now'), findsAtLeastNWidgets(1));
     expect(find.text('Success'), findsOneWidget);
     expect(find.text('1 saved'), findsOneWidget);
+  });
+
+  testWidgets('keeps auth dialog open and shows auth failures', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(
+            InMemoryMindmapRepository(),
+          ),
+          syncAuthGatewayProvider.overrideWithValue(_FailingAuthGateway()),
+          syncRemoteBackupStoreProvider.overrideWithValue(
+            InMemorySyncRemoteBackupStore(),
+          ),
+          syncStateStoreProvider.overrideWithValue(InMemorySyncStateStore()),
+          syncActivityStoreProvider.overrideWithValue(
+            InMemorySyncActivityStore(),
+          ),
+          syncRestorePointStoreProvider.overrideWithValue(
+            InMemorySyncRestorePointStore(),
+          ),
+          syncDeviceIdentityStoreProvider.overrideWithValue(
+            InMemorySyncDeviceIdentityStore(
+              const SyncDeviceIdentity(id: 'device-test', label: 'Test device'),
+            ),
+          ),
+          syncDeviceIdentityProvider.overrideWithValue(
+            const SyncDeviceIdentity(id: 'device-test', label: 'Test device'),
+          ),
+          syncNowProvider.overrideWithValue(() => DateTime(2026, 6, 19, 12)),
+          portableBackupCodecProvider.overrideWithValue(
+            PortableMindmapBackupCodec(
+              iterations: 2,
+              randomBytes: _deterministicRandomBytes(),
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _expandSyncSections(tester);
+    await _tapKey(tester, 'sync-sign-in-button');
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-email-field')),
+      'local@var.app',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-password-field')),
+      'password',
+    );
+    await _tapKey(tester, 'sync-auth-sign-in-submit-button');
+
+    expect(find.byKey(const ValueKey('sync-auth-email-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('sync-auth-message')), findsOneWidget);
+    expect(
+      find.text('Email or password is incorrect.'),
+      findsAtLeastNWidgets(1),
+    );
   });
 
   testWidgets('shows sync health and renames this device', (tester) async {
@@ -204,8 +348,7 @@ void main() {
       find.byKey(const ValueKey('sync-device-name-field')),
       'Studio desktop',
     );
-    await tester.tap(find.byKey(const ValueKey('sync-device-save-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'sync-device-save-button');
 
     final updated = await deviceStore.readOrCreateIdentity();
     expect(updated.label, 'Studio desktop');
@@ -261,10 +404,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('sync-sign-in-button')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('sync-now-button')));
-    await tester.tap(find.byKey(const ValueKey('sync-now-button')));
+    await _expandSyncSections(tester);
+    await _tapKey(tester, 'sync-sign-in-button');
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-email-field')),
+      'local@var.app',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-auth-password-field')),
+      'password',
+    );
+    await _tapKey(tester, 'sync-auth-sign-in-submit-button');
     await tester.pumpAndSettle();
 
     await repository.saveNode(
@@ -288,9 +438,7 @@ void main() {
       ),
     );
 
-    await tester.ensureVisible(find.byKey(const ValueKey('sync-now-button')));
-    await tester.tap(find.byKey(const ValueKey('sync-now-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'sync-now-button');
 
     expect(find.text('Sync blocked by conflicts'), findsOneWidget);
     expect(find.text('Conflict queue'), findsOneWidget);
@@ -311,17 +459,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.ensureVisible(
-      find.byKey(
-        const ValueKey('sync-conflict-use-remote-settings-conflict-note'),
-      ),
-    );
-    await tester.tap(
-      find.byKey(
-        const ValueKey('sync-conflict-use-remote-settings-conflict-note'),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'sync-conflict-use-remote-settings-conflict-note');
 
     final resolvedRemote = await remoteStore.fetchLatestBackup(account.user!);
     expect(find.text('Remote version applied'), findsOneWidget);
@@ -377,13 +515,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _expandSyncSections(tester);
 
     await tester.enterText(
       find.byKey(const ValueKey('portable-passphrase-field')),
       'shared-secret',
     );
-    await tester.tap(find.byKey(const ValueKey('portable-export-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'portable-export-button');
 
     final packageField = tester.widget<TextField>(
       find.byKey(const ValueKey('portable-package-field')),
@@ -393,8 +531,7 @@ void main() {
     expect(package, isNot(contains('Settings private note')));
 
     await repository.deleteNode('settings-portable-note');
-    await tester.tap(find.byKey(const ValueKey('portable-import-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'portable-import-button');
 
     expect(find.text('Portable backup imported'), findsOneWidget);
     expect(
@@ -449,12 +586,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _expandSyncSections(tester);
     await tester.enterText(
       find.byKey(const ValueKey('portable-passphrase-field')),
       'shared-secret',
     );
-    await tester.tap(find.byKey(const ValueKey('portable-export-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'portable-export-button');
 
     expect(find.text('Restore points'), findsOneWidget);
     expect(find.text('1 node'), findsAtLeastNWidgets(1));
@@ -475,12 +612,7 @@ void main() {
       ),
     );
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('restore-point-0-button')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('restore-point-0-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'restore-point-0-button');
 
     expect(find.text('Restore preview'), findsOneWidget);
     expect(find.text('1 update'), findsOneWidget);
@@ -605,12 +737,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('restore-point-0-button')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('restore-point-0-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'restore-point-0-button');
 
     expect(find.text('Restore preview'), findsOneWidget);
     expect(find.text('Will add'), findsOneWidget);
@@ -710,6 +837,7 @@ void main() {
         ),
       ],
     );
+    final restorePointStore = InMemorySyncRestorePointStore();
 
     await tester.pumpWidget(
       ProviderScope(
@@ -723,9 +851,7 @@ void main() {
           syncActivityStoreProvider.overrideWithValue(
             InMemorySyncActivityStore(),
           ),
-          syncRestorePointStoreProvider.overrideWithValue(
-            InMemorySyncRestorePointStore(),
-          ),
+          syncRestorePointStoreProvider.overrideWithValue(restorePointStore),
           syncDeviceIdentityStoreProvider.overrideWithValue(
             InMemorySyncDeviceIdentityStore(
               const SyncDeviceIdentity(id: 'device-test', label: 'Test device'),
@@ -747,25 +873,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _expandSyncSections(tester);
     await tester.enterText(
       find.byKey(const ValueKey('portable-passphrase-field')),
       'shared-secret',
     );
-    await tester.tap(find.byKey(const ValueKey('portable-export-button')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'portable-export-button');
 
     expect(find.text('Restore points'), findsOneWidget);
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('restore-point-0-delete-button')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('restore-point-0-delete-button')),
-    );
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'restore-point-0-delete-button');
 
-    expect(find.text('Restore point deleted'), findsOneWidget);
+    expect(await restorePointStore.recent(), isEmpty);
     expect(find.text('Restore points'), findsNothing);
   });
 
@@ -828,26 +947,220 @@ void main() {
     expect(find.text('Phone snapshot'), findsOneWidget);
     expect(find.text('Laptop snapshot'), findsOneWidget);
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('restore-source-filter-Phone')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('restore-source-filter-Phone')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'restore-source-filter-Phone');
 
     expect(find.text('Phone snapshot'), findsOneWidget);
     expect(find.text('Laptop snapshot'), findsNothing);
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('restore-source-filter-All')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('restore-source-filter-All')));
-    await tester.pumpAndSettle();
+    await _tapKey(tester, 'restore-source-filter-All');
 
     expect(find.text('Phone snapshot'), findsOneWidget);
     expect(find.text('Laptop snapshot'), findsOneWidget);
   });
+
+  testWidgets('SettingsPage collapses template and saved view managers', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+    await _scrollToKey(tester, 'settings-template-manager-toggle');
+
+    expect(find.text('Template manager'), findsOneWidget);
+    expect(
+      find.text(
+        'Custom templates are stored locally and appear in Command quick create.',
+      ),
+      findsNothing,
+    );
+    expect(find.text('Saved views'), findsOneWidget);
+    expect(find.text('Default day view'), findsNothing);
+    expect(find.text('Graph filters'), findsOneWidget);
+    expect(find.text('No saved graph filters yet.'), findsNothing);
+
+    await _tapKey(tester, 'settings-template-manager-toggle');
+    expect(
+      find.text(
+        'Custom templates are stored locally and appear in Command quick create.',
+      ),
+      findsOneWidget,
+    );
+
+    await _tapKey(tester, 'settings-saved-views-toggle');
+    expect(find.text('Default day view'), findsOneWidget);
+
+    await _tapKey(tester, 'settings-graph-filters-toggle');
+    expect(find.text('No saved graph filters yet.'), findsOneWidget);
+  });
+
+  testWidgets('SettingsPage collapses data management options', (tester) async {
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+    await _scrollToKey(tester, 'data-management-toggle');
+
+    expect(find.text('Data management'), findsOneWidget);
+    expect(find.text('Export Data'), findsNothing);
+
+    await _tapKey(tester, 'data-management-toggle');
+    expect(find.text('Export Data'), findsOneWidget);
+    expect(find.text('Clear All Data'), findsOneWidget);
+  });
+
+  testWidgets('SettingsPage collapses quick start guide until toggled', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Quick start guide'), findsOneWidget);
+    expect(find.text('Calendar first'), findsNothing);
+    expect(find.text('Show guide'), findsOneWidget);
+
+    await tester.tap(find.text('Show guide'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Calendar first'), findsOneWidget);
+    expect(find.text('Hide guide'), findsOneWidget);
+
+    await tester.tap(find.text('Hide guide'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Calendar first'), findsNothing);
+    expect(find.text('Show guide'), findsOneWidget);
+  });
+}
+
+Widget _settingsTestApp() {
+  return ProviderScope(
+    overrides: [
+      mindmapRepositoryProvider.overrideWithValue(InMemoryMindmapRepository()),
+      syncAuthGatewayProvider.overrideWithValue(LocalSyncAuthGateway()),
+      syncRemoteBackupStoreProvider.overrideWithValue(
+        InMemorySyncRemoteBackupStore(),
+      ),
+      syncStateStoreProvider.overrideWithValue(InMemorySyncStateStore()),
+      syncActivityStoreProvider.overrideWithValue(InMemorySyncActivityStore()),
+      syncRestorePointStoreProvider.overrideWithValue(
+        InMemorySyncRestorePointStore(),
+      ),
+      syncDeviceIdentityStoreProvider.overrideWithValue(
+        InMemorySyncDeviceIdentityStore(
+          const SyncDeviceIdentity(id: 'device-test', label: 'Test device'),
+        ),
+      ),
+      syncDeviceIdentityProvider.overrideWithValue(
+        const SyncDeviceIdentity(id: 'device-test', label: 'Test device'),
+      ),
+      syncNowProvider.overrideWithValue(() => DateTime(2026, 6, 19, 12)),
+      portableBackupCodecProvider.overrideWithValue(
+        PortableMindmapBackupCodec(
+          iterations: 2,
+          randomBytes: _deterministicRandomBytes(),
+        ),
+      ),
+    ],
+    child: const MaterialApp(home: SettingsPage()),
+  );
+}
+
+final class _FailingAuthGateway implements SyncAuthGateway {
+  @override
+  Future<SyncAuthState> currentState() async => const SyncAuthState.signedOut();
+
+  @override
+  Future<SyncAuthState> signIn({
+    required String email,
+    String password = '',
+    String displayName = '',
+  }) async {
+    throw const SyncAuthException('Email or password is incorrect.');
+  }
+
+  @override
+  Future<SyncAuthState> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  }) async {
+    throw const SyncAuthException('An account already exists for this email.');
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    throw const SyncAuthException('Enter a valid email address.');
+  }
+
+  @override
+  Future<void> signOut() async {}
+}
+
+Finder _keyFinder(String key) => find.byKey(ValueKey<String>(key));
+
+Future<void> _scrollToKey(WidgetTester tester, String key) async {
+  final finder = _keyFinder(key);
+  for (var i = 0; i < 60 && finder.evaluate().isEmpty; i++) {
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -320));
+    await tester.pumpAndSettle();
+  }
+  if (finder.evaluate().isNotEmpty) {
+    await tester.ensureVisible(finder.first);
+    await tester.pumpAndSettle();
+  }
+}
+
+Future<void> _expandSyncSections(WidgetTester tester) async {
+  // Expand Cloud sync if collapsed
+  final cloudTile = find.text('Cloud sync');
+  if (cloudTile.evaluate().isNotEmpty) {
+    await tester.ensureVisible(cloudTile.first);
+    await tester.pumpAndSettle();
+    final signIn = find.byKey(const ValueKey('sync-sign-in-button'));
+    if (signIn.evaluate().isEmpty) {
+      await tester.tap(cloudTile.first);
+      await tester.pumpAndSettle();
+    }
+  }
+  // Expand Portable encrypted backup if collapsed
+  final backupTile = find.text('Portable encrypted backup');
+  if (backupTile.evaluate().isNotEmpty) {
+    await tester.ensureVisible(backupTile.first);
+    await tester.pumpAndSettle();
+    final passphrase = find.byKey(const ValueKey('portable-passphrase-field'));
+    if (passphrase.evaluate().isEmpty) {
+      await tester.tap(backupTile.first);
+      await tester.pumpAndSettle();
+    }
+  }
+}
+
+Future<void> _tapKey(WidgetTester tester, String key) async {
+  await _expandSettingsSectionForKey(tester, key);
+  await _scrollToKey(tester, key);
+  await tester.tap(_keyFinder(key).first, warnIfMissed: false);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _expandSettingsSectionForKey(
+  WidgetTester tester,
+  String key,
+) async {
+  String? toggleKey;
+  if (key.startsWith('settings-day-view') ||
+      key.startsWith('settings-table-quick-view') ||
+      key.startsWith('settings-custom-view') ||
+      key.startsWith('settings-saved-view-preset') ||
+      key == 'settings-saved-view-current-default' ||
+      key == 'settings-table-sort-mode') {
+    toggleKey = 'settings-saved-views-toggle';
+  }
+  if (toggleKey == null) return;
+  // If key already in tree, section is expanded — skip
+  if (_keyFinder(key).evaluate().isNotEmpty) return;
+  // Section collapsed — scroll to toggle and tap it
+  await _scrollToKey(tester, toggleKey);
+  final toggle = _keyFinder(toggleKey);
+  if (toggle.evaluate().isEmpty) return;
+  await tester.tap(toggle.first, warnIfMissed: false);
+  await tester.pumpAndSettle();
 }
 
 List<int> Function(int) _deterministicRandomBytes() {

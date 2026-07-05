@@ -10,11 +10,12 @@ import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/sync/application/sync_providers.dart';
+import 'package:var_app/features/sync/data/firebase_sync_auth_gateway.dart';
+import 'package:var_app/features/sync/data/firestore_sync_remote_backup_store.dart';
 import 'package:var_app/features/sync/data/http_sync_remote_backup_store.dart';
 import 'package:var_app/features/sync/data/in_memory_sync_remote_backup_store.dart';
 import 'package:var_app/features/sync/data/in_memory_sync_state_store.dart';
 import 'package:var_app/features/sync/data/local_sync_auth_gateway.dart';
-import 'package:var_app/features/sync/data/sembast_sync_auth_gateway.dart';
 import 'package:var_app/features/sync/domain/mindmap_backup_document.dart';
 
 void main() {
@@ -68,30 +69,15 @@ void main() {
     },
   );
 
-  test(
-    'syncAuthGatewayProvider uses a persistent auth gateway by default',
-    () async {
-      final database = await databaseFactoryMemory.openDatabase(
-        'sync-provider-auth.db',
-      );
-      addTearDown(database.close);
+  test('syncAuthGatewayProvider uses Firebase auth by default', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
 
-      final container = ProviderContainer(
-        overrides: [
-          mindmapRepositoryProvider.overrideWithValue(
-            InMemoryMindmapRepository(),
-          ),
-          mindmapDatabaseProvider.overrideWithValue(Future.value(database)),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      expect(
-        container.read(syncAuthGatewayProvider),
-        isA<SembastSyncAuthGateway>(),
-      );
-    },
-  );
+    expect(
+      container.read(syncAuthGatewayProvider),
+      isA<FirebaseSyncAuthGateway>(),
+    );
+  });
 
   test(
     'syncDeviceIdentityProvider creates a persistent device identity',
@@ -117,13 +103,13 @@ void main() {
     },
   );
 
-  test('syncRemoteBackupStoreProvider uses in-memory storage by default', () {
+  test('syncRemoteBackupStoreProvider uses Firestore by default', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
     expect(
       container.read(syncRemoteBackupStoreProvider),
-      isA<InMemorySyncRemoteBackupStore>(),
+      isA<FirestoreSyncRemoteBackupStore>(),
     );
   });
 

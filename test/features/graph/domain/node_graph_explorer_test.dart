@@ -108,6 +108,23 @@ void main() {
     expect(view.focusedNeighborhood!.totalConnectionCount, 3);
   });
 
+  test('filters graph by relation label metadata', () {
+    final graph = _buildExplorerGraph();
+
+    final view = NodeGraphExplorerView.fromGraph(
+      graph,
+      query: const NodeGraphExplorerQuery(relationLabelFilter: 'supports'),
+    );
+
+    expect(view.activeFilterCount, 1);
+    expect(view.edgeCount, 1);
+    expect(view.visibleNodes.map((node) => node.id), ['task-1', 'note-1']);
+    expect(
+      view.visibleEdges.map((edge) => '${edge.sourceId}->${edge.targetId}'),
+      ['task-1->note-1'],
+    );
+  });
+
   test('filters graph by project, tag, status, and priority metadata', () {
     final graph = _buildExplorerGraph();
 
@@ -162,6 +179,12 @@ NodeGraph _buildExplorerGraph() {
       project: 'Launch App',
       tags: const ['work', 'release'],
       relatedNodeIds: const ['note-1', 'habit-1'],
+      data: const {
+        'relations': [
+          {'targetId': 'note-1', 'label': 'supports'},
+          {'targetId': 'habit-1', 'label': 'blocks'},
+        ],
+      },
       now: DateTime(2026, 6, 18, 8),
     ),
     MindmapNode.create(

@@ -35,7 +35,9 @@ final class SembastSyncAuthGateway implements SyncAuthGateway {
     if (value == null) return const SyncAuthState.signedOut();
 
     final rawUser = value['user'];
-    if (rawUser is! Map) return const SyncAuthState.signedOut();
+    if (rawUser is! Map<Object?, Object?>) {
+      return const SyncAuthState.signedOut();
+    }
 
     final user = _userFromJson(rawUser.cast<String, Object?>());
     return SyncAuthState.signedIn(user);
@@ -43,6 +45,37 @@ final class SembastSyncAuthGateway implements SyncAuthGateway {
 
   @override
   Future<SyncAuthState> signIn({
+    required String email,
+    String password = '',
+    String displayName = '',
+  }) async {
+    return _signInLocally(email: email, displayName: displayName);
+  }
+
+  @override
+  Future<SyncAuthState> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  }) async {
+    return _signInLocally(email: email, displayName: displayName);
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      throw ArgumentError.value(email, 'email', 'Email is required.');
+    }
+  }
+
+  @override
+  Future<void> signOut() async {
+    final db = await _db;
+    await _store.record(_stateKey).delete(db);
+  }
+
+  Future<SyncAuthState> _signInLocally({
     required String email,
     String displayName = '',
   }) async {
@@ -64,12 +97,6 @@ final class SembastSyncAuthGateway implements SyncAuthGateway {
     });
 
     return SyncAuthState.signedIn(user);
-  }
-
-  @override
-  Future<void> signOut() async {
-    final db = await _db;
-    await _store.record(_stateKey).delete(db);
   }
 }
 

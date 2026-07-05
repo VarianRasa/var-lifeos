@@ -54,6 +54,70 @@ void main() {
     });
   });
 
+  group('detectTimeBlockConflicts', () {
+    test('detects overlapping blocks', () {
+      final conflicts = detectTimeBlockConflicts([
+        const DayTimeBlock(
+          id: 'a',
+          block: TimeBlock(startMinute: 9 * 60, endMinute: 10 * 60),
+        ),
+        const DayTimeBlock(
+          id: 'b',
+          block: TimeBlock(startMinute: 9 * 60 + 30, endMinute: 11 * 60),
+        ),
+      ]);
+
+      expect(conflicts, hasLength(1));
+      expect(conflicts.single.type, TimeBlockConflictType.overlap);
+      expect(conflicts.single.nodeIds, ['a', 'b']);
+      expect(conflicts.single.rangeLabel, '09:30 - 10:00');
+    });
+
+    test('ignores done blocks for conflicts', () {
+      final conflicts = detectTimeBlockConflicts([
+        const DayTimeBlock(
+          id: 'a',
+          block: TimeBlock(startMinute: 9 * 60, endMinute: 10 * 60),
+          isDone: true,
+        ),
+        const DayTimeBlock(
+          id: 'b',
+          block: TimeBlock(startMinute: 9 * 60 + 30, endMinute: 11 * 60),
+        ),
+      ]);
+
+      expect(conflicts, isEmpty);
+    });
+
+    test('detects too many high-priority blocks in a window', () {
+      final conflicts = detectTimeBlockConflicts([
+        const DayTimeBlock(
+          id: 'a',
+          block: TimeBlock(startMinute: 9 * 60, endMinute: 9 * 60 + 30),
+          isHighPriority: true,
+        ),
+        const DayTimeBlock(
+          id: 'b',
+          block: TimeBlock(startMinute: 10 * 60, endMinute: 10 * 60 + 30),
+          isHighPriority: true,
+        ),
+        const DayTimeBlock(
+          id: 'c',
+          block: TimeBlock(startMinute: 10 * 60 + 30, endMinute: 11 * 60),
+          isHighPriority: true,
+        ),
+      ]);
+
+      expect(
+        conflicts.any(
+          (conflict) =>
+              conflict.type == TimeBlockConflictType.highPriorityOverload,
+        ),
+        isTrue,
+      );
+    });
+  });
+
   group('formatTimeOfDay', () {
     test('midnight is 00:00', () {
       expect(formatTimeOfDay(0), '00:00');

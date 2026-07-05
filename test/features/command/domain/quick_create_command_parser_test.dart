@@ -90,7 +90,7 @@ void main() {
     );
 
     expect(command, isNotNull);
-    expect(command!.type, NodeType.note);
+    expect(command!.type, NodeType.event);
     expect(command.title, 'launch');
     expect(command.body, 'launch');
     expect(command.day, DateTime(2026, 6, 19));
@@ -98,10 +98,8 @@ void main() {
     expect(command.data['calendar_kind'], 'meeting');
     expect(command.data['agenda'], 'launch');
     expect(command.data['attendees'], 'Maya\nRafi');
-    expect(command.data['time_block'], {
-      'startTime': '10:00',
-      'endTime': '11:00',
-    });
+    expect(command.data['time_block'], containsPair('startTime', '10:00'));
+    expect(command.data['time_block'], containsPair('endTime', '11:00'));
   });
 
   test('parses Indonesian meeting natural date and jam time', () {
@@ -118,10 +116,8 @@ void main() {
     expect(command.day, DateTime(2026, 6, 19));
     expect(command.tags, ['work']);
     expect(command.data['calendar_kind'], 'meeting');
-    expect(command.data['time_block'], {
-      'startTime': '10:00',
-      'endTime': '11:00',
-    });
+    expect(command.data['time_block'], containsPair('startTime', '10:00'));
+    expect(command.data['time_block'], containsPair('endTime', '11:00'));
   });
 
   test('parses reminder tanggal 5 and time', () {
@@ -139,10 +135,8 @@ void main() {
     expect(command.day, DateTime(2026, 7, 5));
     expect(command.data['calendar_kind'], 'reminder');
     expect(command.data['remindAt'], '08:00');
-    expect(command.data['time_block'], {
-      'startTime': '08:00',
-      'endTime': '08:15',
-    });
+    expect(command.data['time_block'], containsPair('startTime', '08:00'));
+    expect(command.data['time_block'], containsPair('endTime', '08:15'));
   });
 
   test('parses event location and time', () {
@@ -159,10 +153,8 @@ void main() {
     expect(command.day, DateTime(2026, 6, 19));
     expect(command.data['calendar_kind'], 'event');
     expect(command.data['location'], 'Clinic');
-    expect(command.data['time_block'], {
-      'startTime': '14:00',
-      'endTime': '15:00',
-    });
+    expect(command.data['time_block'], containsPair('startTime', '14:00'));
+    expect(command.data['time_block'], containsPair('endTime', '15:00'));
   });
 
   test('parses metric value unit and hari ini', () {
@@ -192,12 +184,81 @@ void main() {
     );
 
     expect(command, isNotNull);
-    expect(command!.type, NodeType.note);
+    expect(command!.type, NodeType.decision);
     expect(command.title, 'pilih stack');
     expect(command.body, 'Flutter\nReact Native');
     expect(command.data['calendar_kind'], 'decision');
     expect(command.data['options'], 'Flutter\nReact Native');
     expect(command.data.containsKey('selectedOption'), isFalse);
+  });
+
+  test('builds structured expense commands', () {
+    final today = DateTime(2026, 6, 18);
+
+    final command = quickCreateCommandFromQuery(
+      'expense 50k lunch with team',
+      today: today,
+      defaultDay: today,
+    );
+
+    expect(command, isNotNull);
+    expect(command!.type, NodeType.expense);
+    expect(command.title, 'lunch with team');
+    expect(command.body, contains('Amount: 50k'));
+    expect(command.body, contains('Category: lunch'));
+  });
+
+  test('builds structured contact commands', () {
+    final today = DateTime(2026, 6, 18);
+
+    final command = quickCreateCommandFromQuery(
+      'contact Budi email budi@mail.com',
+      today: today,
+      defaultDay: today,
+    );
+
+    expect(command, isNotNull);
+    expect(command!.type, NodeType.contact);
+    expect(command.title, 'Budi');
+    expect(command.body, contains('Email: budi@mail.com'));
+  });
+
+  test('builds structured bookmark commands', () {
+    final today = DateTime(2026, 6, 18);
+
+    final command = quickCreateCommandFromQuery(
+      'bookmark https://example.com Flutter refs',
+      today: today,
+      defaultDay: today,
+    );
+
+    expect(command, isNotNull);
+    expect(command!.type, NodeType.bookmark);
+    expect(command.title, 'Flutter refs');
+    expect(command.data['link'], {'url': 'https://example.com'});
+    expect(command.body, contains('URL: https://example.com'));
+  });
+
+  test('builds question and routine structured commands', () {
+    final today = DateTime(2026, 6, 18);
+
+    final question = quickCreateCommandFromQuery(
+      'question how to improve onboarding',
+      today: today,
+      defaultDay: today,
+    );
+    final routine = quickCreateCommandFromQuery(
+      'routine plan day + review tasks + shutdown',
+      today: today,
+      defaultDay: today,
+    );
+
+    expect(question, isNotNull);
+    expect(question!.type, NodeType.question);
+    expect(question.body, contains('## Question'));
+    expect(routine, isNotNull);
+    expect(routine!.type, NodeType.routine);
+    expect(routine.checklistTitles, ['plan day', 'review tasks', 'shutdown']);
   });
 
   test('ignores ordinary search text and invalid date commands', () {

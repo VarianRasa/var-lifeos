@@ -19,6 +19,7 @@ import '../domain/life_os_summary.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/mindmap_repository.dart';
 import '../domain/node_graph.dart';
+import '../domain/node_knowledge_index.dart';
 import '../domain/node_relations.dart';
 import '../domain/smart_node_view.dart';
 import '../domain/workspace_context.dart';
@@ -107,23 +108,12 @@ final nodeRelationsProvider = FutureProvider.family<NodeRelations, String>((
   nodeId,
 ) async {
   final nodes = await ref.watch(allMindmapNodesProvider.future);
-  final nodesById = {for (final node in nodes) node.id: node};
-  final target = nodesById[nodeId];
-  if (target == null) return NodeRelations(nodeId: nodeId);
-
-  final relatedNodes = [
-    for (final relatedNodeId in target.relatedNodeIds)
-      ?nodesById[relatedNodeId],
-  ];
-  final backlinks = [
-    for (final node in nodes)
-      if (node.id != nodeId && node.relatedNodeIds.contains(nodeId)) node,
-  ];
+  final links = NodeKnowledgeIndex(nodes).linksFor(nodeId);
 
   return NodeRelations(
     nodeId: nodeId,
-    relatedNodes: List.unmodifiable(relatedNodes),
-    backlinks: List.unmodifiable(backlinks),
+    relatedNodes: links.outgoingNodes,
+    backlinks: [for (final backlink in links.backlinks) backlink.node],
   );
 });
 

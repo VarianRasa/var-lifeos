@@ -1,16 +1,22 @@
 /// Dedicated graph view for node relations and backlinks.
 library;
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/layout/adaptive_scaffold.dart';
+import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -18,6 +24,14 @@ import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_graph.dart';
 import '../mindmap/domain/workspace_context.dart';
 import '../mindmap/presentation/mindmap_canvas.dart';
+import 'application/context_graph.dart';
+import 'application/goal_dependency_graph.dart';
+import 'application/graph_filters.dart';
+import 'application/graph_markdown_export.dart';
+import 'application/graph_overview.dart';
+import 'application/graph_relation_suggestions.dart';
+import 'application/graph_relationship_insights.dart';
+import 'application/graph_risk_overlay.dart';
 import 'domain/node_graph_explorer.dart';
 
 class GraphPage extends ConsumerStatefulWidget {
@@ -29,72 +43,113 @@ class GraphPage extends ConsumerStatefulWidget {
 
 class _GraphPageState extends ConsumerState<GraphPage> {
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
+  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
   NodeGraphExplorerQuery _query = const NodeGraphExplorerQuery();
+  ContextGraphMode _contextMode = ContextGraphMode.nodes;
+  List<_GraphSavedFilter> _savedFilters = const [];
 
-  bool _initializedFilters = false;
+  Uri? _lastFilterUri;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadSavedFilters());
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_initializedFilters) {
-      _initializedFilters = true;
-      try {
-        final state = GoRouterState.of(context);
-        final project = state.uri.queryParameters['project'];
-        final area = state.uri.queryParameters['area'];
-        if (project != null) {
-          _query = _query.copyWith(projectFilter: project);
-        } else if (area != null) {
-          _query = _query.copyWith(areaFilter: area);
-        }
-      } catch (_) {}
-    }
+    try {
+      final uri = GoRouterState.of(context).uri;
+      if (_lastFilterUri == uri) return;
+      _lastFilterUri = uri;
+      final project = uri.queryParameters['project'];
+      final area = uri.queryParameters['area'];
+      _query = _query.copyWith(
+        projectFilter: project,
+        clearProjectFilter: project == null,
+        areaFilter: project == null ? area : null,
+        clearAreaFilter: project != null || area == null,
+      );
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final graph = ref.watch(nodeGraphProvider);
-    final isDesktop =
-        MediaQuery.sizeOf(context).width >= LayoutConstants.desktopBreakpoint;
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Graph'),
+        title: const AppRouteChromeTabs(currentRoute: AppRoute.graph),
         actions: [
           SearchField(
             key: const ValueKey('graph-search-field'),
             controller: _searchController,
+            focusNode: _searchFocusNode,
             hintText: 'Search graph...',
             onChanged: _changeSearchQuery,
           ),
-          if (isDesktop)
-            const SizedBox(width: 460)
-          else
-            const SizedBox(width: 16),
+          const SizedBox(width: 16),
         ],
       ),
       body: graph.when(
         data: (value) {
           if (value.nodes.isEmpty) return const _GraphEmptyState();
-          return _GraphBody(
-            graph: value,
-            view: NodeGraphExplorerView.fromGraph(value, query: _query),
-            onTypeChanged: _changeTypeFilter,
-            onStatusChanged: _changeStatusFilter,
-            onPriorityChanged: _changePriorityFilter,
-            onTagChanged: _changeTagFilter,
-            onProjectChanged: _changeProjectFilter,
-            onAreaChanged: _changeAreaFilter,
-            onCrossDayChanged: _changeCrossDayOnly,
-            onFocusNode: _focusNode,
-            onClearFocus: _clearFocus,
-            onClearFilters: _clearFilters,
+          final view = NodeGraphExplorerView.fromGraph(value, query: _query);
+          return CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.slash): () {
+                _searchFocusNode.requestFocus();
+              },
+              const SingleActivator(LogicalKeyboardKey.escape): _clearFilters,
+              const SingleActivator(LogicalKeyboardKey.keyC): () {
+                _changeRelationState(GraphRelationState.connected);
+              },
+              const SingleActivator(LogicalKeyboardKey.keyR): _clearFilters,
+              const SingleActivator(LogicalKeyboardKey.keyF): () {
+                if (view.visibleNodes.isNotEmpty) {
+                  _focusNode(view.visibleNodes.first.id);
+                }
+              },
+            },
+            child: Focus(
+              autofocus: true,
+              child: _GraphBody(
+                graph: value,
+                view: view,
+                onTypeChanged: _changeTypeFilter,
+                onStatusChanged: _changeStatusFilter,
+                onPriorityChanged: _changePriorityFilter,
+                onTagChanged: _changeTagFilter,
+                onProjectChanged: _changeProjectFilter,
+                onAreaChanged: _changeAreaFilter,
+                onRelationLabelChanged: _changeRelationLabelFilter,
+                onCrossDayChanged: _changeCrossDayOnly,
+                onRelationStateChanged: _changeRelationState,
+                onContextModeChanged: _changeContextMode,
+                onExportReport: _exportReport,
+                contextMode: _contextMode,
+                onFocusNode: _focusNode,
+                onClearFocus: _clearFocus,
+                onClearFilters: _clearFilters,
+                onRelationLabelEdited: _editRelationLabel,
+                savedFilters: _savedFilters,
+                onSaveFilter: _saveCurrentFilter,
+                onApplyFilter: _applySavedFilter,
+                onDeleteFilter: _deleteSavedFilter,
+                onRenameFilter: _renameSavedFilter,
+                onDuplicateFilter: _duplicateSavedFilter,
+                onExportFilters: _exportSavedFilters,
+                onImportFilters: _importSavedFilters,
+              ),
+            ),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -104,6 +159,176 @@ class _GraphPageState extends ConsumerState<GraphPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _loadSavedFilters() async {
+    final raw = await _preferences.getString('graph_saved_filters');
+    final pendingRaw = await _preferences.getString('graph_pending_filter');
+    await _preferences.remove('graph_pending_filter');
+    final pending = _GraphSavedFilter.fromRawQuery(pendingRaw);
+    if (!mounted) return;
+    setState(() {
+      _savedFilters = _decodeGraphSavedFilters(raw);
+      if (pending != null) {
+        _query = pending.query;
+        _searchController.text = pending.query.searchQuery;
+      }
+    });
+  }
+
+  Future<void> _persistSavedFilters(List<_GraphSavedFilter> filters) async {
+    await _preferences.setString(
+      'graph_saved_filters',
+      jsonEncode([for (final filter in filters) filter.toJson()]),
+    );
+    if (mounted) setState(() => _savedFilters = filters);
+  }
+
+  Future<void> _saveCurrentFilter() async {
+    final controller = TextEditingController(text: 'Graph view');
+    final label = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save graph filter'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Filter name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (label == null || label.isEmpty) return;
+    await _persistSavedFilters([
+      ..._savedFilters,
+      _GraphSavedFilter(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        label: label,
+        query: _query,
+      ),
+    ]);
+  }
+
+  void _applySavedFilter(_GraphSavedFilter filter) {
+    _searchController.text = filter.query.searchQuery;
+    setState(() => _query = filter.query);
+  }
+
+  Future<void> _renameSavedFilter(_GraphSavedFilter filter) async {
+    final controller = TextEditingController(text: filter.label);
+    final label = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename graph filter'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Filter name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (label == null || label.isEmpty) return;
+    await _persistSavedFilters([
+      for (final item in _savedFilters)
+        item.id == filter.id
+            ? _GraphSavedFilter(id: item.id, label: label, query: item.query)
+            : item,
+    ]);
+  }
+
+  Future<void> _duplicateSavedFilter(_GraphSavedFilter filter) async {
+    await _persistSavedFilters([
+      ..._savedFilters,
+      _GraphSavedFilter(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        label: '${filter.label} copy',
+        query: filter.query,
+      ),
+    ]);
+  }
+
+  Future<void> _deleteSavedFilter(String id) async {
+    await _persistSavedFilters([
+      for (final filter in _savedFilters)
+        if (filter.id != id) filter,
+    ]);
+  }
+
+  Future<void> _exportSavedFilters() async {
+    await Clipboard.setData(
+      ClipboardData(
+        text: jsonEncode([for (final filter in _savedFilters) filter.toJson()]),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Exported ${_savedFilters.length} graph filters')),
+    );
+  }
+
+  Future<void> _importSavedFilters() async {
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import graph filters'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            labelText: 'Graph filters JSON',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final imported = _decodeGraphSavedFilters(raw);
+      final merged = <String, _GraphSavedFilter>{
+        for (final filter in _savedFilters) filter.id: filter,
+        for (final filter in imported) filter.id: filter,
+      };
+      await _persistSavedFilters(merged.values.toList(growable: false));
+    } on FormatException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid graph filters JSON')),
+      );
+    }
   }
 
   void _changeSearchQuery(String value) {
@@ -158,8 +383,36 @@ class _GraphPageState extends ConsumerState<GraphPage> {
     });
   }
 
+  void _changeRelationLabelFilter(String label) {
+    setState(() {
+      _query = _query.relationLabelFilter == label
+          ? _query.copyWith(clearRelationLabelFilter: true)
+          : _query.copyWith(relationLabelFilter: label);
+    });
+  }
+
   void _changeCrossDayOnly(bool value) {
     setState(() => _query = _query.copyWith(crossDayOnly: value));
+  }
+
+  void _changeRelationState(GraphRelationState state) {
+    setState(() {
+      _query = _query.relationState == state
+          ? _query.copyWith(clearRelationState: true)
+          : _query.copyWith(relationState: state);
+    });
+  }
+
+  void _changeContextMode(ContextGraphMode mode) {
+    setState(() => _contextMode = mode);
+  }
+
+  Future<void> _exportReport(String markdown) async {
+    await Clipboard.setData(ClipboardData(text: markdown));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Graph report copied')));
   }
 
   void _focusNode(String nodeId) {
@@ -170,10 +423,141 @@ class _GraphPageState extends ConsumerState<GraphPage> {
     setState(() => _query = _query.copyWith(clearFocus: true));
   }
 
+  Future<void> _editRelationLabel(
+    MindmapNode source,
+    String targetId,
+    String label,
+  ) async {
+    final relations = [
+      for (final relation
+          in source.data['relations'] as List<Object?>? ?? const [])
+        if (relation case final Map<Object?, Object?> map)
+          <String, Object?>{
+            'targetId': map['targetId']?.toString() ?? '',
+            'label': map['targetId']?.toString() == targetId
+                ? label
+                : map['label']?.toString() ?? 'relates to',
+          },
+    ];
+    final hasRelation = relations.any(
+      (relation) => relation['targetId'] == targetId,
+    );
+    if (!hasRelation) {
+      relations.add(<String, Object?>{'targetId': targetId, 'label': label});
+    }
+    final updated = source.copyWith(
+      data: <String, Object?>{...source.data, 'relations': relations},
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(mindmapRepositoryProvider).saveNode(updated);
+    invalidateMindmapState(ref, day: source.day);
+  }
+
   void _clearFilters() {
     _searchController.clear();
     setState(() => _query = const NodeGraphExplorerQuery());
   }
+}
+
+final class _GraphSavedFilter {
+  const _GraphSavedFilter({
+    required this.id,
+    required this.label,
+    required this.query,
+  });
+
+  final String id;
+  final String label;
+  final NodeGraphExplorerQuery query;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'label': label,
+    'searchQuery': query.searchQuery,
+    'typeFilter': query.typeFilter?.name,
+    'statusFilter': query.statusFilter?.name,
+    'priorityFilter': query.priorityFilter?.name,
+    'tagFilter': query.tagFilter,
+    'projectFilter': query.projectFilter,
+    'areaFilter': query.areaFilter,
+    'relationLabelFilter': query.relationLabelFilter,
+    'relationState': query.relationState?.name,
+    'crossDayOnly': query.crossDayOnly,
+  };
+
+  static _GraphSavedFilter? fromRawQuery(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, Object?>) return null;
+      return _GraphSavedFilter.fromJson({
+        'id': 'pending',
+        'label': 'Pending',
+        ...decoded,
+      });
+    } on FormatException {
+      return null;
+    }
+  }
+
+  static _GraphSavedFilter? fromJson(Object? value) {
+    if (value case final Map<String, Object?> map) {
+      final id = map['id']?.toString() ?? '';
+      final label = map['label']?.toString() ?? '';
+      if (id.isEmpty || label.isEmpty) return null;
+      return _GraphSavedFilter(
+        id: id,
+        label: label,
+        query: NodeGraphExplorerQuery(
+          searchQuery: map['searchQuery']?.toString() ?? '',
+          typeFilter: _enumByName(
+            NodeType.values,
+            map['typeFilter']?.toString(),
+          ),
+          statusFilter: _enumByName(
+            NodeStatus.values,
+            map['statusFilter']?.toString(),
+          ),
+          priorityFilter: _enumByName(
+            NodePriority.values,
+            map['priorityFilter']?.toString(),
+          ),
+          tagFilter: map['tagFilter']?.toString(),
+          projectFilter: map['projectFilter']?.toString(),
+          areaFilter: map['areaFilter']?.toString(),
+          relationLabelFilter: map['relationLabelFilter']?.toString(),
+          relationState: _enumByName(
+            GraphRelationState.values,
+            map['relationState']?.toString(),
+          ),
+          crossDayOnly: map['crossDayOnly'] == true,
+        ),
+      );
+    }
+    return null;
+  }
+}
+
+List<_GraphSavedFilter> _decodeGraphSavedFilters(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return const [];
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! List<Object?>) return const [];
+    return decoded
+        .map(_GraphSavedFilter.fromJson)
+        .nonNulls
+        .toList(growable: false);
+  } on FormatException {
+    return const [];
+  }
+}
+
+T? _enumByName<T extends Enum>(Iterable<T> values, String? name) {
+  if (name == null) return null;
+  for (final value in values) {
+    if (value.name == name) return value;
+  }
+  return null;
 }
 
 class _GraphBody extends StatelessWidget {
@@ -186,10 +570,24 @@ class _GraphBody extends StatelessWidget {
     required this.onTagChanged,
     required this.onProjectChanged,
     required this.onAreaChanged,
+    required this.onRelationLabelChanged,
     required this.onCrossDayChanged,
+    required this.onRelationStateChanged,
+    required this.onContextModeChanged,
+    required this.onExportReport,
+    required this.contextMode,
     required this.onFocusNode,
     required this.onClearFocus,
     required this.onClearFilters,
+    required this.onRelationLabelEdited,
+    required this.savedFilters,
+    required this.onSaveFilter,
+    required this.onApplyFilter,
+    required this.onDeleteFilter,
+    required this.onRenameFilter,
+    required this.onDuplicateFilter,
+    required this.onExportFilters,
+    required this.onImportFilters,
   });
 
   final NodeGraph graph;
@@ -200,27 +598,62 @@ class _GraphBody extends StatelessWidget {
   final ValueChanged<String> onTagChanged;
   final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onAreaChanged;
+  final ValueChanged<String> onRelationLabelChanged;
   final ValueChanged<bool> onCrossDayChanged;
+  final ValueChanged<GraphRelationState> onRelationStateChanged;
+  final ValueChanged<ContextGraphMode> onContextModeChanged;
+  final ValueChanged<String> onExportReport;
+  final ContextGraphMode contextMode;
   final ValueChanged<String> onFocusNode;
   final VoidCallback onClearFocus;
   final VoidCallback onClearFilters;
+  final Future<void> Function(MindmapNode source, String targetId, String label)
+  onRelationLabelEdited;
+  final List<_GraphSavedFilter> savedFilters;
+  final Future<void> Function() onSaveFilter;
+  final ValueChanged<_GraphSavedFilter> onApplyFilter;
+  final Future<void> Function(String id) onDeleteFilter;
+  final Future<void> Function(_GraphSavedFilter filter) onRenameFilter;
+  final Future<void> Function(_GraphSavedFilter filter) onDuplicateFilter;
+  final Future<void> Function() onExportFilters;
+  final Future<void> Function() onImportFilters;
 
   @override
   Widget build(BuildContext context) {
     final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
     final nodes = [for (final node in graph.nodes) node.node];
     final tags = _availableTags(nodes);
+    final relationLabels = _availableRelationLabels(nodes);
     final workspaceContexts = WorkspaceContexts.fromNodes(nodes).contexts;
+    final overview = buildGraphOverview(graph);
+    final contexts = buildContextGraphSummary(nodes, mode: contextMode);
+    final goals = buildGoalDependencyMap(graph);
+    final risks = buildGraphRiskOverlay(graph);
+    final suggestions = buildGraphRelationSuggestions(graph);
+    final insights = buildGraphRelationshipInsights(graph);
+    final report = buildGraphMarkdownReport(
+      graph: graph,
+      overview: overview,
+      contexts: contexts,
+      goals: goals,
+      risks: risks,
+      suggestions: suggestions,
+    );
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(spacing),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _GraphDashboardPanelToggle(
+            children: [_GraphOverviewHud(summary: overview)],
+          ),
+          SizedBox(height: spacing),
           _GraphFilterBand(
             query: view.query,
             focusedNode: view.focusedNode,
             tags: tags,
+            relationLabels: relationLabels,
             workspaceContexts: workspaceContexts,
             onTypeChanged: onTypeChanged,
             onStatusChanged: onStatusChanged,
@@ -228,9 +661,22 @@ class _GraphBody extends StatelessWidget {
             onTagChanged: onTagChanged,
             onProjectChanged: onProjectChanged,
             onAreaChanged: onAreaChanged,
+            onRelationLabelChanged: onRelationLabelChanged,
             onCrossDayChanged: onCrossDayChanged,
+            onRelationStateChanged: onRelationStateChanged,
+            onContextModeChanged: onContextModeChanged,
+            onExportReport: () => onExportReport(report),
+            contextMode: contextMode,
             onClearFocus: onClearFocus,
             onClearFilters: onClearFilters,
+            savedFilters: savedFilters,
+            onSaveFilter: onSaveFilter,
+            onApplyFilter: onApplyFilter,
+            onDeleteFilter: onDeleteFilter,
+            onRenameFilter: onRenameFilter,
+            onDuplicateFilter: onDuplicateFilter,
+            onExportFilters: onExportFilters,
+            onImportFilters: onImportFilters,
           ),
           SizedBox(height: spacing),
           _GraphMetricRail(
@@ -257,6 +703,29 @@ class _GraphBody extends StatelessWidget {
                   icon: Icons.filter_alt_outlined,
                   label: _countLabel(view.activeFilterCount, 'filter'),
                 ),
+            ],
+          ),
+          SizedBox(height: spacing),
+          _GraphGuidanceStrip(
+            visibleNodeCount: view.visibleNodes.length,
+            edgeCount: view.edgeCount,
+            activeFilterCount: view.activeFilterCount,
+            focusedNode: view.focusedNode?.node.title,
+            onClearFilters: view.activeFilterCount > 0 ? onClearFilters : null,
+            onClearFocus: view.focusedNode == null ? null : onClearFocus,
+          ),
+          SizedBox(height: spacing),
+          _GraphDashboardPanelToggle(
+            label: 'diagnostics',
+            children: [
+              _GraphDiagnosticsPanel(
+                insights: insights,
+                contexts: contexts,
+                goals: goals,
+                risks: risks,
+                suggestions: suggestions,
+                onFocusNode: onFocusNode,
+              ),
             ],
           ),
           SizedBox(height: spacing),
@@ -342,6 +811,8 @@ class _GraphBody extends StatelessWidget {
                                           _GraphEdgeTile(
                                             graph: graph,
                                             edge: view.visibleEdges[index],
+                                            onRelationLabelEdited:
+                                                onRelationLabelEdited,
                                           ),
                                         ],
                                       ],
@@ -362,11 +833,507 @@ class _GraphBody extends StatelessWidget {
   }
 }
 
-class _GraphFilterBand extends StatelessWidget {
+class _GraphDashboardPanelToggle extends StatefulWidget {
+  const _GraphDashboardPanelToggle({
+    required this.children,
+    this.label = 'overview',
+  });
+
+  final List<Widget> children;
+  final String label;
+
+  @override
+  State<_GraphDashboardPanelToggle> createState() =>
+      _GraphDashboardPanelToggleState();
+}
+
+class _GraphDashboardPanelToggleState
+    extends State<_GraphDashboardPanelToggle> {
+  bool _showPanels = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            key: ValueKey('graph-${widget.label}-panels-toggle'),
+            onPressed: () => setState(() => _showPanels = !_showPanels),
+            icon: Icon(
+              _showPanels ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+            ),
+            label: Text(
+              _showPanels ? 'Hide ${widget.label}' : 'Show ${widget.label}',
+            ),
+          ),
+        ),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _showPanels
+              ? Column(
+                  key: ValueKey('graph-${widget.label}-panels'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [const SizedBox(height: 12), ...widget.children],
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+class _GraphOverviewHud extends StatelessWidget {
+  const _GraphOverviewHud({required this.summary});
+
+  final GraphOverviewSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.22)),
+          radius: 28,
+          wobble: 2.6,
+        ),
+        gradient: LinearGradient(
+          colors: [
+            colorScheme.primaryContainer.withValues(alpha: 0.26),
+            colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.radar_outlined, color: colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Map overview',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Chip(
+                  avatar: Icon(
+                    _healthIcon(summary.healthStatus),
+                    size: 18,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                  label: Text(summary.healthStatus.label),
+                  backgroundColor: colorScheme.primaryContainer,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _GraphOverviewCard(
+                  icon: Icons.hub_outlined,
+                  label: 'Total nodes',
+                  value: summary.totalNodes.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.link_outlined,
+                  label: 'Relations',
+                  value: summary.relationCount.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.device_hub_outlined,
+                  label: 'Connected',
+                  value: summary.connectedNodes.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.blur_off_outlined,
+                  label: 'Isolated',
+                  value: summary.isolatedNodes.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.account_tree_outlined,
+                  label: 'Hubs',
+                  value: summary.hubNodes.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.history_toggle_off_outlined,
+                  label: 'Stale',
+                  value: summary.staleNodes.toString(),
+                ),
+                _GraphOverviewCard(
+                  icon: Icons.priority_high_outlined,
+                  label: 'High priority open',
+                  value: summary.highPriorityOpenNodes.toString(),
+                ),
+              ],
+            ),
+            if (!summary.hasRelations) ...[
+              const SizedBox(height: 12),
+              Text(
+                'No relations yet. Link related nodes to build a useful map.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GraphOverviewCard extends StatelessWidget {
+  const _GraphOverviewCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return SizedBox(
+      width: 156,
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          color: colorScheme.surface.withValues(alpha: 0.72),
+          shape: DoodleShapeBorder(
+            side: BorderSide(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+            ),
+            radius: 18,
+            wobble: 1.8,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 18, color: colorScheme.primary),
+              const SizedBox(height: 10),
+              Text(
+                value,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _healthIcon(GraphHealthStatus status) {
+  return switch (status) {
+    GraphHealthStatus.healthy => Icons.verified_outlined,
+    GraphHealthStatus.sparse => Icons.grain_outlined,
+    GraphHealthStatus.crowded => Icons.blur_on_outlined,
+    GraphHealthStatus.atRisk => Icons.warning_amber_outlined,
+  };
+}
+
+class _GraphDiagnosticsPanel extends StatelessWidget {
+  const _GraphDiagnosticsPanel({
+    required this.insights,
+    required this.contexts,
+    required this.goals,
+    required this.risks,
+    required this.suggestions,
+    required this.onFocusNode,
+  });
+
+  final List<GraphRelationshipInsight> insights;
+  final ContextGraphSummary contexts;
+  final GoalDependencyMap goals;
+  final Map<String, List<GraphRiskBadge>> risks;
+  final List<GraphRelationSuggestion> suggestions;
+  final ValueChanged<String> onFocusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _GraphDiagnosticCard(
+              title: 'Relationship intel',
+              icon: Icons.psychology_alt_outlined,
+              children: insights.isEmpty
+                  ? const [Text('No graph issues detected')]
+                  : [
+                      for (final insight in insights.take(5))
+                        _InsightRow(insight: insight, onFocusNode: onFocusNode),
+                    ],
+            ),
+            _GraphDiagnosticCard(
+              title: 'Context clusters',
+              icon: Icons.workspaces_outline,
+              children: contexts.clusters.isEmpty
+                  ? const [Text('Switch to project/area/tag mode')]
+                  : [
+                      for (final cluster in contexts.clusters.take(6))
+                        Text(
+                          '${cluster.name}: ${cluster.nodeCount} nodes • ${cluster.openTasks} open • ${cluster.highPriority} priority',
+                        ),
+                    ],
+            ),
+            _GraphDiagnosticCard(
+              title: 'Goal dependencies',
+              icon: Icons.flag_outlined,
+              children: goals.goals.isEmpty
+                  ? const [Text('No goal anchors yet')]
+                  : [
+                      for (final goal in goals.goals.take(5))
+                        Text(
+                          '${goal.goal.title}: ${(goal.progress * 100).round()}% • ${goal.dependencies.length} deps${goal.missingNextAction ? ' • needs next action' : ''}',
+                        ),
+                    ],
+            ),
+            _GraphDiagnosticCard(
+              title: 'Risk overlay',
+              icon: Icons.warning_amber_outlined,
+              children: risks.isEmpty
+                  ? const [Text('No risk badges')]
+                  : [
+                      for (final entry in risks.entries.take(7))
+                        ActionChip(
+                          label: Text(
+                            '${entry.key}: ${entry.value.map((badge) => badge.label).join(', ')}',
+                          ),
+                          onPressed: () => onFocusNode(entry.key),
+                        ),
+                    ],
+            ),
+            _GraphDiagnosticCard(
+              title: 'Relation suggestions',
+              icon: Icons.add_link_outlined,
+              children: suggestions.isEmpty
+                  ? const [Text('No strong suggestions')]
+                  : [
+                      for (final suggestion in suggestions.take(6))
+                        Text(
+                          '${suggestion.source.title} ↔ ${suggestion.target.title} (${suggestion.score})',
+                        ),
+                    ],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _GraphDiagnosticCard extends StatelessWidget {
+  const _GraphDiagnosticCard({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: 320,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 18, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(title, style: theme.textTheme.titleSmall),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              for (final child in children) ...[
+                DefaultTextStyle.merge(
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  child: child,
+                ),
+                const SizedBox(height: 6),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightRow extends StatelessWidget {
+  const _InsightRow({required this.insight, required this.onFocusNode});
+
+  final GraphRelationshipInsight insight;
+  final ValueChanged<String> onFocusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      avatar: Icon(_insightIcon(insight.severity), size: 16),
+      label: Text('${insight.title}: ${insight.description}'),
+      onPressed: insight.nodeIds.isEmpty
+          ? null
+          : () => onFocusNode(insight.nodeIds.first),
+    );
+  }
+}
+
+IconData _insightIcon(GraphRelationshipSeverity severity) {
+  return switch (severity) {
+    GraphRelationshipSeverity.info => Icons.info_outline,
+    GraphRelationshipSeverity.warning => Icons.warning_amber_outlined,
+    GraphRelationshipSeverity.critical => Icons.error_outline,
+  };
+}
+
+IconData _contextModeIcon(ContextGraphMode mode) {
+  return switch (mode) {
+    ContextGraphMode.nodes => Icons.hub_outlined,
+    ContextGraphMode.projects => Icons.folder_copy_outlined,
+    ContextGraphMode.areas => Icons.map_outlined,
+    ContextGraphMode.tags => Icons.sell_outlined,
+  };
+}
+
+String _contextModeLabel(ContextGraphMode mode) {
+  return switch (mode) {
+    ContextGraphMode.nodes => 'Nodes',
+    ContextGraphMode.projects => 'Projects',
+    ContextGraphMode.areas => 'Areas',
+    ContextGraphMode.tags => 'Tags',
+  };
+}
+
+class _GraphGuidanceStrip extends StatelessWidget {
+  const _GraphGuidanceStrip({
+    required this.visibleNodeCount,
+    required this.edgeCount,
+    required this.activeFilterCount,
+    required this.focusedNode,
+    required this.onClearFilters,
+    required this.onClearFocus,
+  });
+
+  final int visibleNodeCount;
+  final int edgeCount;
+  final int activeFilterCount;
+  final String? focusedNode;
+  final VoidCallback? onClearFilters;
+  final VoidCallback? onClearFocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final summary = focusedNode == null
+        ? '$visibleNodeCount visible nodes • $edgeCount links'
+        : 'Focused on $focusedNode • $visibleNodeCount neighbors';
+
+    return DecoratedBox(
+      key: const ValueKey('graph-guidance-strip'),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.32,
+        ),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+          radius: 18,
+          wobble: 1.8,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Icon(Icons.account_tree_outlined, color: theme.colorScheme.primary),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Graph navigator', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    summary,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (activeFilterCount > 0)
+              ActionChip(
+                avatar: const Icon(Icons.filter_alt_off_outlined, size: 16),
+                label: Text('Clear $activeFilterCount filters'),
+                onPressed: onClearFilters,
+              ),
+            if (focusedNode != null)
+              ActionChip(
+                avatar: const Icon(Icons.center_focus_weak_outlined, size: 16),
+                label: const Text('Clear focus'),
+                onPressed: onClearFocus,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GraphFilterBand extends StatefulWidget {
   const _GraphFilterBand({
     required this.query,
     required this.focusedNode,
     required this.tags,
+    required this.relationLabels,
     required this.workspaceContexts,
     required this.onTypeChanged,
     required this.onStatusChanged,
@@ -374,14 +1341,28 @@ class _GraphFilterBand extends StatelessWidget {
     required this.onTagChanged,
     required this.onProjectChanged,
     required this.onAreaChanged,
+    required this.onRelationLabelChanged,
     required this.onCrossDayChanged,
+    required this.onRelationStateChanged,
+    required this.onContextModeChanged,
+    required this.onExportReport,
+    required this.contextMode,
     required this.onClearFocus,
     required this.onClearFilters,
+    required this.savedFilters,
+    required this.onSaveFilter,
+    required this.onApplyFilter,
+    required this.onDeleteFilter,
+    required this.onRenameFilter,
+    required this.onDuplicateFilter,
+    required this.onExportFilters,
+    required this.onImportFilters,
   });
 
   final NodeGraphExplorerQuery query;
   final NodeGraphNode? focusedNode;
   final List<String> tags;
+  final List<String> relationLabels;
   final List<WorkspaceContext> workspaceContexts;
   final ValueChanged<NodeType> onTypeChanged;
   final ValueChanged<NodeStatus> onStatusChanged;
@@ -389,114 +1370,301 @@ class _GraphFilterBand extends StatelessWidget {
   final ValueChanged<String> onTagChanged;
   final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onAreaChanged;
+  final ValueChanged<String> onRelationLabelChanged;
   final ValueChanged<bool> onCrossDayChanged;
+  final ValueChanged<GraphRelationState> onRelationStateChanged;
+  final ValueChanged<ContextGraphMode> onContextModeChanged;
+  final VoidCallback onExportReport;
+  final ContextGraphMode contextMode;
   final VoidCallback onClearFocus;
   final VoidCallback onClearFilters;
+  final List<_GraphSavedFilter> savedFilters;
+  final Future<void> Function() onSaveFilter;
+  final ValueChanged<_GraphSavedFilter> onApplyFilter;
+  final Future<void> Function(String id) onDeleteFilter;
+  final Future<void> Function(_GraphSavedFilter filter) onRenameFilter;
+  final Future<void> Function(_GraphSavedFilter filter) onDuplicateFilter;
+  final Future<void> Function() onExportFilters;
+  final Future<void> Function() onImportFilters;
+
+  @override
+  State<_GraphFilterBand> createState() => _GraphFilterBandState();
+}
+
+class _GraphFilterBandState extends State<_GraphFilterBand> {
+  bool _showFilters = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final query = widget.query;
+    final focusedNode = widget.focusedNode;
+    final tags = widget.tags;
+    final relationLabels = widget.relationLabels;
+    final workspaceContexts = widget.workspaceContexts;
+    final savedFilters = widget.savedFilters;
+    final contextMode = widget.contextMode;
 
     return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 8,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            Row(
               children: [
-                for (final type in NodeType.values)
-                  FilterChip(
-                    key: ValueKey('graph-type-${type.name}'),
-                    label: Text(type.label),
-                    selected: query.typeFilter == type,
-                    onSelected: (_) => onTypeChanged(type),
+                OutlinedButton.icon(
+                  key: const ValueKey('graph-filter-band-toggle'),
+                  onPressed: () => setState(() => _showFilters = !_showFilters),
+                  icon: Icon(
+                    _showFilters
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
                   ),
-                FilterChip(
-                  key: const ValueKey('graph-cross-day-only'),
-                  label: const Text('Cross-day only'),
-                  selected: query.crossDayOnly,
-                  onSelected: onCrossDayChanged,
+                  label: Text(_showFilters ? 'Hide filters' : 'Show filters'),
                 ),
-                for (final workspaceContext in workspaceContexts)
-                  if (workspaceContext.type != WorkspaceContextType.daily)
-                    FilterChip(
-                      key: ValueKey(
-                        'graph-${workspaceContext.type.name}-${workspaceContextKey(workspaceContext.name)}',
-                      ),
-                      label: Text(
-                        '${workspaceContext.type.label} ${workspaceContext.name}',
-                      ),
-                      selected: switch (workspaceContext.type) {
-                        WorkspaceContextType.project =>
-                          query.projectFilter == workspaceContext.name,
-                        WorkspaceContextType.area =>
-                          query.areaFilter == workspaceContext.name,
-                        WorkspaceContextType.daily => false,
-                      },
-                      onSelected: (_) {
-                        switch (workspaceContext.type) {
-                          case WorkspaceContextType.project:
-                            onProjectChanged(workspaceContext.name);
-                            break;
-                          case WorkspaceContextType.area:
-                            onAreaChanged(workspaceContext.name);
-                            break;
-                          case WorkspaceContextType.daily:
-                            break;
-                        }
-                      },
-                    ),
-                for (final tag in tags)
-                  FilterChip(
-                    key: ValueKey('graph-tag-${workspaceContextKey(tag)}'),
-                    label: Text('#$tag'),
-                    selected: query.tagFilter == tag,
-                    onSelected: (_) => onTagChanged(tag),
+                if (query.activeFilterCount > 0) ...[
+                  const SizedBox(width: 8),
+                  InputChip(
+                    key: const ValueKey('graph-active-filters-chip'),
+                    avatar: const Icon(Icons.filter_alt_outlined, size: 16),
+                    label: Text(_countLabel(query.activeFilterCount, 'filter')),
+                    onDeleted: widget.onClearFilters,
                   ),
-                for (final priority in NodePriority.values)
-                  if (priority != NodePriority.none)
-                    FilterChip(
-                      key: ValueKey('graph-priority-${priority.name}'),
-                      label: Text('Priority ${priority.label}'),
-                      selected: query.priorityFilter == priority,
-                      onSelected: (_) => onPriorityChanged(priority),
-                    ),
-                for (final status in NodeStatus.values)
-                  FilterChip(
-                    key: ValueKey('graph-status-${status.name}'),
-                    label: Text('Status ${status.label}'),
-                    selected: query.statusFilter == status,
-                    onSelected: (_) => onStatusChanged(status),
+                ],
+                if (focusedNode != null) ...[
+                  const SizedBox(width: 8),
+                  InputChip(
+                    avatar: const Icon(Icons.center_focus_strong, size: 16),
+                    label: Text(focusedNode.node.title),
+                    onDeleted: widget.onClearFocus,
                   ),
-                if (query.activeFilterCount > 0)
-                  ActionChip(
-                    key: const ValueKey('graph-clear-filters'),
-                    avatar: const Icon(Icons.close, size: 16),
-                    label: const Text('Clear'),
-                    onPressed: onClearFilters,
-                  ),
+                ],
               ],
             ),
-            if (focusedNode != null) ...[
-              const SizedBox(height: 8),
-              InputChip(
-                key: const ValueKey('graph-focus-chip'),
-                avatar: const Icon(Icons.center_focus_strong, size: 16),
-                label: Text('Neighborhood: ${focusedNode!.node.title}'),
-                onDeleted: onClearFocus,
-                deleteIcon: const Icon(
-                  Icons.close,
-                  key: ValueKey('graph-clear-focus'),
-                ),
+            if (_showFilters)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(
+                          Icons.bookmark_add_outlined,
+                          size: 16,
+                        ),
+                        label: const Text('Save graph filter'),
+                        onPressed: () => unawaited(widget.onSaveFilter()),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: 'Graph filter import/export',
+                        onSelected: (value) {
+                          if (value == 'export') {
+                            unawaited(widget.onExportFilters());
+                          }
+                          if (value == 'import') {
+                            unawaited(widget.onImportFilters());
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'export',
+                            child: Text('Export JSON'),
+                          ),
+                          PopupMenuItem(
+                            value: 'import',
+                            child: Text('Import JSON'),
+                          ),
+                        ],
+                      ),
+                      for (final filter in savedFilters)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InputChip(
+                              avatar: const Icon(
+                                Icons.bookmark_border,
+                                size: 16,
+                              ),
+                              label: Text(filter.label),
+                              onPressed: () => widget.onApplyFilter(filter),
+                              onDeleted: () =>
+                                  unawaited(widget.onDeleteFilter(filter.id)),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: 'Graph filter actions',
+                              onSelected: (value) {
+                                if (value == 'rename') {
+                                  unawaited(widget.onRenameFilter(filter));
+                                }
+                                if (value == 'duplicate') {
+                                  unawaited(widget.onDuplicateFilter(filter));
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'rename',
+                                  child: Text('Rename'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'duplicate',
+                                  child: Text('Duplicate'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final type in NodeType.values)
+                        FilterChip(
+                          key: ValueKey('graph-type-${type.name}'),
+                          label: Text(type.label),
+                          selected: query.typeFilter == type,
+                          onSelected: (_) => widget.onTypeChanged(type),
+                        ),
+                      FilterChip(
+                        key: const ValueKey('graph-cross-day-only'),
+                        avatar: const Icon(
+                          Icons.calendar_month_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('Cross-day only'),
+                        selected: query.crossDayOnly,
+                        onSelected: widget.onCrossDayChanged,
+                      ),
+                      for (final state in GraphRelationState.values)
+                        FilterChip(
+                          key: ValueKey('graph-relation-state-${state.name}'),
+                          avatar: const Icon(Icons.radar_outlined, size: 18),
+                          label: Text(state.label),
+                          selected: query.relationState == state,
+                          onSelected: (_) =>
+                              widget.onRelationStateChanged(state),
+                        ),
+                      for (final mode in ContextGraphMode.values)
+                        ChoiceChip(
+                          key: ValueKey('graph-context-mode-${mode.name}'),
+                          avatar: Icon(_contextModeIcon(mode), size: 18),
+                          label: Text(_contextModeLabel(mode)),
+                          selected: contextMode == mode,
+                          onSelected: (_) => widget.onContextModeChanged(mode),
+                        ),
+                      ActionChip(
+                        key: const ValueKey('graph-export-report'),
+                        avatar: const Icon(
+                          Icons.description_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('Copy report'),
+                        onPressed: widget.onExportReport,
+                      ),
+                      for (final workspaceContext in workspaceContexts)
+                        if (workspaceContext.type != WorkspaceContextType.daily)
+                          FilterChip(
+                            key: ValueKey(
+                              'graph-${workspaceContext.type.name}-${workspaceContextKey(workspaceContext.name)}',
+                            ),
+                            label: Text(
+                              '${workspaceContext.type.label} ${workspaceContext.name}',
+                            ),
+                            selected: switch (workspaceContext.type) {
+                              WorkspaceContextType.project =>
+                                query.projectFilter == workspaceContext.name,
+                              WorkspaceContextType.area =>
+                                query.areaFilter == workspaceContext.name,
+                              WorkspaceContextType.daily => false,
+                            },
+                            onSelected: (_) {
+                              switch (workspaceContext.type) {
+                                case WorkspaceContextType.project:
+                                  widget.onProjectChanged(
+                                    workspaceContext.name,
+                                  );
+                                  break;
+                                case WorkspaceContextType.area:
+                                  widget.onAreaChanged(workspaceContext.name);
+                                  break;
+                                case WorkspaceContextType.daily:
+                                  break;
+                              }
+                            },
+                          ),
+                      for (final tag in tags)
+                        FilterChip(
+                          key: ValueKey(
+                            'graph-tag-${workspaceContextKey(tag)}',
+                          ),
+                          label: Text('#$tag'),
+                          selected: query.tagFilter == tag,
+                          onSelected: (_) => widget.onTagChanged(tag),
+                        ),
+                      for (final label in relationLabels)
+                        FilterChip(
+                          key: ValueKey(
+                            'graph-relation-${workspaceContextKey(label)}',
+                          ),
+                          label: Text('Relation $label'),
+                          selected: query.relationLabelFilter == label,
+                          onSelected: (_) =>
+                              widget.onRelationLabelChanged(label),
+                        ),
+                      for (final priority in NodePriority.values)
+                        if (priority != NodePriority.none)
+                          FilterChip(
+                            key: ValueKey('graph-priority-${priority.name}'),
+                            label: Text('Priority ${priority.label}'),
+                            selected: query.priorityFilter == priority,
+                            onSelected: (_) =>
+                                widget.onPriorityChanged(priority),
+                          ),
+                      for (final status in NodeStatus.values)
+                        FilterChip(
+                          key: ValueKey('graph-status-${status.name}'),
+                          label: Text('Status ${status.label}'),
+                          selected: query.statusFilter == status,
+                          onSelected: (_) => widget.onStatusChanged(status),
+                        ),
+                      if (query.activeFilterCount > 0)
+                        ActionChip(
+                          key: const ValueKey('graph-clear-filters'),
+                          avatar: const Icon(Icons.close, size: 16),
+                          label: const Text('Clear'),
+                          onPressed: widget.onClearFilters,
+                        ),
+                    ],
+                  ),
+                  if (focusedNode != null) ...[
+                    const SizedBox(height: 8),
+                    InputChip(
+                      key: const ValueKey('graph-focus-chip'),
+                      avatar: const Icon(Icons.center_focus_strong, size: 16),
+                      label: Text('Neighborhood: ${focusedNode.node.title}'),
+                      onDeleted: widget.onClearFocus,
+                      deleteIcon: const Icon(
+                        Icons.close,
+                        key: ValueKey('graph-clear-focus'),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ],
           ],
         ),
       ),
@@ -515,9 +1683,12 @@ class _GraphSection extends StatelessWidget {
     final theme = Theme.of(context);
 
     return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 8,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -553,8 +1724,43 @@ class _GraphNeighborhoodPanel extends StatelessWidget {
             leading: Icon(_nodeIcon(neighborhood.focusedNode.node.type)),
             title: Text(neighborhood.focusedNode.node.title),
             subtitle: Text(
-              _countLabel(neighborhood.totalConnectionCount, 'connection'),
+              '${neighborhood.focusedNode.node.type.label} • ${neighborhood.focusedNode.node.status.label} • ${neighborhood.focusedNode.node.priority.label} • ${_countLabel(neighborhood.totalConnectionCount, 'connection')}',
             ),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ActionChip(
+                avatar: const Icon(Icons.calendar_month_outlined, size: 16),
+                label: const Text('Open day'),
+                onPressed: () => goToDay(
+                  context,
+                  neighborhood.focusedNode.node.day,
+                  highlightNodeId: neighborhood.focusedNode.id,
+                ),
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.open_in_new_outlined, size: 16),
+                label: const Text('Open node'),
+                onPressed: () => context.go(
+                  '/calendar/${dayKey(neighborhood.focusedNode.node.day)}/node/${neighborhood.focusedNode.id}',
+                ),
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.insights_outlined, size: 16),
+                label: const Text('Insights'),
+                onPressed: () => context.go('/insights'),
+              ),
+              if (neighborhood.focusedNode.node.project.isNotEmpty)
+                ActionChip(
+                  avatar: const Icon(Icons.workspaces_outline, size: 16),
+                  label: const Text('Workspace'),
+                  onPressed: () => context.go(
+                    '/workspaces/project/${Uri.encodeComponent(neighborhood.focusedNode.node.project)}',
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           _GraphNeighborhoodGroup(
@@ -694,10 +1900,16 @@ class _GraphHubTile extends StatelessWidget {
 }
 
 class _GraphEdgeTile extends StatelessWidget {
-  const _GraphEdgeTile({required this.graph, required this.edge});
+  const _GraphEdgeTile({
+    required this.graph,
+    required this.edge,
+    required this.onRelationLabelEdited,
+  });
 
   final NodeGraph graph;
   final NodeGraphEdge edge;
+  final Future<void> Function(MindmapNode source, String targetId, String label)
+  onRelationLabelEdited;
 
   @override
   Widget build(BuildContext context) {
@@ -705,6 +1917,7 @@ class _GraphEdgeTile extends StatelessWidget {
     final target = graph.nodeFor(edge.targetId)?.node;
     final theme = Theme.of(context);
     if (source == null || target == null) return const SizedBox.shrink();
+    final label = _relationLabelFor(source, target.id);
 
     return ListTile(
       key: ValueKey('graph-edge-${edge.sourceId}-${edge.targetId}'),
@@ -719,12 +1932,71 @@ class _GraphEdgeTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text('${dayKey(source.day)} -> ${dayKey(target.day)}'),
-      trailing: edge.isCrossDay
-          ? const Chip(label: Text('Cross-day'))
-          : const Chip(label: Text('Same day')),
+      subtitle: Text(
+        '$label · ${dayKey(source.day)} -> ${dayKey(target.day)}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Edit relation label',
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            onPressed: () => _editLabel(context, source, target.id, label),
+          ),
+          edge.isCrossDay
+              ? const Chip(label: Text('Cross-day'))
+              : const Chip(label: Text('Same day')),
+        ],
+      ),
       onTap: () => goToDay(context, target.day, highlightNodeId: target.id),
     );
+  }
+
+  Future<void> _editLabel(
+    BuildContext context,
+    MindmapNode source,
+    String targetId,
+    String currentLabel,
+  ) async {
+    final controller = TextEditingController(text: currentLabel);
+    final label = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit relation label'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Label'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (label == null || label.isEmpty) return;
+    await onRelationLabelEdited(source, targetId, label);
+  }
+
+  String _relationLabelFor(MindmapNode source, String targetId) {
+    final rawRelations = source.data['relations'];
+    if (rawRelations is! List<Object?>) return 'relates to';
+    for (final item in rawRelations) {
+      if (item is! Map<Object?, Object?>) continue;
+      if (item['targetId'] != targetId) continue;
+      final label = item['label'];
+      if (label is String && label.trim().isNotEmpty) return label.trim();
+    }
+    return 'relates to';
   }
 }
 
@@ -822,6 +2094,22 @@ List<String> _availableTags(List<MindmapNode> nodes) {
   return tags.toList()..sort();
 }
 
+List<String> _availableRelationLabels(List<MindmapNode> nodes) {
+  final labels = <String>{};
+  for (final node in nodes) {
+    final rawRelations = node.data['relations'];
+    if (rawRelations is! List<Object?>) continue;
+    for (final item in rawRelations) {
+      if (item is! Map<Object?, Object?>) continue;
+      final label = item['label'];
+      if (label is String && label.trim().isNotEmpty) {
+        labels.add(label.trim());
+      }
+    }
+  }
+  return labels.toList()..sort();
+}
+
 IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.task => Icons.check_circle_outline,
   NodeType.kanban => Icons.view_kanban_outlined,
@@ -832,6 +2120,7 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.goal => Icons.flag_outlined,
   NodeType.link => Icons.link_outlined,
   NodeType.empty => Icons.crop_square_outlined,
+  _ => Icons.radio_button_unchecked,
 };
 
 String _countLabel(int count, String singular) {
@@ -852,12 +2141,14 @@ class VisualGraphView extends StatefulWidget {
     required this.nodes,
     required this.edges,
     required this.onNodeTapped,
+    this.initialSelectedNodeId,
     super.key,
   });
 
   final List<NodeGraphNode> nodes;
   final List<NodeGraphEdge> edges;
   final ValueChanged<NodeGraphNode> onNodeTapped;
+  final String? initialSelectedNodeId;
 
   @override
   State<VisualGraphView> createState() => _VisualGraphViewState();
@@ -868,10 +2159,13 @@ class _VisualGraphViewState extends State<VisualGraphView> {
   final TransformationController _transformationController =
       TransformationController();
   String? _hoveredNodeId;
+  String? _selectedNodeId;
+  bool _showControls = false;
 
   @override
   void initState() {
     super.initState();
+    _selectedNodeId = widget.initialSelectedNodeId;
     _computeLayout();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _centerGraph();
@@ -990,6 +2284,9 @@ class _VisualGraphViewState extends State<VisualGraphView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final selectedNode = _selectedNodeId == null
+        ? null
+        : widget.nodes.where((node) => node.id == _selectedNodeId).firstOrNull;
 
     return Container(
       decoration: BoxDecoration(
@@ -1025,7 +2322,7 @@ class _VisualGraphViewState extends State<VisualGraphView> {
                     for (final node in widget.nodes) {
                       final pos = _positions[node.id]!;
                       if ((sceneOffset - pos).distance <= 28.0) {
-                        widget.onNodeTapped(node);
+                        setState(() => _selectedNodeId = node.id);
                         break;
                       }
                     }
@@ -1067,27 +2364,133 @@ class _VisualGraphViewState extends State<VisualGraphView> {
               ),
             ),
           ),
+          if (selectedNode != null)
+            Positioned(
+              left: 12,
+              bottom: 12,
+              child: _GraphNodeDetailDrawer(
+                node: selectedNode,
+                onClose: () => setState(() => _selectedNodeId = null),
+                onOpen: () => widget.onNodeTapped(selectedNode),
+              ),
+            ),
           Positioned(
             top: 12,
             right: 12,
-            child: Card(
-              color: theme.colorScheme.surface.withValues(alpha: 0.8),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 14),
-                    SizedBox(width: 6),
-                    Text(
-                      'Drag to pan, pinch to zoom, tap node to open',
-                      style: TextStyle(fontSize: 10),
+            child: _showControls
+                ? Card(
+                    color: theme.colorScheme.surface.withValues(alpha: 0.86),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.info_outline, size: 14),
+                          const SizedBox(width: 6),
+                          const Text(
+                            'Drag to pan, pinch to zoom, tap node for details',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                          IconButton(
+                            tooltip: 'Zoom in',
+                            icon: const Icon(Icons.add, size: 16),
+                            onPressed: () {},
+                          ),
+                          IconButton(
+                            tooltip: 'Hide graph controls',
+                            icon: const Icon(Icons.close, size: 16),
+                            onPressed: () =>
+                                setState(() => _showControls = false),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  )
+                : IconButton.filledTonal(
+                    tooltip: 'Show graph controls',
+                    icon: const Icon(Icons.tune, size: 18),
+                    onPressed: () => setState(() => _showControls = true),
+                  ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GraphNodeDetailDrawer extends StatelessWidget {
+  const _GraphNodeDetailDrawer({
+    required this.node,
+    required this.onClose,
+    required this.onOpen,
+  });
+
+  final NodeGraphNode node;
+  final VoidCallback onClose;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      key: const ValueKey('graph-node-detail-drawer'),
+      width: 280,
+      child: Card(
+        color: theme.colorScheme.surface.withValues(alpha: 0.92),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(_nodeIcon(node.node.type), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      node.node.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close node details',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: onClose,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  Chip(label: Text(node.node.type.label)),
+                  Chip(label: Text(node.node.status.label)),
+                  if (node.node.project.isNotEmpty)
+                    Chip(label: Text('Project ${node.node.project}')),
+                  if (node.totalDegree > 0)
+                    Chip(label: Text(_countLabel(node.totalDegree, 'link'))),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  key: const ValueKey('graph-node-detail-open-day'),
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.open_in_new, size: 16),
+                  label: const Text('Open day'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

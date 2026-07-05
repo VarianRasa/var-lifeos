@@ -124,6 +124,50 @@ void main() {
     expect(find.text('Agenda task'), findsOneWidget);
   });
 
+  testWidgets('CalendarPage today cell keeps the Today badge readable', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 7, 5);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+
+    final dayNumber = tester.widget<Text>(
+      find.byKey(const ValueKey('calendar-day-number-2026-07-05')),
+    );
+
+    expect(
+      dayNumber.style?.color,
+      Theme.of(tester.element(find.byType(CalendarPage))).colorScheme.primary,
+    );
+  });
+
+  testWidgets('CalendarPage advanced filters dialog uses roomy sections', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 7, 5);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('calendar-advanced-filter-fields')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-advanced-filter-toggles')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-advanced-filter-footer')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('CalendarPage agenda can move node to another date', (
     tester,
   ) async {
@@ -521,6 +565,7 @@ void main() {
       containsPair('snoozedTo', '2026-06-25'),
     );
     expect(find.text('Snoozed routine'), findsWidgets);
+    expect(find.text('Snoozed to Jun 25, 2026'), findsWidgets);
     expect(find.text('Snoozed 4 routines to Jun 25, 2026'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('calendar-routine-apply-banner')),
@@ -585,6 +630,25 @@ void main() {
           now: DateTime(2026, 6, 19, 10),
         ),
         MindmapNode.create(
+          id: 'done-node',
+          type: NodeType.task,
+          title: 'Done by status',
+          day: today,
+          status: NodeStatus.done,
+          now: DateTime(2026, 6, 19, 10),
+        ),
+        MindmapNode.create(
+          id: 'routine-node',
+          type: NodeType.task,
+          title: 'Applied routine',
+          day: today,
+          tags: const ['routine'],
+          data: const {
+            'automation': {'routineId': 'daily-plan'},
+          },
+          now: DateTime(2026, 6, 19, 11),
+        ),
+        MindmapNode.create(
           id: 'routine-marker',
           type: NodeType.note,
           title: 'Skipped Daily plan',
@@ -593,7 +657,7 @@ void main() {
           data: const {
             'automation': {'state': 'skipped'},
           },
-          now: DateTime(2026, 6, 19, 11),
+          now: DateTime(2026, 6, 19, 12),
         ),
       ],
     );
@@ -614,8 +678,23 @@ void main() {
     expect(find.text('Agenda task'), findsOneWidget);
     expect(find.text('Launch event'), findsOneWidget);
     expect(find.text('Drink water'), findsOneWidget);
-    expect(find.text('Skipped Daily plan'), findsOneWidget);
+    expect(find.text('Done by status'), findsOneWidget);
 
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-event')));
+    await tester.pumpAndSettle();
+    expect(find.text('Launch event'), findsOneWidget);
+    expect(find.text('Agenda task'), findsNothing);
+    expect(find.text('Drink water'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-all')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-done')));
+    await tester.pumpAndSettle();
+    expect(find.text('Done by status'), findsOneWidget);
+    expect(find.text('Launch event'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-all')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('agenda-filter-events')));
     await tester.pumpAndSettle();
     expect(find.text('Launch event'), findsOneWidget);
@@ -629,6 +708,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
     await tester.pumpAndSettle();
+    expect(find.text('Applied routine'), findsOneWidget);
     expect(find.text('Skipped Daily plan'), findsOneWidget);
     expect(find.text('Skipped routine'), findsOneWidget);
     expect(find.text('Drink water'), findsNothing);
@@ -690,6 +770,77 @@ void main() {
     expect(find.text('Launch event'), findsOneWidget);
     expect(find.text('Agenda task'), findsOneWidget);
     expect(find.text('No matching agenda items'), findsNothing);
+  });
+
+  testWidgets('CalendarPage keyboard shortcuts ignore text entry focus', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        _taskNode(id: 'agenda-task', title: 'Agenda task', day: today),
+      ],
+    );
+    final container = ProviderContainer(
+      overrides: [
+        mindmapRepositoryProvider.overrideWithValue(repository),
+        currentDateProvider.overrideWithValue(today),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await _pumpCalendar(
+      tester,
+      repository: repository,
+      today: today,
+      container: container,
+    );
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    final searchEditable = find.descendant(
+      of: find.byKey(const ValueKey('calendar-search-field')),
+      matching: find.byType(EditableText),
+    );
+    await tester.tap(searchEditable);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyM);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.pumpAndSettle();
+
+    expect(container.read(calendarViewModeProvider), CalendarViewMode.agenda);
+    expect(container.read(agendaFilterProvider), AgendaFilter.all);
+    expect(find.byKey(const ValueKey('calendar-agenda-list')), findsOneWidget);
+  });
+
+  testWidgets('CalendarPage quick capture creates parsed node', (tester) async {
+    _setLargeCalendarSurface(tester);
+
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Week'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Quick add (Ctrl+N)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('calendar-quick-capture-input')),
+      'task Pay bills p:high #home',
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-quick-capture-submit')),
+    );
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    expect(nodes, hasLength(1));
+    expect(nodes.single.title, 'Pay bills');
+    expect(nodes.single.type, NodeType.task);
+    expect(nodes.single.priority, NodePriority.high);
+    expect(nodes.single.tags, contains('home'));
   });
 
   testWidgets('CalendarPage shows mobile week strip on narrow screens', (
@@ -760,6 +911,172 @@ void main() {
 
     expect(find.text('Agenda task'), findsOneWidget);
     expect(find.text('No event items'), findsNothing);
+    expect(find.text('Reset filters'), findsNothing);
+  });
+
+  testWidgets('CalendarPage agenda reset clears all active filters', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'note-node',
+          type: NodeType.note,
+          title: 'Hidden note',
+          day: today,
+          now: DateTime(2026, 6, 19, 8),
+        ),
+      ],
+    );
+    final container = ProviderContainer(
+      overrides: [
+        mindmapRepositoryProvider.overrideWithValue(repository),
+        currentDateProvider.overrideWithValue(today),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await _pumpCalendar(
+      tester,
+      repository: repository,
+      today: today,
+      container: container,
+    );
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    await container
+        .read(agendaFilterProvider.notifier)
+        .setFilter(AgendaFilter.tasks);
+    container.read(calendarTypeFiltersProvider.notifier).state = {
+      NodeType.task,
+    };
+    container.read(calendarDoneFilterProvider.notifier).state = true;
+    container.read(calendarSearchQueryProvider.notifier).state = 'missing';
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-agenda-empty')), findsOneWidget);
+    expect(find.text('Reset filters'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-empty-show-all')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(container.read(agendaFilterProvider), AgendaFilter.all);
+    expect(container.read(calendarTypeFiltersProvider), isEmpty);
+    expect(container.read(calendarDoneFilterProvider), isFalse);
+    expect(container.read(calendarSearchQueryProvider), isEmpty);
+    expect(find.text('Hidden note'), findsOneWidget);
+  });
+
+  testWidgets('CalendarPage agenda counts follow focused day and filters', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'visible-task',
+          type: NodeType.task,
+          title: 'Visible task',
+          day: today,
+          now: DateTime(2026, 6, 19, 8),
+        ),
+        MindmapNode.create(
+          id: 'out-of-window',
+          type: NodeType.task,
+          title: 'Out of window',
+          day: today.add(const Duration(days: 30)),
+          now: DateTime(2026, 6, 19, 9),
+        ),
+        MindmapNode.create(
+          id: 'visible-event',
+          type: NodeType.note,
+          title: 'Visible event',
+          day: today.add(const Duration(days: 29)),
+          data: const {'calendar_kind': 'event'},
+          now: DateTime(2026, 6, 19, 10),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agenda-filter-all')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agenda-filter-tasks')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agenda-filter-events')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Out of window'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-filter-event')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agenda-filter-all')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('agenda-filter-tasks')),
+        matching: find.text('1'),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('CalendarPage filter chips expose semantic state', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'task-node',
+          type: NodeType.task,
+          title: 'Agenda task',
+          day: today,
+          now: DateTime(2026, 6, 19, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+
+    expect(find.bySemanticsLabel('Calendar filter: All'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-tasks')));
+    await tester.pumpAndSettle();
+    expect(
+      find.bySemanticsLabel('Agenda filter: Tasks, 1 item'),
+      findsOneWidget,
+    );
+    semantics.dispose();
   });
 
   testWidgets('CalendarPage agenda empty CTA opens focused day', (
@@ -1374,6 +1691,7 @@ void main() {
 
     expect(find.text('Snoozed Daily plan'), findsOneWidget);
     expect(find.text('Snoozed routine'), findsOneWidget);
+    expect(find.text('Snoozed to Jun 30, 2026'), findsOneWidget);
 
     // Open marker actions menu and tap Resnooze
     await tester.tap(
@@ -1397,7 +1715,63 @@ void main() {
     final marker = nodes.firstWhere((n) => n.id == 'snooze-marker-1');
     final updatedSnoozedTo =
         (marker.data['automation'] as Map)['snoozedTo'] as String;
-    expect(updatedSnoozedTo, isNot('2026-06-30'));
+    expect(updatedSnoozedTo, '2026-06-29');
+    expect(find.text('Snoozed to Jun 29, 2026'), findsOneWidget);
+  });
+
+  testWidgets('CalendarPage resnooze handles invalid stored target', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'bad-snooze-marker',
+          type: NodeType.note,
+          title: 'Snoozed Daily plan',
+          day: today,
+          isArchived: true,
+          tags: const ['routine', 'automation-snooze'],
+          data: {
+            'automation': {
+              'routineId': 'daily-plan',
+              'templateId': 'daily-plan',
+              'recurrence': 'daily',
+              'state': 'snoozed',
+              'snoozedTo': 'not-a-date',
+            },
+          },
+          now: DateTime(today.year, today.month, today.day, 8),
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('agenda-filter-routines')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        const ValueKey('calendar-routine-marker-actions-bad-snooze-marker'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resnooze'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+
+    await tester.tap(find.text('24').last);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    final marker = await repository.getNode('bad-snooze-marker');
+    final updatedSnoozedTo =
+        (marker!.data['automation'] as Map)['snoozedTo'] as String;
+    expect(updatedSnoozedTo, '2026-06-24');
+    expect(find.text('Snoozed to Jun 24, 2026'), findsOneWidget);
   });
 
   testWidgets('CalendarPage applies routine from skipped marker actions menu', (
@@ -1497,6 +1871,22 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-add-node')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-more-actions')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-open-day')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-template')),
+      findsNothing,
+    );
     expect(find.text('day=2026-06-19'), findsNothing);
   });
 
@@ -1533,6 +1923,10 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-more-actions')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('calendar-day-preview-open-day')),
@@ -1592,6 +1986,24 @@ void main() {
     );
     expect(find.text('2 nodes'), findsWidgets);
     expect(find.text('1 high'), findsWidgets);
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-minimap-toggle')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-minimap-body')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-day-preview-minimap-toggle')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('calendar-day-preview-minimap-body')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('CalendarPage preview close hides panel', (tester) async {
@@ -1644,7 +2056,10 @@ void main() {
     await tester.enterText(searchEditable, 'missing');
     await tester.pumpAndSettle();
 
-    expect(find.text('Clear search to see all nodes for this day.'), findsOneWidget);
+    expect(
+      find.text('Clear search to see all nodes for this day.'),
+      findsOneWidget,
+    );
     expect(find.text('Preview search task'), findsNothing);
 
     await tester.tap(

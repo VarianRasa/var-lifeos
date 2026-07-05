@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../shared/widgets/doodle_border.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
 import '../domain/kanban_board.dart';
 import '../domain/mindmap_node.dart';
@@ -158,6 +159,23 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
       'A milestone-based target to track overall progress and achievement.',
     NodeType.link =>
       'A shortcut node containing an external URL and back-references.',
+    NodeType.event =>
+      'A calendar-aware event with agenda, location, and reminders.',
+    NodeType.decision =>
+      'A decision log with options, chosen path, and rationale.',
+    NodeType.resource =>
+      'A reusable reference, asset, reading, or external material.',
+    NodeType.idea =>
+      'A lightweight spark for concepts, experiments, and incubation.',
+    NodeType.question =>
+      'An open question with context, possible answers, and follow-up.',
+    NodeType.contact =>
+      'A person or organization with role, channel, and relationship notes.',
+    NodeType.metric => 'A measurable value, KPI, health signal, or trend.',
+    NodeType.expense => 'A spending, cost, purchase, or budget note.',
+    NodeType.bookmark => 'A saved URL, reference, or external destination.',
+    NodeType.routine =>
+      'A repeatable workflow, ritual, or operating checklist.',
     NodeType.empty => 'A basic spacer/empty node.',
   };
 
@@ -246,28 +264,20 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _choiceSection(context, 'Type', [
-                for (final type in NodeType.values)
-                  ChoiceChip(
-                    key: ValueKey('${widget.keyPrefix}-type-${type.name}'),
-                    label: Text(type.label),
-                    selected: _type == type,
-                    onSelected: (_) {
-                      setState(() {
-                        _type = type;
-                        _selectedTemplateId = null;
-                      });
-                    },
-                  ),
+                for (final type in _primaryNodeTypes) _typeChoiceChip(type),
               ], wrap: true),
               const SizedBox(height: 10),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
+                decoration: ShapeDecoration(
                   color: nodeColor(_type).withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: nodeColor(_type).withValues(alpha: 0.3),
+                  shape: DoodleShapeBorder(
+                    side: BorderSide(
+                      color: nodeColor(_type).withValues(alpha: 0.3),
+                    ),
+                    radius: 10,
+                    wobble: 1.4,
                   ),
                 ),
                 child: Row(
@@ -299,6 +309,10 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                       onSelected: (_) => _applyTemplate(template),
                     ),
                 ], wrap: true),
+                const SizedBox(height: 10),
+                _choiceSection(context, 'More Types', [
+                  for (final type in _advancedNodeTypes) _typeChoiceChip(type),
+                ]),
               ],
               const SizedBox(height: 24),
               Text('Basics', style: Theme.of(context).textTheme.titleSmall),
@@ -310,7 +324,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Title',
                   errorText: _titleError,
                   prefixIcon: const Icon(Icons.title),
-                  border: const OutlineInputBorder(),
+                  border: const DoodleInputBorder(),
                 ),
                 textInputAction: TextInputAction.next,
                 onChanged: (_) {
@@ -326,7 +340,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Body',
                   prefixIcon: Icon(Icons.notes),
-                  border: OutlineInputBorder(),
+                  border: DoodleInputBorder(),
                   alignLabelWithHint: true,
                 ),
                 minLines: 2,
@@ -367,7 +381,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         labelText: 'Project',
                         hintText: 'Launch App',
                         prefixIcon: Icon(Icons.folder_outlined),
-                        border: OutlineInputBorder(),
+                        border: DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                     ),
@@ -381,7 +395,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         labelText: 'Area',
                         hintText: 'Health, Finance',
                         prefixIcon: Icon(Icons.category_outlined),
-                        border: OutlineInputBorder(),
+                        border: DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                     ),
@@ -396,7 +410,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Tags',
                   hintText: 'work, launch',
                   prefixIcon: Icon(Icons.tag),
-                  border: OutlineInputBorder(),
+                  border: DoodleInputBorder(),
                 ),
                 textInputAction: TextInputAction.next,
               ),
@@ -414,7 +428,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         hintText: 'YYYY-MM-DD',
                         errorText: _dueDateError,
                         prefixIcon: const Icon(Icons.calendar_today),
-                        border: const OutlineInputBorder(),
+                        border: const DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                       onChanged: (_) {
@@ -434,7 +448,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         hintText: '0-100',
                         errorText: _progressError,
                         prefixIcon: const Icon(Icons.percent),
-                        border: const OutlineInputBorder(),
+                        border: const DoodleInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
                       textInputAction: TextInputAction.next,
@@ -478,7 +492,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Related node IDs',
                   hintText: 'node-a, node-b',
                   prefixIcon: Icon(Icons.link),
-                  border: OutlineInputBorder(),
+                  border: DoodleInputBorder(),
                 ),
                 minLines: 1,
                 maxLines: 2,
@@ -542,7 +556,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
   void _loadTypeSpecificData(Map<String, Object?> data) {
     _kanbanCardsController.text = KanbanBoard.fromNodeData(
       data,
-    ).cards.map((card) => card.title).join('\n');
+    ).cards.map((card) => '${card.column.name}: ${card.title}').join('\n');
     final habitData = _sectionData(data, 'habit');
     _habitRecurrence = habitData['recurrence'] as String? ?? 'daily';
     _habitTargetController.text = habitData['target'] as String? ?? '';
@@ -591,6 +605,45 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
     _calSelectedOptionController.text = payload?.selectedOption ?? '';
     _calReasonController.text = payload?.reason ?? '';
     _calRemindAtController.text = payload?.remindAt ?? '';
+  }
+
+  static const List<NodeType> _primaryNodeTypes = [
+    NodeType.task,
+    NodeType.kanban,
+    NodeType.plan,
+    NodeType.note,
+    NodeType.journal,
+    NodeType.habit,
+    NodeType.goal,
+    NodeType.link,
+    NodeType.event,
+    NodeType.decision,
+    NodeType.resource,
+    NodeType.idea,
+    NodeType.empty,
+  ];
+
+  static const List<NodeType> _advancedNodeTypes = [
+    NodeType.question,
+    NodeType.contact,
+    NodeType.metric,
+    NodeType.expense,
+    NodeType.bookmark,
+    NodeType.routine,
+  ];
+
+  ChoiceChip _typeChoiceChip(NodeType type) {
+    return ChoiceChip(
+      key: ValueKey('${widget.keyPrefix}-type-${type.name}'),
+      label: Text(type.label),
+      selected: _type == type,
+      onSelected: (_) {
+        setState(() {
+          _type = type;
+          _selectedTemplateId = null;
+        });
+      },
+    );
   }
 
   Widget _choiceSection(
@@ -664,9 +717,12 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
   Widget _typeSpecificSection(BuildContext context) {
     final theme = Theme.of(context);
     return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 8,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -679,12 +735,24 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
             minLines: 2,
             maxLines: 4,
           ),
-          NodeType.kanban => TextField(
-            key: ValueKey('${widget.keyPrefix}-kanban-cards-field'),
-            controller: _kanbanCardsController,
-            decoration: const InputDecoration(labelText: 'Cards'),
-            minLines: 3,
-            maxLines: 5,
+          NodeType.kanban => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _KanbanInputSummary(text: _kanbanCardsController.text),
+              const SizedBox(height: 8),
+              TextField(
+                key: ValueKey('${widget.keyPrefix}-kanban-cards-field'),
+                controller: _kanbanCardsController,
+                decoration: const InputDecoration(
+                  labelText: 'Cards',
+                  hintText: 'todo: Scope\ndoing: Build\ndone: Review',
+                  helperText: 'Use todo:/doing:/done: prefixes.',
+                ),
+                minLines: 3,
+                maxLines: 5,
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
           ),
           NodeType.habit => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -837,6 +905,40 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
             controller: _noteSourceController,
             decoration: const InputDecoration(labelText: 'URL'),
           ),
+          NodeType.event => const Text(
+            'Use Calendar payload fields below for agenda, location, participants, and reminder.',
+          ),
+          NodeType.decision => const Text(
+            'Use Calendar payload fields below for options, selected option, and rationale.',
+          ),
+          NodeType.resource => TextField(
+            key: ValueKey('${widget.keyPrefix}-resource-source-field'),
+            controller: _noteSourceController,
+            decoration: const InputDecoration(labelText: 'Source / URL'),
+          ),
+          NodeType.idea => const Text(
+            'Capture the spark in the description, then connect it to plans, goals, or resources.',
+          ),
+          NodeType.question => const Text(
+            'Capture the question, context, possible answers, and next follow-up.',
+          ),
+          NodeType.contact => const Text(
+            'Use the description for name, role, channel, and relationship notes.',
+          ),
+          NodeType.metric => const Text(
+            'Use the description for value, unit, cadence, and trend notes.',
+          ),
+          NodeType.expense => const Text(
+            'Use the description for amount, category, date, and budget notes.',
+          ),
+          NodeType.bookmark => TextField(
+            key: ValueKey('${widget.keyPrefix}-bookmark-url-field'),
+            controller: _noteSourceController,
+            decoration: const InputDecoration(labelText: 'URL'),
+          ),
+          NodeType.routine => const Text(
+            'Use the description for trigger, steps, cadence, and checklist.',
+          ),
         },
       ),
     );
@@ -845,9 +947,12 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
   Widget _calendarPayloadSection(BuildContext context) {
     final payloadKind = _calendarKind ?? CalendarNodeKind.event;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: Theme.of(context).dividerColor),
+          radius: 8,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -1099,6 +1204,20 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
       NodeType.link => {
         'link': {'url': _noteSourceController.text.trim()},
       },
+      NodeType.event => const <String, Object?>{},
+      NodeType.decision => const <String, Object?>{},
+      NodeType.resource => {
+        'note': {'source': _noteSourceController.text.trim()},
+      },
+      NodeType.idea => const <String, Object?>{},
+      NodeType.question => const <String, Object?>{},
+      NodeType.contact => const <String, Object?>{},
+      NodeType.metric => const <String, Object?>{},
+      NodeType.expense => const <String, Object?>{},
+      NodeType.bookmark => {
+        'link': {'url': _noteSourceController.text.trim()},
+      },
+      NodeType.routine => const <String, Object?>{},
       NodeType.empty => const <String, Object?>{},
     };
     return {...data, ..._parseCalendarPayloadData()};
@@ -1130,20 +1249,75 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
       ).cards)
         card.title.trim().toLowerCase(): card,
     };
-    final lines = _parseLines(_kanbanCardsController.text);
+    final cards = <KanbanCard>[];
+    var index = 0;
+    for (final rawLine in _kanbanCardsController.text.split('\n')) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      final separator = line.indexOf(':');
+      final prefix = separator > 0 ? line.substring(0, separator).trim() : '';
+      final title = separator > 0 ? line.substring(separator + 1).trim() : line;
+      if (title.isEmpty) continue;
+      final column = KanbanColumn.fromName(prefix);
+      cards.add(
+        existingByTitle[title.toLowerCase()]?.copyWith(
+              title: title,
+              column: column,
+            ) ??
+            KanbanCard(id: 'card-${++index}', title: title, column: column),
+      );
+    }
 
-    return {
-      'kanban': KanbanBoard(
-        cards: [
-          for (var index = 0; index < lines.length; index++)
-            existingByTitle[lines[index].toLowerCase()]?.copyWith(
-                  title: lines[index],
-                ) ??
-                KanbanCard(id: 'card-${index + 1}', title: lines[index]),
-        ],
-      ).toJson(),
-    };
+    return {'kanban': KanbanBoard(cards: cards).toJson()};
   }
+}
+
+class _KanbanInputSummary extends StatelessWidget {
+  const _KanbanInputSummary({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = _kanbanInputCounts(text);
+    final todo = counts[KanbanColumn.todo] ?? 0;
+    final doing = counts[KanbanColumn.doing] ?? 0;
+    final done = counts[KanbanColumn.done] ?? 0;
+    final total = todo + doing + done;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: [
+        Chip(
+          avatar: const Icon(Icons.view_kanban_outlined, size: 16),
+          label: Text('Cards $total'),
+          visualDensity: VisualDensity.compact,
+        ),
+        Chip(label: Text('Todo $todo'), visualDensity: VisualDensity.compact),
+        Chip(label: Text('Doing $doing'), visualDensity: VisualDensity.compact),
+        Chip(label: Text('Done $done'), visualDensity: VisualDensity.compact),
+      ],
+    );
+  }
+}
+
+Map<KanbanColumn, int> _kanbanInputCounts(String text) {
+  final counts = <KanbanColumn, int>{
+    KanbanColumn.todo: 0,
+    KanbanColumn.doing: 0,
+    KanbanColumn.done: 0,
+  };
+  for (final rawLine in text.split('\n')) {
+    final line = rawLine.trim();
+    if (line.isEmpty) continue;
+    final separator = line.indexOf(':');
+    final prefix = separator > 0 ? line.substring(0, separator).trim() : '';
+    final title = separator > 0 ? line.substring(separator + 1).trim() : line;
+    if (title.isEmpty) continue;
+    final column = KanbanColumn.fromName(prefix);
+    counts[column] = (counts[column] ?? 0) + 1;
+  }
+  return counts;
 }
 
 Map<String, Object?> _sectionData(Map<String, Object?> data, String key) {

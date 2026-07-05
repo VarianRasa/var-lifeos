@@ -52,6 +52,7 @@ void main() {
     expect(data['source'], 'test');
     expect(data['calendar_kind'], 'meeting');
     expect(data['agenda'], 'Launch');
-    expect(data['time_block'], {'startTime': '10:00', 'endTime': '11:00'});
+    expect(data['time_block'], containsPair('startTime', '10:00'));
+    expect(data['time_block'], containsPair('endTime', '11:00'));
   });
 }

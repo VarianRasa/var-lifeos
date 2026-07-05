@@ -166,7 +166,7 @@ final class SyncRestorePoint {
       id: json['id'] as String? ?? '',
       label: json['label'] as String? ?? '',
       createdAt: createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-      document: rawDocument is Map
+      document: rawDocument is Map<Object?, Object?>
           ? MindmapBackupDocument.fromJson(rawDocument.cast<String, Object?>())
           : throw const FormatException('Restore point document is invalid.'),
     );

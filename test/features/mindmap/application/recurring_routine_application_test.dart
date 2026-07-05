@@ -136,9 +136,28 @@ void main() {
     },
   );
 
+  test('snoozeRecurringRoutines rejects same-day targets', () async {
+    final day = DateTime(2026, 6, 22);
+    final repository = InMemoryMindmapRepository();
+    final dailyPlan = defaultRecurringRoutines.singleWhere(
+      (routine) => routine.id == 'daily-plan',
+    );
+
+    final snoozed = await snoozeRecurringRoutines(
+      repository: repository,
+      day: day,
+      targetDay: DateTime(2026, 6, 22, 18),
+      routines: [dailyPlan],
+      now: DateTime(2026, 6, 22, 9),
+    );
+
+    expect(snoozed, isEmpty);
+    expect(await repository.listNodes(day: day), isEmpty);
+  });
+
   test('snoozeRecurringRoutines moves a routine to the target day', () async {
     final monday = DateTime(2026, 6, 22);
-    final tuesday = DateTime(2026, 6, 23);
+    final tuesday = DateTime(2026, 6, 23, 15);
     final repository = InMemoryMindmapRepository();
     final weeklyReview = defaultRecurringRoutines.singleWhere(
       (routine) => routine.id == 'weekly-review',

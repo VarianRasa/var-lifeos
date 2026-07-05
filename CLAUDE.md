@@ -20,8 +20,14 @@ flutter pub get
 # Run app
 flutter run
 flutter run -d chrome
+flutter run -d chrome --dart-define=VAR_DEMO_SEED=false
+flutter run -d chrome --dart-define=VAR_DEMO_SEED=true
 
-# Analyze/lint
+# Optional HTTP sync endpoint
+flutter run --dart-define=VAR_SYNC_ENDPOINT=https://sync.example.test
+
+# Format + analyze/lint
+dart format --set-exit-if-changed .
 flutter analyze
 
 # Test
@@ -31,6 +37,7 @@ flutter test --name "goalMilestones returns trimmed milestones"
 
 # Build common targets
 flutter build web
+flutter build web --release --dart-define=VAR_DEMO_SEED=false
 flutter build apk
 flutter build windows
 
@@ -43,7 +50,12 @@ flutter pub outdated
 flutter pub upgrade --major-versions
 ```
 
-For sync against an HTTP backend, pass `VAR_SYNC_ENDPOINT` at runtime/build time, e.g. `flutter run --dart-define=VAR_SYNC_ENDPOINT=https://...`. Without it, sync adapters use local/in-memory fallbacks.
+Runtime flags are parsed in `lib/core/config/runtime_config.dart`:
+
+- `VAR_SYNC_ENDPOINT`: enables HTTP sync adapters; without it, sync uses local/in-memory fallbacks.
+- `VAR_DEMO_SEED`: accepts `1`, `true`, `yes`, or `on`; without it, fresh local DBs start without demo seed nodes.
+
+Before sharing a beta build, follow `docs/release/beta_release_checklist.md`. Its automated preflight is `flutter pub get`, `dart format --set-exit-if-changed .`, `flutter analyze`, `flutter test`, and `flutter build web --release --dart-define=VAR_DEMO_SEED=false`.
 
 ## Architecture
 
@@ -51,14 +63,14 @@ For sync against an HTTP backend, pass `VAR_SYNC_ENDPOINT` at runtime/build time
 
 - Entry point: `lib/main.dart` initializes Flutter, then wraps `VarApp` in `ProviderScope`.
 - `lib/app.dart` builds `MaterialApp.router`, watches theme providers, and wires `appRouterProvider`.
-- `lib/core/router/app_router.dart` owns `go_router` config. Routes are flat and URL-friendly (`/calendar`, `/calendar/:date`, `/calendar/:date/node/:nodeId`, `/insights`, `/graph`, `/workspaces`, `/settings`).
+- `lib/core/router/app_router.dart` owns `go_router` config. Routes are flat and URL-friendly: `/calendar`, `/calendar/:date`, `/calendar/:date/node/:nodeId`, `/insights`, `/graph`, `/workspaces`, `/workspaces/:type/:name`, `/settings`. Day routes support `?highlight=<nodeId>`.
 - `lib/shared/layout/adaptive_scaffold.dart` wraps top-level routes. Desktop (>= 840px) uses floating nav + command/focus buttons; mobile uses bottom nav. Global shortcuts include `Ctrl+K` command palette and `Ctrl+T` today.
 
 ### Feature-first layout
 
 ```text
 lib/
-├── core/        # constants, router, theme, date utilities
+├── core/        # constants, runtime config, router, theme, date utilities
 ├── features/    # calendar, command, graph, insights, mindmap, settings, sync, workspace
 ├── shared/      # reusable layout/widgets
 ├── app.dart
@@ -86,7 +98,7 @@ Feature modules follow layered boundaries where practical:
 - `mindmapNodeDatabaseProvider` wraps Sembast access.
 - `mindmapRepositoryProvider` exposes `MindmapRepository`, currently backed by `LocalDatabaseMindmapRepository`.
 - `SharedPreferencesMindmapNodeStore` is legacy storage used during local DB initialization/migration.
-- Seed data comes from `buildSeedMindmapNodes()`.
+- Seed data comes from `buildSeedMindmapNodes()` only when `VAR_DEMO_SEED` is enabled.
 
 ### Riverpod state graph
 
@@ -94,7 +106,7 @@ Feature modules follow layered boundaries where practical:
 
 - `nodesForDayProvider(day)` and `allMindmapNodesProvider` read repository data.
 - Derived providers compute day summaries, smart views, life OS summary, insights, automation suggestions, workspace contexts, relations, and graph.
-- After any node mutation, call `invalidateMindmapState(ref, day: ..., extraDay: ...)` so the full derived graph refreshes consistently.
+- After any node mutation, call `invalidateMindmapState(ref, day: ..., extraDay: ...)` or `invalidateMindmapStateFromRef(...)` so the full derived graph refreshes consistently.
 
 ### Sync/backup
 
@@ -137,51 +149,3 @@ Feature modules follow layered boundaries where practical:
 
 - Current code and `pubspec.yaml` use Sembast plus optional HTTP sync adapters.
 - No Cursor rules or GitHub Copilot instruction file were present when this file was generated.
-
-## Current Handoff (Codex -> Claude Code)
-
-### Latest committed baseline
-
-- `23e17f2 Add calendar routine snooze date picker`
-- `0241dae Add calendar routine selection controls`
-- `9ba0a9b Document phase 3 calendar routine closeout`
-- `01f7c98 Add calendar recurring routine actions`
-
-### Calendar routine feature status
-
-- Agenda view shows a routine banner when today has ready recurring routines.
-- Routine dialog supports per-routine checkboxes plus `Select all` and `Clear`.
-- Apply creates selected routine nodes for today.
-- Skip creates archived routine skip markers for selected routines.
-- Snooze opens a date picker and creates archived routine snooze markers with `automation.snoozedTo`.
-- Skip/snooze markers intentionally surface in Agenda with `Skipped routine` / `Snoozed routine` badges.
-- Agenda has a persisted `Routines` filter. Shortcuts: `1` All, `2` Tasks, `3` Events, `4` Habits, `5` Routines, `6` Done.
-- Skip/snooze snackbars support Undo by deleting generated marker nodes and invalidating Calendar/Mindmap providers.
-- Routine marker rows now have action menus for delete, resnooze snoozed markers, and apply now. Apply now can force-create a routine even when it is not due today.
-
-### Important files
-
-- `lib/features/calendar/calendar_page.dart`
-- `lib/features/calendar/application/calendar_view_controller.dart`
-- `lib/features/mindmap/application/recurring_routine_application.dart`
-- `lib/features/mindmap/domain/recurring_routine.dart`
-- `test/features/calendar/calendar_page_test.dart`
-- `docs/phase_3_closeout.md`
-- `docs/release/beta_release_checklist.md`
-
-### Last validation
-
-```bash
-flutter analyze
-flutter test test/features/calendar/calendar_page_test.dart
-flutter test
-```
-
-Result: all pass. Calendar test suite: 30 tests. Full test suite: 363 tests.
-
-### Suggested next work
-
-- Phase 5 is now user-led page-by-page feature and UI/UX enhancement.
-- Start by asking which page the user wants to polish first, then audit that page and propose a small implementation plan before code changes.
-- Recommended order: Calendar/Agenda, Day Mindmap, Command Palette, Insights, Graph, Workspaces, Settings, Backup/Sync.
-- Keep changes focused to the selected page unless the user approves broader refactors.

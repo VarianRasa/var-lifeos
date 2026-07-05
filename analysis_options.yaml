@@ -20,6 +20,7 @@ analyzer:
     - '**/*.g.dart'
     - '**/*.freezed.dart'
     - '**/generated_plugin_registrant.dart'
+    - 'lib/dataconnect_generated/**'
 
 linter:
   # Stricter, production-quality rule set on top of flutter_lints.

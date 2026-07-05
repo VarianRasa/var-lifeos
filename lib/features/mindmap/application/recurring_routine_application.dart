@@ -109,6 +109,7 @@ Future<List<MindmapNode>> snoozeRecurringRoutines({
 }) async {
   final normalizedDay = day.dateOnly;
   final normalizedTargetDay = targetDay.dateOnly;
+  if (!normalizedTargetDay.isAfter(normalizedDay)) return const [];
   final timestamp = now ?? DateTime.now();
   final plan = await previewRecurringRoutines(
     repository: repository,

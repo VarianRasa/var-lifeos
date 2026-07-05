@@ -11,6 +11,8 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/layout/adaptive_scaffold.dart';
+import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -20,6 +22,7 @@ import '../mindmap/domain/automation_forecast.dart';
 import '../mindmap/domain/automation_health.dart';
 import '../mindmap/domain/automation_rule.dart';
 import '../mindmap/domain/automation_suggestion.dart';
+import '../mindmap/domain/canvas_position.dart';
 import '../mindmap/domain/life_os_summary.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/mindmap_repository.dart';
@@ -28,10 +31,42 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
+import 'application/context_health.dart' as health;
+import 'application/focus_insights.dart' as focus;
+import 'application/goal_insights.dart' as goals;
+import 'application/habit_insights.dart' as habits;
+import 'application/insight_cache.dart' as insight_cache;
+import 'application/insight_filters.dart' as insight_filters;
+import 'application/insight_recommendations.dart' as recs;
+import 'application/insight_risk_engine.dart' as risks;
+import 'application/insights_markdown_export.dart' as md_export;
+import 'application/insights_summary.dart' as mission;
+import 'application/insights_trends.dart' as trends;
+import 'application/review_insights.dart' as reviews;
 import 'domain/insights_summary.dart';
 
+class _SetInsightRangeIntent extends Intent {
+  const _SetInsightRangeIntent(this.preset);
+
+  final insight_filters.InsightRangePreset preset;
+}
+
+class _FocusInsightSearchIntent extends Intent {
+  const _FocusInsightSearchIntent();
+}
+
+class _ExportInsightReportIntent extends Intent {
+  const _ExportInsightReportIntent();
+}
+
+class _RefreshInsightsIntent extends Intent {
+  const _RefreshInsightsIntent();
+}
+
 class InsightsPage extends ConsumerStatefulWidget {
-  const InsightsPage({super.key});
+  const InsightsPage({super.key, this.initialShowDashboardPanels = false});
+
+  final bool initialShowDashboardPanels;
 
   @override
   ConsumerState<InsightsPage> createState() => _InsightsPageState();
@@ -39,36 +74,46 @@ class InsightsPage extends ConsumerStatefulWidget {
 
 class _InsightsPageState extends ConsumerState<InsightsPage> {
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   String _query = '';
+  String _latestMarkdownReport = '';
   SmartNodeViewType? _smartViewFilter;
   String? _projectFilter;
   String? _areaFilter;
   NodeStatus? _statusFilter;
   NodePriority? _priorityFilter;
+  NodeType? _typeFilter;
+  String? _tagFilter;
+  insight_filters.InsightRangePreset _rangePreset =
+      insight_filters.InsightRangePreset.sevenDays;
+  late bool _showDashboardPanels;
 
-  bool _initializedFilters = false;
+  Uri? _lastFilterUri;
+
+  @override
+  void initState() {
+    super.initState();
+    _showDashboardPanels = widget.initialShowDashboardPanels;
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_initializedFilters) {
-      _initializedFilters = true;
-      try {
-        final state = GoRouterState.of(context);
-        final project = state.uri.queryParameters['project'];
-        final area = state.uri.queryParameters['area'];
-        if (project != null) {
-          _projectFilter = project;
-        } else if (area != null) {
-          _areaFilter = area;
-        }
-      } catch (_) {}
-    }
+    try {
+      final uri = GoRouterState.of(context).uri;
+      if (_lastFilterUri == uri) return;
+      _lastFilterUri = uri;
+      final project = uri.queryParameters['project'];
+      final area = uri.queryParameters['area'];
+      _projectFilter = project;
+      _areaFilter = project == null ? area : null;
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -78,131 +123,354 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
     final automationSuggestions = ref.watch(automationSuggestionsProvider);
     final today = ref.watch(currentDateProvider);
 
-    final isDesktop =
-        MediaQuery.sizeOf(context).width >= LayoutConstants.desktopBreakpoint;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Insights'),
-        actions: [
-          SearchField(
-            key: const ValueKey('insights-search-field'),
-            controller: _searchController,
-            hintText: 'Search nodes...',
-            onChanged: (value) {
-              setState(() => _query = value.trim().toLowerCase());
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyT): _SetInsightRangeIntent(
+          insight_filters.InsightRangePreset.today,
+        ),
+        SingleActivator(LogicalKeyboardKey.keyW): _SetInsightRangeIntent(
+          insight_filters.InsightRangePreset.sevenDays,
+        ),
+        SingleActivator(LogicalKeyboardKey.keyM): _SetInsightRangeIntent(
+          insight_filters.InsightRangePreset.thisMonth,
+        ),
+        SingleActivator(LogicalKeyboardKey.slash): _FocusInsightSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyE): _ExportInsightReportIntent(),
+        SingleActivator(LogicalKeyboardKey.keyR): _RefreshInsightsIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _SetInsightRangeIntent: CallbackAction<_SetInsightRangeIntent>(
+            onInvoke: (intent) {
+              if (_isEditingText()) return null;
+              setState(() => _rangePreset = intent.preset);
+              return null;
             },
           ),
-          if (isDesktop)
-            const SizedBox(width: 460)
-          else
-            const SizedBox(width: 16),
-        ],
-      ),
-      body: smartViews.when(
-        data: (value) {
-          final filteredNodes = _filterNodes(value.nodesFor(_smartViewFilter));
-          final workspaceContexts = WorkspaceContexts.fromNodes(value.allNodes);
-          final lifeSummary = LifeOsSummary.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final lifeRhythm = LifeOsRhythm.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final attention = LifeOsAttention.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final insightsSummary = InsightsSummary.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final weeklyPulse = InsightsWeeklyPulse.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final automationForecast = AutomationForecast.fromNodes(
-            today: today,
-            nodes: value.allNodes,
-          );
-          final automationHealth = AutomationHealth.fromNodes(
-            nodes: value.allNodes,
-          );
-          final automationEvents = automationEventsFromNodes(value.allNodes);
-          final nodeGraph = NodeGraph.fromNodes(value.allNodes);
-          return _InsightsBody(
-            today: today,
-            nodes: value.allNodes,
-            filteredNodes: filteredNodes,
-            automationSuggestions: automationSuggestions.valueOrNull,
-            automationForecast: automationForecast,
-            automationHealth: automationHealth,
-            automationEvents: automationEvents,
-            smartViews: value.views,
-            workspaceContexts: workspaceContexts.contexts,
-            lifeSummary: lifeSummary,
-            lifeRhythm: lifeRhythm,
-            attention: attention,
-            insightsSummary: insightsSummary,
-            weeklyPulse: weeklyPulse,
-            nodeGraph: nodeGraph,
-            searchQuery: _query,
-            smartViewFilter: _smartViewFilter,
-            projectFilter: _projectFilter,
-            areaFilter: _areaFilter,
-            statusFilter: _statusFilter,
-            priorityFilter: _priorityFilter,
-            onSmartViewChanged: (smartView) {
-              setState(() {
-                _smartViewFilter = _smartViewFilter == smartView
-                    ? null
-                    : smartView;
-              });
+          _FocusInsightSearchIntent: CallbackAction<_FocusInsightSearchIntent>(
+            onInvoke: (_) {
+              _searchFocusNode.requestFocus();
+              return null;
             },
-            onProjectChanged: (project) {
-              setState(() {
-                _projectFilter = _projectFilter == project ? null : project;
-                if (_projectFilter != null) _areaFilter = null;
-              });
+          ),
+          _ExportInsightReportIntent:
+              CallbackAction<_ExportInsightReportIntent>(
+                onInvoke: (_) {
+                  if (_isEditingText()) return null;
+                  if (_latestMarkdownReport.isNotEmpty) {
+                    Clipboard.setData(
+                      ClipboardData(text: _latestMarkdownReport),
+                    );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Markdown report copied to clipboard'),
+                      ),
+                    );
+                  }
+                  return null;
+                },
+              ),
+          _RefreshInsightsIntent: CallbackAction<_RefreshInsightsIntent>(
+            onInvoke: (_) {
+              if (_isEditingText()) return null;
+              ref.invalidate(smartNodeViewsProvider);
+              return null;
             },
-            onAreaChanged: (area) {
-              setState(() {
-                _areaFilter = _areaFilter == area ? null : area;
-                if (_areaFilter != null) _projectFilter = null;
-              });
-            },
-            onStatusChanged: (status) {
-              setState(() {
-                _statusFilter = _statusFilter == status ? null : status;
-              });
-            },
-            onPriorityChanged: (priority) {
-              setState(() {
-                _priorityFilter = _priorityFilter == priority ? null : priority;
-              });
-            },
-            onReviewAutomations: _openAutomationCenter,
-            onPauseAutomationIssue: _pauseAutomationHealthIssue,
-          );
+          ),
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => ErrorMessage(
-          message: 'Unable to load insights',
-          onRetry: () => ref.invalidate(smartNodeViewsProvider),
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const AppRouteChromeTabs(currentRoute: AppRoute.insights),
+              actions: [
+                IconButton(
+                  tooltip: _showDashboardPanels
+                      ? 'Hide dashboard panels'
+                      : 'Show dashboard panels',
+                  icon: Icon(
+                    _showDashboardPanels
+                        ? Icons.dashboard_customize
+                        : Icons.dashboard_customize_outlined,
+                  ),
+                  onPressed: () => setState(() {
+                    _showDashboardPanels = !_showDashboardPanels;
+                  }),
+                ),
+                SearchField(
+                  key: const ValueKey('insights-search-field'),
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  hintText: 'Search nodes...',
+                  onChanged: (value) {
+                    setState(() => _query = value.trim().toLowerCase());
+                  },
+                ),
+                const SizedBox(width: 16),
+              ],
+            ),
+            body: smartViews.when(
+              data: (value) {
+                final range = insight_filters.insightDateRangeForPreset(
+                  preset: _rangePreset,
+                  today: today,
+                );
+                final dashboardFilter = insight_filters.InsightFilterState(
+                  project: _projectFilter,
+                  area: _areaFilter,
+                  tag: _tagFilter,
+                  nodeType: _typeFilter,
+                  priority: _priorityFilter,
+                  status: _statusFilter,
+                );
+                final nodeIndex = insight_cache.buildInsightNodeIndex(
+                  nodes: value.allNodes,
+                  filter: dashboardFilter,
+                  range: range,
+                  today: today,
+                );
+                final scopedNodes = nodeIndex.scopedNodes;
+                final filteredNodes = _filterNodes(
+                  value.nodesFor(_smartViewFilter),
+                  range,
+                );
+                final workspaceContexts = WorkspaceContexts.fromNodes(
+                  value.allNodes,
+                );
+                final lifeSummary = LifeOsSummary.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final lifeRhythm = LifeOsRhythm.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final attention = LifeOsAttention.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final insightsSummary = InsightsSummary.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final missionSummaries = mission.buildInsightsSummary(
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final completionTrend = trends.buildCompletionTrend(
+                  start: range.start,
+                  end: range.end,
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final habitRoutineInsights = habits.buildHabitRoutineInsights(
+                  start: range.start,
+                  end: range.end,
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final focusInsights = focus.buildFocusInsightSummary(
+                  start: range.start,
+                  end: range.end,
+                  nodes: scopedNodes,
+                );
+                final reviewInsights = reviews.buildReviewInsightSummary(
+                  start: range.start,
+                  end: range.end,
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final contextHealth = health.buildContextHealthSummary(
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final goalInsights = goals.buildGoalInsightSummary(
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final insightRisks = risks.buildInsightRisks(
+                  today: today,
+                  nodes: scopedNodes,
+                );
+                final recommendations = recs.buildInsightRecommendations(
+                  risks: insightRisks,
+                  overdueCount: insightsSummary.overdueCount,
+                  openTaskCount: nodeIndex.openTaskCount,
+                  reviewCount: reviewInsights.reviewCount,
+                  hasContextFilter: !dashboardFilter.isEmpty,
+                );
+                final markdownReport = md_export.buildInsightsMarkdownReport(
+                  md_export.InsightsMarkdownReportInput(
+                    generatedAt: DateTime.now(),
+                    rangeStart: range.start,
+                    rangeEnd: range.end,
+                    nodes: scopedNodes,
+                    missionSummaries: missionSummaries,
+                    completionTrend: completionTrend,
+                    risks: insightRisks,
+                    recommendations: recommendations,
+                    contextHealth: contextHealth,
+                    focusSummary: focusInsights,
+                    habitSummary: habitRoutineInsights.habits,
+                    reviewSummary: reviewInsights,
+                    goalSummary: goalInsights,
+                    scopeLabel: _rangePresetLabel(_rangePreset),
+                  ),
+                );
+                _latestMarkdownReport = markdownReport;
+                final weeklyPulse = InsightsWeeklyPulse.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final weeklyReview = InsightsWeeklyReview.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final automationForecast = AutomationForecast.fromNodes(
+                  today: today,
+                  nodes: value.allNodes,
+                );
+                final automationHealth = AutomationHealth.fromNodes(
+                  nodes: value.allNodes,
+                );
+                final automationEvents = automationEventsFromNodes(
+                  value.allNodes,
+                );
+                final nodeGraph = NodeGraph.fromNodes(value.allNodes);
+                return _InsightsBody(
+                  today: today,
+                  nodes: value.allNodes,
+                  filteredNodes: filteredNodes,
+                  nodeIndex: nodeIndex,
+                  automationSuggestions: automationSuggestions.valueOrNull,
+                  automationForecast: automationForecast,
+                  automationHealth: automationHealth,
+                  automationEvents: automationEvents,
+                  smartViews: value.views,
+                  workspaceContexts: workspaceContexts.contexts,
+                  lifeSummary: lifeSummary,
+                  lifeRhythm: lifeRhythm,
+                  attention: attention,
+                  insightsSummary: insightsSummary,
+                  missionSummaries: missionSummaries,
+                  completionTrend: completionTrend,
+                  habitRoutineInsights: habitRoutineInsights,
+                  focusInsights: focusInsights,
+                  reviewInsights: reviewInsights,
+                  contextHealth: contextHealth,
+                  goalInsights: goalInsights,
+                  insightRisks: insightRisks,
+                  recommendations: recommendations,
+                  markdownReport: markdownReport,
+                  weeklyPulse: weeklyPulse,
+                  weeklyReview: weeklyReview,
+                  nodeGraph: nodeGraph,
+                  searchQuery: _query,
+                  smartViewFilter: _smartViewFilter,
+                  projectFilter: _projectFilter,
+                  areaFilter: _areaFilter,
+                  statusFilter: _statusFilter,
+                  priorityFilter: _priorityFilter,
+                  typeFilter: _typeFilter,
+                  tagFilter: _tagFilter,
+                  rangePreset: _rangePreset,
+                  showDashboardPanels: _showDashboardPanels,
+                  onSmartViewChanged: (smartView) {
+                    setState(() {
+                      _smartViewFilter = _smartViewFilter == smartView
+                          ? null
+                          : smartView;
+                    });
+                  },
+                  onProjectChanged: (project) {
+                    setState(() {
+                      _projectFilter = _projectFilter == project
+                          ? null
+                          : project;
+                      if (_projectFilter != null) _areaFilter = null;
+                    });
+                  },
+                  onAreaChanged: (area) {
+                    setState(() {
+                      _areaFilter = _areaFilter == area ? null : area;
+                      if (_areaFilter != null) _projectFilter = null;
+                    });
+                  },
+                  onStatusChanged: (status) {
+                    setState(() {
+                      _statusFilter = _statusFilter == status ? null : status;
+                    });
+                  },
+                  onPriorityChanged: (priority) {
+                    setState(() {
+                      _priorityFilter = _priorityFilter == priority
+                          ? null
+                          : priority;
+                    });
+                  },
+                  onTypeChanged: (type) {
+                    setState(() {
+                      _typeFilter = _typeFilter == type ? null : type;
+                    });
+                  },
+                  onTagChanged: (tag) {
+                    setState(() {
+                      _tagFilter = _tagFilter == tag ? null : tag;
+                    });
+                  },
+                  onRangePresetChanged: (preset) {
+                    setState(() => _rangePreset = preset);
+                  },
+                  onClearInsightFilters: () {
+                    setState(() {
+                      _projectFilter = null;
+                      _areaFilter = null;
+                      _statusFilter = null;
+                      _priorityFilter = null;
+                      _typeFilter = null;
+                      _tagFilter = null;
+                      _rangePreset =
+                          insight_filters.InsightRangePreset.sevenDays;
+                    });
+                  },
+                  onCreateWeeklyReview: () => _createWeeklyReview(today),
+                  onRescheduleNode: _rescheduleOverdueNode,
+                  onCompleteNode: _completeOverdueNode,
+                  onPinGoal: _pinGoal,
+                  onCreateGoalNextAction: _createGoalNextAction,
+                  onReviewAutomations: _openAutomationCenter,
+                  onPauseAutomationIssue: _pauseAutomationHealthIssue,
+                );
+              },
+              loading: () => const _InsightsLoadingSkeleton(),
+              error: (error, _) => _InsightsErrorState(
+                message: 'Unable to load insights',
+                onRetry: () => ref.invalidate(smartNodeViewsProvider),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  List<MindmapNode> _filterNodes(List<MindmapNode> nodes) {
+  bool _isEditingText() {
+    final focused = FocusManager.instance.primaryFocus?.context?.widget;
+    return focused is EditableText;
+  }
+
+  List<MindmapNode> _filterNodes(
+    List<MindmapNode> nodes,
+    insight_filters.InsightDateRange range,
+  ) {
     final normalizedQuery = _query.trim().toLowerCase();
     final filtered = nodes.where((node) {
       if (_statusFilter != null && node.status != _statusFilter) return false;
       if (_priorityFilter != null && node.priority != _priorityFilter) {
         return false;
       }
+      if (_typeFilter != null && node.type != _typeFilter) return false;
+      if (_tagFilter != null && !node.tags.contains(_tagFilter)) return false;
       if (_projectFilter != null && node.project != _projectFilter) {
         return false;
       }
@@ -213,6 +481,117 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
 
     filtered.sort(_compareInsightNodes);
     return filtered;
+  }
+
+  Future<void> _rescheduleOverdueNode(MindmapNode node) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final tomorrow = ref.read(currentDateProvider).dateOnly.addDays(1);
+    final updated = node.copyWith(dueDate: tomorrow, updatedAt: DateTime.now());
+    await repository.saveNode(updated);
+    invalidateMindmapState(ref, day: node.day, extraDay: tomorrow);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Rescheduled ${node.title} to tomorrow')),
+    );
+  }
+
+  Future<void> _completeOverdueNode(MindmapNode node) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final updated = node.copyWith(
+      isDone: true,
+      status: NodeStatus.done,
+      progress: 1,
+      updatedAt: DateTime.now(),
+    );
+    await repository.saveNode(updated);
+    invalidateMindmapState(ref, day: node.day);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Completed ${node.title}')));
+  }
+
+  Future<void> _pinGoal(MindmapNode node) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final updated = node.copyWith(isPinned: true, updatedAt: DateTime.now());
+    await repository.saveNode(updated);
+    invalidateMindmapState(ref, day: node.day);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Pinned ${node.title}')));
+  }
+
+  Future<void> _createGoalNextAction(MindmapNode goal) async {
+    final repository = ref.read(mindmapRepositoryProvider);
+    final today = ref.read(currentDateProvider).dateOnly;
+    final now = DateTime.now();
+    final node = MindmapNode(
+      id: 'goal-action-${now.microsecondsSinceEpoch}',
+      type: NodeType.task,
+      title: 'Next action: ${goal.title}',
+      day: today,
+      createdAt: now,
+      updatedAt: now,
+      body: 'Move goal forward: [[${goal.title}]]',
+      position: CanvasPosition(goal.position.dx + 260, goal.position.dy + 80),
+      priority: NodePriority.high,
+      project: goal.project,
+      area: goal.area,
+      tags: const ['next-action'],
+      relatedNodeIds: [goal.id],
+      dueDate: today,
+      data: {
+        'relations': [
+          {'targetId': goal.id, 'label': 'moves goal'},
+        ],
+      },
+    );
+    await repository.saveNode(node);
+    invalidateMindmapState(ref, day: today, extraDay: goal.day);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Next action created for ${goal.title}'),
+        action: SnackBarAction(
+          label: 'Open',
+          onPressed: () => goToDay(context, today, highlightNodeId: node.id),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createWeeklyReview(DateTime today) async {
+    final normalizedToday = today.dateOnly;
+    final repository = ref.read(mindmapRepositoryProvider);
+    final now = DateTime.now();
+    final node = MindmapNode(
+      id: 'weekly-review-${now.microsecondsSinceEpoch}',
+      type: NodeType.journal,
+      title: 'Weekly review',
+      day: normalizedToday,
+      createdAt: now,
+      updatedAt: now,
+      body: 'Wins\n- \n\nLessons\n- \n\nNext week focus\n- ',
+      position: const CanvasPosition(0, 0),
+      tags: const ['weekly-review'],
+      data: const {
+        'journal': {'isWeeklyReview': true, 'prompt': 'Weekly review'},
+      },
+    );
+    await repository.saveNode(node);
+    invalidateMindmapState(ref, day: normalizedToday);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Weekly review created'),
+        action: SnackBarAction(
+          label: 'Open',
+          onPressed: () =>
+              goToDay(context, normalizedToday, highlightNodeId: node.id),
+        ),
+      ),
+    );
   }
 
   Future<void> _openAutomationCenter(AutomationSuggestions suggestions) async {
@@ -278,6 +657,7 @@ class _InsightsBody extends StatelessWidget {
     required this.today,
     required this.nodes,
     required this.filteredNodes,
+    required this.nodeIndex,
     required this.automationSuggestions,
     required this.automationForecast,
     required this.automationHealth,
@@ -288,7 +668,18 @@ class _InsightsBody extends StatelessWidget {
     required this.lifeRhythm,
     required this.attention,
     required this.insightsSummary,
+    required this.missionSummaries,
+    required this.completionTrend,
+    required this.habitRoutineInsights,
+    required this.focusInsights,
+    required this.reviewInsights,
+    required this.contextHealth,
+    required this.goalInsights,
+    required this.insightRisks,
+    required this.recommendations,
+    required this.markdownReport,
     required this.weeklyPulse,
+    required this.weeklyReview,
     required this.nodeGraph,
     required this.searchQuery,
     required this.smartViewFilter,
@@ -296,11 +687,24 @@ class _InsightsBody extends StatelessWidget {
     required this.areaFilter,
     required this.statusFilter,
     required this.priorityFilter,
+    required this.typeFilter,
+    required this.tagFilter,
+    required this.rangePreset,
+    required this.showDashboardPanels,
     required this.onSmartViewChanged,
     required this.onProjectChanged,
     required this.onAreaChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
+    required this.onTypeChanged,
+    required this.onTagChanged,
+    required this.onRangePresetChanged,
+    required this.onClearInsightFilters,
+    required this.onCreateWeeklyReview,
+    required this.onRescheduleNode,
+    required this.onCompleteNode,
+    required this.onPinGoal,
+    required this.onCreateGoalNextAction,
     required this.onReviewAutomations,
     required this.onPauseAutomationIssue,
   });
@@ -308,6 +712,7 @@ class _InsightsBody extends StatelessWidget {
   final DateTime today;
   final List<MindmapNode> nodes;
   final List<MindmapNode> filteredNodes;
+  final insight_cache.InsightNodeIndex nodeIndex;
   final AutomationSuggestions? automationSuggestions;
   final AutomationForecast automationForecast;
   final AutomationHealth automationHealth;
@@ -318,7 +723,18 @@ class _InsightsBody extends StatelessWidget {
   final LifeOsRhythm lifeRhythm;
   final LifeOsAttention attention;
   final InsightsSummary insightsSummary;
+  final List<mission.InsightsSummary> missionSummaries;
+  final trends.InsightTrendSeries completionTrend;
+  final habits.HabitRoutineInsightSummary habitRoutineInsights;
+  final focus.FocusInsightSummary focusInsights;
+  final reviews.ReviewInsightSummary reviewInsights;
+  final health.ContextHealthSummary contextHealth;
+  final goals.GoalInsightSummary goalInsights;
+  final List<risks.InsightRisk> insightRisks;
+  final List<recs.InsightRecommendation> recommendations;
+  final String markdownReport;
   final InsightsWeeklyPulse weeklyPulse;
+  final InsightsWeeklyReview weeklyReview;
   final NodeGraph nodeGraph;
   final String searchQuery;
   final SmartNodeViewType? smartViewFilter;
@@ -326,24 +742,38 @@ class _InsightsBody extends StatelessWidget {
   final String? areaFilter;
   final NodeStatus? statusFilter;
   final NodePriority? priorityFilter;
+  final NodeType? typeFilter;
+  final String? tagFilter;
+  final insight_filters.InsightRangePreset rangePreset;
+  final bool showDashboardPanels;
   final ValueChanged<SmartNodeViewType> onSmartViewChanged;
   final ValueChanged<String> onProjectChanged;
   final ValueChanged<String> onAreaChanged;
   final ValueChanged<NodeStatus> onStatusChanged;
   final ValueChanged<NodePriority> onPriorityChanged;
+  final ValueChanged<NodeType> onTypeChanged;
+  final ValueChanged<String> onTagChanged;
+  final ValueChanged<insight_filters.InsightRangePreset> onRangePresetChanged;
+  final VoidCallback onClearInsightFilters;
+  final Future<void> Function() onCreateWeeklyReview;
+  final Future<void> Function(MindmapNode node) onRescheduleNode;
+  final Future<void> Function(MindmapNode node) onCompleteNode;
+  final Future<void> Function(MindmapNode node) onPinGoal;
+  final Future<void> Function(MindmapNode node) onCreateGoalNextAction;
   final ValueChanged<AutomationSuggestions> onReviewAutomations;
   final Future<void> Function(AutomationHealthIssue) onPauseAutomationIssue;
 
   @override
   Widget build(BuildContext context) {
     final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
-    final showOverviewPanels =
+    final hasCleanDashboardScope =
         searchQuery.trim().isEmpty &&
         smartViewFilter == null &&
         projectFilter == null &&
         areaFilter == null &&
         statusFilter == null &&
         priorityFilter == null;
+    final showOverviewPanels = showDashboardPanels && hasCleanDashboardScope;
     final showAttentionPanel =
         attention.signals.isNotEmpty && showOverviewPanels;
     final showAutomationPanel =
@@ -358,6 +788,7 @@ class _InsightsBody extends StatelessWidget {
         automationEvents.isNotEmpty && showOverviewPanels;
     final showWorkspaceFocus =
         workspaceContexts.isNotEmpty && showOverviewPanels;
+    final isEmptyWorkspace = nodes.isEmpty && hasCleanDashboardScope;
 
     return Padding(
       padding: EdgeInsets.all(spacing),
@@ -365,6 +796,23 @@ class _InsightsBody extends StatelessWidget {
         children: [
           if (showOverviewPanels) ...[
             _buildWeeklyDigest(context),
+            SizedBox(height: spacing),
+          ],
+          _InsightRangeFilterBar(
+            rangePreset: rangePreset,
+            typeFilter: typeFilter,
+            tagFilter: tagFilter,
+            nodes: nodes,
+            onRangePresetChanged: onRangePresetChanged,
+            onTypeChanged: onTypeChanged,
+            onTagChanged: onTagChanged,
+            onClear: onClearInsightFilters,
+          ),
+          const SizedBox(height: 8),
+          const _InsightShortcutHintBar(),
+          SizedBox(height: spacing),
+          if (isEmptyWorkspace) ...[
+            const _NewUserEmptyState(),
             SizedBox(height: spacing),
           ],
           _MetricRail(
@@ -375,12 +823,11 @@ class _InsightsBody extends StatelessWidget {
               ),
               _MetricPill(
                 icon: Icons.check_circle_outline,
-                label: '${nodes.where((node) => node.isDone).length} done',
+                label: '${nodeIndex.completedCount} done',
               ),
               _MetricPill(
                 icon: Icons.flag_outlined,
-                label:
-                    '${nodes.where((node) => node.priority.index >= NodePriority.high.index).length} high priority',
+                label: '${nodeIndex.highPriorityOpenTaskCount} high priority',
               ),
               if (insightsSummary.taskCount > 0)
                 _MetricPill(
@@ -456,6 +903,19 @@ class _InsightsBody extends StatelessWidget {
                 ),
             ],
           ),
+          if (showOverviewPanels) ...[
+            SizedBox(height: spacing),
+            _InsightActionStrip(
+              overdueCount: nodeIndex.overdueTaskCount,
+              highPriorityCount: nodeIndex.highPriorityOpenTaskCount,
+              automationCount: automationSuggestions?.readyCount ?? 0,
+              onOverdue: () => onSmartViewChanged(SmartNodeViewType.overdue),
+              onHighPriority: () => onPriorityChanged(NodePriority.high),
+              onAutomations: automationSuggestions == null
+                  ? null
+                  : () => onReviewAutomations(automationSuggestions!),
+            ),
+          ],
           if (showAttentionPanel) ...[
             SizedBox(height: spacing),
             _AttentionPanel(attention: attention),
@@ -511,7 +971,55 @@ class _InsightsBody extends StatelessWidget {
             SizedBox(height: spacing),
             _WeeklyPulsePanel(pulse: weeklyPulse),
             SizedBox(height: spacing),
-            _FocusTimerAnalyticsPanel(summary: insightsSummary, today: today),
+            _WeeklyReviewPanel(
+              review: weeklyReview,
+              onCreateWeeklyReview: onCreateWeeklyReview,
+              onRescheduleNode: onRescheduleNode,
+              onCompleteNode: onCompleteNode,
+              onPinGoal: onPinGoal,
+              onCreateGoalNextAction: onCreateGoalNextAction,
+            ),
+            SizedBox(height: spacing),
+            _FocusTimerAnalyticsPanel(
+              summary: insightsSummary,
+              focusSummary: focusInsights,
+              today: today,
+            ),
+            SizedBox(height: spacing),
+            _KnowledgeGraphPanel(graph: nodeGraph),
+            SizedBox(height: spacing),
+            _MissionDashboardPanel(summaries: missionSummaries),
+            SizedBox(height: spacing),
+            _WorkloadTrendPanel(series: completionTrend),
+            SizedBox(height: spacing),
+            _HabitRoutineInsightPanel(summary: habitRoutineInsights),
+            SizedBox(height: spacing),
+            _ReviewInsightPanel(summary: reviewInsights),
+            SizedBox(height: spacing),
+            _ContextHealthPanel(summary: contextHealth),
+            SizedBox(height: spacing),
+            _GoalInsightPanel(summary: goalInsights),
+            SizedBox(height: spacing),
+            _InsightRiskPanel(riskItems: insightRisks),
+            SizedBox(height: spacing),
+            _RecommendationPanel(
+              recommendations: recommendations,
+              onSmartViewChanged: onSmartViewChanged,
+              onPriorityChanged: onPriorityChanged,
+              onCreateWeeklyReview: onCreateWeeklyReview,
+              onProjectChanged: onProjectChanged,
+              markdownReport: markdownReport,
+            ),
+            SizedBox(height: spacing),
+            _InsightDrillDownPanel(
+              nodeIndex: nodeIndex,
+              contextHealth: contextHealth,
+              habitSummary: habitRoutineInsights.habits,
+              reviewSummary: reviewInsights,
+              goalSummary: goalInsights,
+              onProjectChanged: onProjectChanged,
+              onAreaChanged: onAreaChanged,
+            ),
           ],
           SizedBox(height: spacing),
           _FilterBand(
@@ -521,6 +1029,14 @@ class _InsightsBody extends StatelessWidget {
             onPriorityChanged: onPriorityChanged,
           ),
           SizedBox(height: spacing),
+          _SectionLabel(
+            icon: Icons.manage_search_outlined,
+            title: 'Focus results',
+            subtitle: filteredNodes.isEmpty
+                ? 'No nodes match the active filters'
+                : '${filteredNodes.length} sorted nodes ready to inspect',
+          ),
+          SizedBox(height: spacing * 0.75),
           if (filteredNodes.isEmpty)
             const SizedBox(height: 260, child: _EmptyResults())
           else
@@ -528,10 +1044,6 @@ class _InsightsBody extends StatelessWidget {
               if (index > 0) const SizedBox(height: 10),
               _InsightNodeTile(node: filteredNodes[index]),
             ],
-          if (showOverviewPanels) ...[
-            SizedBox(height: spacing),
-            _KnowledgeGraphPanel(graph: nodeGraph),
-          ],
         ],
       ),
     );
@@ -540,15 +1052,13 @@ class _InsightsBody extends StatelessWidget {
   Widget _buildWeeklyDigest(BuildContext context) {
     final theme = Theme.of(context);
 
-    final totalTasks = nodes.where((n) => n.type == NodeType.task).length;
-    final doneTasks = nodes
-        .where((n) => n.type == NodeType.task && n.isDone)
-        .length;
-    final completionPct = totalTasks > 0 ? (doneTasks / totalTasks) : 0.0;
+    final totalTasks = insightsSummary.taskCount;
+    final doneTasks = insightsSummary.completedTaskCount;
+    final completionPct = insightsSummary.taskCompletionRate;
 
-    final activeNodesCount = nodes.length;
+    final activeNodesCount = nodeIndex.activeCount;
     final moodAvg = lifeSummary.averageMood;
-    final habitCount = nodes.where((n) => n.type == NodeType.habit).length;
+    final habitCount = nodeIndex.typeCounts[NodeType.habit] ?? 0;
 
     return Container(
       decoration: BoxDecoration(
@@ -733,8 +1243,1791 @@ class _InsightsBody extends StatelessWidget {
   void _showExportDialog(BuildContext context) {
     showDialog<void>(
       context: context,
-      builder: (context) => _ExportDataDialog(nodes: nodes),
+      builder: (context) =>
+          _ExportDataDialog(nodes: nodes, markdownReport: markdownReport),
     );
+  }
+}
+
+class _InsightsLoadingSkeleton extends StatelessWidget {
+  const _InsightsLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+    return Padding(
+      padding: EdgeInsets.all(spacing),
+      child: ListView(
+        children: const [
+          _SkeletonBlock(height: 96, widthFactor: 1),
+          SizedBox(height: 12),
+          _SkeletonMetricRail(),
+          SizedBox(height: 12),
+          _SkeletonBlock(height: 180, widthFactor: 1),
+          SizedBox(height: 12),
+          _SkeletonBlock(height: 120, widthFactor: 0.85),
+          SizedBox(height: 12),
+          _SkeletonBlock(height: 120, widthFactor: 0.7),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkeletonMetricRail extends StatelessWidget {
+  const _SkeletonMetricRail();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _SkeletonPill(),
+          SizedBox(width: 8),
+          _SkeletonPill(),
+          SizedBox(width: 8),
+          _SkeletonPill(),
+          SizedBox(width: 8),
+          _SkeletonPill(),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkeletonPill extends StatelessWidget {
+  const _SkeletonPill();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      label: 'Loading insights',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.55,
+          ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: const SizedBox(width: 132, height: 36),
+      ),
+    );
+  }
+}
+
+class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({required this.height, required this.widthFactor});
+
+  final double height;
+  final double widthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FractionallySizedBox(
+      alignment: Alignment.centerLeft,
+      widthFactor: widthFactor,
+      child: Semantics(
+        label: 'Loading insights',
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.55,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: SizedBox(height: height),
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightsErrorState extends StatelessWidget {
+  const _InsightsErrorState({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 36,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                const SizedBox(height: 12),
+                ErrorMessage(message: message, onRetry: onRetry),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NewUserEmptyState extends StatelessWidget {
+  const _NewUserEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      key: const ValueKey('insights-empty-state'),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.primaryContainer.withValues(alpha: 0.38),
+            theme.colorScheme.surfaceContainerLow,
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 560;
+            final copy = Column(
+              crossAxisAlignment: compact
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No insight signals yet',
+                  textAlign: compact ? TextAlign.center : TextAlign.start,
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Create tasks, habits, goals, or journal notes from Calendar. Insights stay local and become useful as your day pages fill up.',
+                  textAlign: compact ? TextAlign.center : TextAlign.start,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _HelperChip(label: 'Add 3 tasks'),
+                    _HelperChip(label: 'Log focus time'),
+                    _HelperChip(label: 'Write a review'),
+                  ],
+                ),
+              ],
+            );
+            final icon = Icon(
+              Icons.explore_outlined,
+              size: compact ? 36 : 44,
+              color: theme.colorScheme.primary,
+            );
+            if (compact) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [icon, const SizedBox(height: 10), copy],
+              );
+            }
+            return Row(
+              children: [
+                icon,
+                const SizedBox(width: 14),
+                Expanded(child: copy),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _HelperChip extends StatelessWidget {
+  const _HelperChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(label: Text(label), visualDensity: VisualDensity.compact);
+  }
+}
+
+class _InsightActionStrip extends StatelessWidget {
+  const _InsightActionStrip({
+    required this.overdueCount,
+    required this.highPriorityCount,
+    required this.automationCount,
+    required this.onOverdue,
+    required this.onHighPriority,
+    required this.onAutomations,
+  });
+
+  final int overdueCount;
+  final int highPriorityCount;
+  final int automationCount;
+  final VoidCallback onOverdue;
+  final VoidCallback onHighPriority;
+  final VoidCallback? onAutomations;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasOverdue = overdueCount > 0;
+    final hasHighPriority = highPriorityCount > 0;
+    final hasAutomations = automationCount > 0 && onAutomations != null;
+
+    return DecoratedBox(
+      key: const ValueKey('insights-action-strip'),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.28,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              Icons.tips_and_updates_outlined,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Suggested next moves',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _actionSummary(
+                      hasOverdue: hasOverdue,
+                      hasHighPriority: hasHighPriority,
+                      hasAutomations: hasAutomations,
+                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (hasOverdue)
+                  ActionChip(
+                    key: const ValueKey('insights-action-overdue'),
+                    avatar: const Icon(Icons.warning_amber_outlined, size: 16),
+                    label: Text('Review $overdueCount overdue'),
+                    onPressed: onOverdue,
+                  ),
+                if (hasHighPriority)
+                  ActionChip(
+                    key: const ValueKey('insights-action-high-priority'),
+                    avatar: const Icon(Icons.flag_outlined, size: 16),
+                    label: Text('Focus $highPriorityCount high'),
+                    onPressed: onHighPriority,
+                  ),
+                if (hasAutomations)
+                  ActionChip(
+                    key: const ValueKey('insights-action-automations'),
+                    avatar: const Icon(
+                      Icons.auto_awesome_motion_outlined,
+                      size: 16,
+                    ),
+                    label: Text('Run $automationCount routines'),
+                    onPressed: onAutomations,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _actionSummary({
+    required bool hasOverdue,
+    required bool hasHighPriority,
+    required bool hasAutomations,
+  }) {
+    if (!hasOverdue && !hasHighPriority && !hasAutomations) {
+      return 'Everything looks steady. Use filters below to inspect your system.';
+    }
+    return 'Jump straight to the items most likely to unblock the day.';
+  }
+}
+
+class _MissionDashboardPanel extends StatelessWidget {
+  const _MissionDashboardPanel({required this.summaries});
+
+  final List<mission.InsightsSummary> summaries;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-mission-dashboard'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.radar_outlined, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('Mission dashboard', style: theme.textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 10),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final columns = width >= 980
+                    ? 3
+                    : width >= 640
+                    ? 2
+                    : 1;
+                return GridView.count(
+                  crossAxisCount: columns,
+                  childAspectRatio: columns == 1 ? 3.1 : 2.25,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  physics: const NeverScrollableScrollPhysics(),
+                  shrinkWrap: true,
+                  children: [
+                    for (final summary in summaries)
+                      _MissionWindowCard(summary: summary),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionWindowCard extends StatelessWidget {
+  const _MissionWindowCard({required this.summary});
+
+  final mission.InsightsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final statusColor = _missionStatusColor(theme, summary.status);
+    final metrics = summary.current;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.35,
+        ),
+        border: Border.all(color: statusColor.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _missionWindowLabel(summary.window.kind),
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      _missionStatusLabel(summary.status),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MissionMetric(
+                  label: 'Open',
+                  value: '${metrics.openTasks}',
+                  delta: summary.openTaskDelta,
+                  lowerIsBetter: true,
+                ),
+                _MissionMetric(
+                  label: 'Done',
+                  value: '${metrics.completedTasks}',
+                  delta: summary.completedTaskDelta,
+                ),
+                _MissionMetric(
+                  label: 'Overdue',
+                  value: '${metrics.overdueTasks}',
+                  delta: summary.overdueTaskDelta,
+                  lowerIsBetter: true,
+                ),
+                _MissionMetric(
+                  label: 'High',
+                  value: '${metrics.highPriorityOpenTasks}',
+                  delta: summary.highPriorityOpenTaskDelta,
+                  lowerIsBetter: true,
+                ),
+                _MissionMetric(
+                  label: 'Focus',
+                  value: '${metrics.focusMinutes}m',
+                  delta: summary.focusMinuteDelta,
+                ),
+                _MissionMetric(
+                  label: 'Habit',
+                  value: _percentLabel(metrics.habitCompletionRate),
+                  delta: (summary.habitCompletionDelta * 100).round(),
+                ),
+                _MissionMetric(
+                  label: 'Review',
+                  value: '${metrics.reviewCount}',
+                  delta: summary.reviewCountDelta,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MissionMetric extends StatelessWidget {
+  const _MissionMetric({
+    required this.label,
+    required this.value,
+    required this.delta,
+    this.lowerIsBetter = false,
+  });
+
+  final String label;
+  final String value;
+  final int delta;
+  final bool lowerIsBetter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isGood = lowerIsBetter ? delta < 0 : delta > 0;
+    final isBad = lowerIsBetter ? delta > 0 : delta < 0;
+    final deltaColor = isGood
+        ? Colors.greenAccent.shade400
+        : isBad
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurfaceVariant;
+
+    return SizedBox(
+      width: 96,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.labelSmall),
+          const SizedBox(height: 2),
+          Wrap(
+            spacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(value, style: theme.textTheme.titleSmall),
+              Text(
+                _deltaLabel(delta),
+                style: theme.textTheme.labelSmall?.copyWith(color: deltaColor),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _missionWindowLabel(mission.InsightsWindowKind kind) {
+  switch (kind) {
+    case mission.InsightsWindowKind.today:
+      return 'Today';
+    case mission.InsightsWindowKind.week:
+      return 'This week';
+    case mission.InsightsWindowKind.month:
+      return 'This month';
+  }
+}
+
+String _missionStatusLabel(mission.InsightMissionStatus status) {
+  switch (status) {
+    case mission.InsightMissionStatus.stable:
+      return 'Stable';
+    case mission.InsightMissionStatus.improving:
+      return 'Improving';
+    case mission.InsightMissionStatus.atRisk:
+      return 'At risk';
+    case mission.InsightMissionStatus.critical:
+      return 'Critical';
+  }
+}
+
+Color _missionStatusColor(
+  ThemeData theme,
+  mission.InsightMissionStatus status,
+) {
+  switch (status) {
+    case mission.InsightMissionStatus.stable:
+      return theme.colorScheme.primary;
+    case mission.InsightMissionStatus.improving:
+      return Colors.greenAccent.shade400;
+    case mission.InsightMissionStatus.atRisk:
+      return Colors.orangeAccent.shade400;
+    case mission.InsightMissionStatus.critical:
+      return theme.colorScheme.error;
+  }
+}
+
+String _deltaLabel(int delta) {
+  if (delta == 0) return '±0';
+  return delta > 0 ? '+$delta' : '$delta';
+}
+
+class _WorkloadTrendPanel extends StatelessWidget {
+  const _WorkloadTrendPanel({required this.series});
+
+  final trends.InsightTrendSeries series;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final totalDone = series.points.fold<int>(
+      0,
+      (total, point) => total + point.completedTasks,
+    );
+    final totalOpen = series.points.fold<int>(
+      0,
+      (total, point) => total + point.openTasks,
+    );
+    final totalOverdue = series.points.fold<int>(
+      0,
+      (total, point) => total + point.overdueTasks,
+    );
+    final totalHighPriority = series.points.fold<int>(
+      0,
+      (total, point) => total + point.highPriorityOpenTasks,
+    );
+
+    return DecoratedBox(
+      key: const ValueKey('insights-workload-trend-panel'),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.stacked_bar_chart, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Completion and workload trends',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                _TrendChip(
+                  label: 'Done ${_trendLabel(series.completionDirection)}',
+                  direction: series.completionDirection,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (series.points.isEmpty || series.isEmpty)
+              Text(
+                'No task trend data in the selected window yet.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _TrendTotalPill(
+                    label: 'Done',
+                    value: totalDone,
+                    color: Colors.greenAccent.shade400,
+                  ),
+                  _TrendTotalPill(
+                    label: 'Open',
+                    value: totalOpen,
+                    color: theme.colorScheme.primary,
+                  ),
+                  _TrendTotalPill(
+                    label: 'Overdue',
+                    value: totalOverdue,
+                    color: theme.colorScheme.error,
+                  ),
+                  _TrendTotalPill(
+                    label: 'High',
+                    value: totalHighPriority,
+                    color: Colors.orangeAccent.shade400,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 112,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final point in series.points)
+                      Expanded(child: _TrendDayBar(point: point)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _TrendChip(
+                    label: 'Open ${_trendLabel(series.openWorkDirection)}',
+                    direction: series.openWorkDirection,
+                  ),
+                  _TrendChip(
+                    label: 'Overdue ${_trendLabel(series.overdueDirection)}',
+                    direction: series.overdueDirection,
+                  ),
+                  _TrendChip(
+                    label:
+                        'High priority ${_trendLabel(series.highPriorityDirection)}',
+                    direction: series.highPriorityDirection,
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TrendTotalPill extends StatelessWidget {
+  const _TrendTotalPill({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final int value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: color.withValues(alpha: 0.08),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: color.withValues(alpha: 0.4)),
+          radius: 999,
+          wobble: 0.8,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          '$label $value',
+          style: theme.textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrendDayBar extends StatelessWidget {
+  const _TrendDayBar({required this.point});
+
+  final trends.InsightTrendPoint point;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final maxValue = [
+      point.openTasks,
+      point.completedTasks,
+      point.overdueTasks,
+      point.highPriorityOpenTasks,
+      1,
+    ].reduce((a, b) => a > b ? a : b);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          _MiniBar(
+            value: point.completedTasks,
+            maxValue: maxValue,
+            color: Colors.greenAccent.shade400,
+          ),
+          const SizedBox(height: 2),
+          _MiniBar(
+            value: point.openTasks,
+            maxValue: maxValue,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(height: 2),
+          _MiniBar(
+            value: point.overdueTasks,
+            maxValue: maxValue,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(height: 2),
+          _MiniBar(
+            value: point.highPriorityOpenTasks,
+            maxValue: maxValue,
+            color: Colors.orangeAccent.shade400,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            DateFormat('E').format(point.day).substring(0, 1),
+            style: theme.textTheme.labelSmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniBar extends StatelessWidget {
+  const _MiniBar({
+    required this.value,
+    required this.maxValue,
+    required this.color,
+  });
+
+  final int value;
+  final int maxValue;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final height = value == 0 ? 4.0 : 4.0 + (value / maxValue) * 18.0;
+    return Tooltip(
+      message: '$value',
+      child: Container(
+        width: 18,
+        height: height,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: value == 0 ? 0.25 : 0.85),
+          borderRadius: BorderRadius.circular(999),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrendChip extends StatelessWidget {
+  const _TrendChip({required this.label, required this.direction});
+
+  final String label;
+  final trends.InsightTrendDirection direction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = _trendColor(theme, direction);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_trendIcon(direction), size: 14, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _trendLabel(trends.InsightTrendDirection direction) {
+  switch (direction) {
+    case trends.InsightTrendDirection.up:
+      return 'up';
+    case trends.InsightTrendDirection.down:
+      return 'down';
+    case trends.InsightTrendDirection.flat:
+      return 'flat';
+    case trends.InsightTrendDirection.volatile:
+      return 'volatile';
+  }
+}
+
+IconData _trendIcon(trends.InsightTrendDirection direction) {
+  switch (direction) {
+    case trends.InsightTrendDirection.up:
+      return Icons.trending_up;
+    case trends.InsightTrendDirection.down:
+      return Icons.trending_down;
+    case trends.InsightTrendDirection.flat:
+      return Icons.trending_flat;
+    case trends.InsightTrendDirection.volatile:
+      return Icons.show_chart;
+  }
+}
+
+Color _trendColor(ThemeData theme, trends.InsightTrendDirection direction) {
+  switch (direction) {
+    case trends.InsightTrendDirection.up:
+      return Colors.greenAccent.shade400;
+    case trends.InsightTrendDirection.down:
+      return Colors.orangeAccent.shade400;
+    case trends.InsightTrendDirection.flat:
+      return theme.colorScheme.onSurfaceVariant;
+    case trends.InsightTrendDirection.volatile:
+      return theme.colorScheme.error;
+  }
+}
+
+class _HabitRoutineInsightPanel extends StatelessWidget {
+  const _HabitRoutineInsightPanel({required this.summary});
+
+  final habits.HabitRoutineInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final habit = summary.habits;
+    final routine = summary.routines;
+
+    return DecoratedBox(
+      key: const ValueKey('insights-habit-routine-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.repeat_on_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Habit and routine intelligence',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                _TrendChip(
+                  label: 'Habits ${_percentLabel(habit.completionRate)}',
+                  direction: habit.completionRate >= 0.75
+                      ? trends.InsightTrendDirection.up
+                      : habit.completionRate == 0
+                      ? trends.InsightTrendDirection.flat
+                      : trends.InsightTrendDirection.down,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (habit.habitCount == 0 &&
+                routine.appliedCount == 0 &&
+                routine.skippedCount == 0 &&
+                routine.snoozedCount == 0)
+              Text(
+                'No habit or routine signal in this window yet.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else ...[
+              _MetricRail(
+                children: [
+                  _MetricPill(
+                    icon: Icons.check_circle_outline,
+                    label:
+                        '${habit.completedCount}/${habit.expectedCount} habit completions',
+                  ),
+                  if (habit.streakAtRisk != null)
+                    _MetricPill(
+                      icon: Icons.local_fire_department_outlined,
+                      label: 'Streak at risk: ${habit.streakAtRisk!.title}',
+                    ),
+                  if (habit.mostConsistentHabit != null)
+                    _MetricPill(
+                      icon: Icons.workspace_premium_outlined,
+                      label:
+                          'Most consistent: ${habit.mostConsistentHabit!.title}',
+                    ),
+                  _MetricPill(
+                    icon: Icons.playlist_add_check_outlined,
+                    label: '${routine.appliedCount} applied',
+                  ),
+                  _MetricPill(
+                    icon: Icons.block_outlined,
+                    label: '${routine.skippedCount} skipped',
+                  ),
+                  _MetricPill(
+                    icon: Icons.snooze_outlined,
+                    label: '${routine.snoozedCount} snoozed',
+                  ),
+                  if (routine.frequentlySnoozedRoutine != null)
+                    _MetricPill(
+                      icon: Icons.warning_amber_outlined,
+                      label:
+                          'Frequently snoozed: ${routine.frequentlySnoozedRoutine}',
+                    ),
+                ],
+              ),
+              if (habit.missedHabits.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Missed habits',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final node in habit.missedHabits.take(4))
+                      Chip(
+                        avatar: const Icon(
+                          Icons.radio_button_unchecked,
+                          size: 16,
+                        ),
+                        label: Text(node.title),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewInsightPanel extends StatelessWidget {
+  const _ReviewInsightPanel({required this.summary});
+
+  final reviews.ReviewInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final lastReview = summary.lastReviewDate;
+
+    return DecoratedBox(
+      key: const ValueKey('insights-review-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.rate_review_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Review and journaling cadence',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                if (!summary.hasReviewThisWeek)
+                  const _TrendChip(
+                    label: 'No review this week',
+                    direction: trends.InsightTrendDirection.down,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _MetricRail(
+              children: [
+                _MetricPill(
+                  icon: Icons.edit_note_outlined,
+                  label: '${summary.journalCount} journals',
+                ),
+                _MetricPill(
+                  icon: Icons.fact_check_outlined,
+                  label: '${summary.reviewCount} reviews',
+                ),
+                _MetricPill(
+                  icon: Icons.local_fire_department_outlined,
+                  label: '${summary.currentReflectionStreak} reflection streak',
+                ),
+                _MetricPill(
+                  icon: Icons.timeline_outlined,
+                  label: '${summary.longestReflectionStreak} longest streak',
+                ),
+                if (lastReview != null)
+                  _MetricPill(
+                    icon: Icons.event_available_outlined,
+                    label: 'Last ${DateFormat('MMM d').format(lastReview)}',
+                  ),
+                if (summary.reviewGaps.isNotEmpty)
+                  _MetricPill(
+                    icon: Icons.warning_amber_outlined,
+                    label: '${summary.reviewGaps.first.dayCount}d review gap',
+                  ),
+              ],
+            ),
+            if (summary.keywordBuckets.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Recurring themes',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final entry in summary.keywordBuckets.entries)
+                    Chip(label: Text('${entry.key} ${entry.value}')),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ContextHealthPanel extends StatelessWidget {
+  const _ContextHealthPanel({required this.summary});
+
+  final health.ContextHealthSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visibleItems = summary.items.take(6).toList(growable: false);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-context-health-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.account_tree_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Project and area health',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                if (summary.neglectedContexts.isNotEmpty)
+                  _TrendChip(
+                    label: '${summary.neglectedContexts.length} neglected',
+                    direction: trends.InsightTrendDirection.down,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (visibleItems.isEmpty)
+              Text(
+                'No project or area context yet.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else ...[
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columnSpacing: 18,
+                  horizontalMargin: 0,
+                  headingTextStyle: theme.textTheme.labelMedium,
+                  dataTextStyle: theme.textTheme.bodySmall,
+                  columns: const [
+                    DataColumn(label: Text('Context')),
+                    DataColumn(label: Text('Open')),
+                    DataColumn(label: Text('Done')),
+                    DataColumn(label: Text('Late')),
+                    DataColumn(label: Text('High')),
+                    DataColumn(label: Text('Health')),
+                  ],
+                  rows: [
+                    for (final item in visibleItems)
+                      DataRow(
+                        cells: [
+                          DataCell(
+                            Text(
+                              '${item.isProject ? 'Project' : 'Area'} ${item.name}',
+                            ),
+                          ),
+                          DataCell(Text('${item.openTasks}')),
+                          DataCell(Text('${item.completedTasks}')),
+                          DataCell(Text('${item.overdueTasks}')),
+                          DataCell(Text('${item.highPriorityOpenTasks}')),
+                          DataCell(
+                            Text(
+                              _contextHealthLabel(item.status),
+                              style: TextStyle(
+                                color: _contextHealthColor(theme, item.status),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              _MetricRail(
+                children: [
+                  if (summary.hotContexts.isNotEmpty)
+                    _MetricPill(
+                      icon: Icons.local_fire_department_outlined,
+                      label: 'Hot: ${summary.hotContexts.first.name}',
+                    ),
+                  if (summary.neglectedContexts.isNotEmpty)
+                    _MetricPill(
+                      icon: Icons.schedule_outlined,
+                      label:
+                          'Neglected: ${summary.neglectedContexts.first.name}',
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _contextHealthLabel(health.ContextHealthStatus status) {
+  switch (status) {
+    case health.ContextHealthStatus.good:
+      return 'good';
+    case health.ContextHealthStatus.watch:
+      return 'watch';
+    case health.ContextHealthStatus.stale:
+      return 'stale';
+    case health.ContextHealthStatus.critical:
+      return 'critical';
+  }
+}
+
+Color _contextHealthColor(ThemeData theme, health.ContextHealthStatus status) {
+  switch (status) {
+    case health.ContextHealthStatus.good:
+      return Colors.greenAccent.shade400;
+    case health.ContextHealthStatus.watch:
+      return Colors.orangeAccent.shade400;
+    case health.ContextHealthStatus.stale:
+      return theme.colorScheme.tertiary;
+    case health.ContextHealthStatus.critical:
+      return theme.colorScheme.error;
+  }
+}
+
+class _GoalInsightPanel extends StatelessWidget {
+  const _GoalInsightPanel({required this.summary});
+
+  final goals.GoalInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-goal-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.track_changes_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Goal and milestone progress',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                if (summary.needsNextActionGoals.isNotEmpty)
+                  const _TrendChip(
+                    label: 'Goal needs next action',
+                    direction: trends.InsightTrendDirection.down,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (summary.goalCount == 0)
+              Text(
+                'No goal nodes yet.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else ...[
+              _MetricRail(
+                children: [
+                  _MetricPill(
+                    icon: Icons.flag_outlined,
+                    label: '${summary.goalCount} goals',
+                  ),
+                  _MetricPill(
+                    icon: Icons.stacked_line_chart_outlined,
+                    label:
+                        '${_percentLabel(summary.averageProgress)} avg progress',
+                  ),
+                  _MetricPill(
+                    icon: Icons.radio_button_unchecked,
+                    label: '${summary.notStartedCount} not started',
+                  ),
+                  _MetricPill(
+                    icon: Icons.pending_actions_outlined,
+                    label: '${summary.inProgressCount} in progress',
+                  ),
+                  _MetricPill(
+                    icon: Icons.check_circle_outline,
+                    label: '${summary.completedCount} done',
+                  ),
+                  if (summary.milestoneMomentumCount > 0)
+                    _MetricPill(
+                      icon: Icons.rocket_launch_outlined,
+                      label:
+                          '${summary.milestoneMomentumCount} milestone momentum',
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (summary.stalledGoals.isNotEmpty)
+                    _GoalInsightChip(
+                      icon: Icons.warning_amber_outlined,
+                      label:
+                          'Stalled: ${summary.stalledGoals.first.node.title}',
+                      color: theme.colorScheme.error,
+                    ),
+                  if (summary.recentlyProgressedGoals.isNotEmpty)
+                    _GoalInsightChip(
+                      icon: Icons.trending_up,
+                      label:
+                          'Recently progressed: ${summary.recentlyProgressedGoals.first.node.title}',
+                      color: Colors.greenAccent.shade400,
+                    ),
+                  if (summary.needsNextActionGoals.isNotEmpty)
+                    _GoalInsightChip(
+                      icon: Icons.add_task_outlined,
+                      label:
+                          'Next action: ${summary.needsNextActionGoals.first.node.title}',
+                      color: Colors.orangeAccent.shade400,
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GoalInsightChip extends StatelessWidget {
+  const _GoalInsightChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightRiskPanel extends StatelessWidget {
+  const _InsightRiskPanel({required this.riskItems});
+
+  final List<risks.InsightRisk> riskItems;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visibleRisks = riskItems.take(5).toList(growable: false);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-risk-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.shield_outlined, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Smart risk detection',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                _TrendChip(
+                  label: riskItems.isEmpty
+                      ? 'No active risks'
+                      : '${riskItems.length} risks',
+                  direction: riskItems.isEmpty
+                      ? trends.InsightTrendDirection.flat
+                      : trends.InsightTrendDirection.volatile,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (visibleRisks.isEmpty)
+              Text(
+                'No actionable risk detected in local data.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
+              Column(
+                children: [
+                  for (final risk in visibleRisks) _InsightRiskTile(risk: risk),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightRiskTile extends StatelessWidget {
+  const _InsightRiskTile({required this.risk});
+
+  final risks.InsightRisk risk;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = _riskSeverityColor(theme, risk.severity);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(_riskSeverityIcon(risk.severity), color: color, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      risk.title,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(risk.message, style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      _riskActionLabel(risk.actionType),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Color _riskSeverityColor(ThemeData theme, risks.InsightRiskSeverity severity) {
+  switch (severity) {
+    case risks.InsightRiskSeverity.info:
+      return theme.colorScheme.primary;
+    case risks.InsightRiskSeverity.watch:
+      return Colors.orangeAccent.shade400;
+    case risks.InsightRiskSeverity.high:
+      return theme.colorScheme.tertiary;
+    case risks.InsightRiskSeverity.critical:
+      return theme.colorScheme.error;
+  }
+}
+
+IconData _riskSeverityIcon(risks.InsightRiskSeverity severity) {
+  switch (severity) {
+    case risks.InsightRiskSeverity.info:
+      return Icons.info_outline;
+    case risks.InsightRiskSeverity.watch:
+      return Icons.visibility_outlined;
+    case risks.InsightRiskSeverity.high:
+      return Icons.priority_high;
+    case risks.InsightRiskSeverity.critical:
+      return Icons.report_gmailerrorred;
+  }
+}
+
+String _riskActionLabel(risks.InsightRiskActionType actionType) {
+  switch (actionType) {
+    case risks.InsightRiskActionType.openCalendar:
+      return 'Action: open Calendar';
+    case risks.InsightRiskActionType.openDayReview:
+      return 'Action: open Day review';
+    case risks.InsightRiskActionType.filterContext:
+      return 'Action: inspect context';
+    case risks.InsightRiskActionType.createWeeklyReview:
+      return 'Action: create weekly review';
+    case risks.InsightRiskActionType.scheduleOverdue:
+      return 'Action: schedule overdue tasks';
+    case risks.InsightRiskActionType.balanceWorkload:
+      return 'Action: balance workload';
+  }
+}
+
+class _RecommendationPanel extends StatelessWidget {
+  const _RecommendationPanel({
+    required this.recommendations,
+    required this.onSmartViewChanged,
+    required this.onPriorityChanged,
+    required this.onCreateWeeklyReview,
+    required this.onProjectChanged,
+    required this.markdownReport,
+  });
+
+  final List<recs.InsightRecommendation> recommendations;
+  final ValueChanged<SmartNodeViewType> onSmartViewChanged;
+  final ValueChanged<NodePriority> onPriorityChanged;
+  final Future<void> Function() onCreateWeeklyReview;
+  final ValueChanged<String> onProjectChanged;
+  final String markdownReport;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visibleItems = recommendations.take(5).toList(growable: false);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-recommendation-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.auto_awesome_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Recommended next actions',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (visibleItems.isEmpty)
+              Text(
+                'No recommendations right now.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
+              Column(
+                children: [
+                  for (final item in visibleItems)
+                    _RecommendationTile(
+                      item: item,
+                      onPressed: () => _runRecommendation(context, item),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _runRecommendation(
+    BuildContext context,
+    recs.InsightRecommendation item,
+  ) {
+    switch (item.action) {
+      case recs.InsightRecommendationAction.openCalendar:
+        context.go(AppRoute.calendar.path);
+      case recs.InsightRecommendationAction.openDayReview:
+        context.go(AppRoute.calendar.path);
+      case recs.InsightRecommendationAction.filterContext:
+        final contextName = item.contextName;
+        if (contextName != null && contextName.isNotEmpty) {
+          onProjectChanged(contextName);
+        }
+      case recs.InsightRecommendationAction.createWeeklyReview:
+        onCreateWeeklyReview();
+      case recs.InsightRecommendationAction.scheduleOverdueTasks:
+        onSmartViewChanged(SmartNodeViewType.overdue);
+      case recs.InsightRecommendationAction.applyDayTemplate:
+        context.go(AppRoute.calendar.path);
+      case recs.InsightRecommendationAction.balanceWorkload:
+        onPriorityChanged(NodePriority.high);
+      case recs.InsightRecommendationAction.exportReport:
+        Clipboard.setData(ClipboardData(text: markdownReport));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Markdown report copied to clipboard')),
+        );
+    }
+  }
+}
+
+class _RecommendationTile extends StatelessWidget {
+  const _RecommendationTile({required this.item, required this.onPressed});
+
+  final recs.InsightRecommendation item;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.35,
+          ),
+          border: Border.all(color: theme.dividerColor),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              Icon(
+                _recommendationIcon(item.action),
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.title, style: theme.textTheme.labelLarge),
+                    const SizedBox(height: 2),
+                    Text(item.message, style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: onPressed,
+                child: Text(_recommendationActionLabel(item.action)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+IconData _recommendationIcon(recs.InsightRecommendationAction action) {
+  switch (action) {
+    case recs.InsightRecommendationAction.openCalendar:
+      return Icons.calendar_month_outlined;
+    case recs.InsightRecommendationAction.openDayReview:
+      return Icons.today_outlined;
+    case recs.InsightRecommendationAction.filterContext:
+      return Icons.filter_alt_outlined;
+    case recs.InsightRecommendationAction.createWeeklyReview:
+      return Icons.rate_review_outlined;
+    case recs.InsightRecommendationAction.scheduleOverdueTasks:
+      return Icons.event_repeat_outlined;
+    case recs.InsightRecommendationAction.applyDayTemplate:
+      return Icons.dashboard_customize_outlined;
+    case recs.InsightRecommendationAction.balanceWorkload:
+      return Icons.balance_outlined;
+    case recs.InsightRecommendationAction.exportReport:
+      return Icons.ios_share_outlined;
+  }
+}
+
+String _recommendationActionLabel(recs.InsightRecommendationAction action) {
+  switch (action) {
+    case recs.InsightRecommendationAction.openCalendar:
+      return 'Open';
+    case recs.InsightRecommendationAction.openDayReview:
+      return 'Review';
+    case recs.InsightRecommendationAction.filterContext:
+      return 'Filter';
+    case recs.InsightRecommendationAction.createWeeklyReview:
+      return 'Create';
+    case recs.InsightRecommendationAction.scheduleOverdueTasks:
+      return 'Schedule';
+    case recs.InsightRecommendationAction.applyDayTemplate:
+      return 'Apply';
+    case recs.InsightRecommendationAction.balanceWorkload:
+      return 'Balance';
+    case recs.InsightRecommendationAction.exportReport:
+      return 'Export';
   }
 }
 
@@ -820,7 +3113,10 @@ class _WeeklyPulsePanel extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.insights_outlined, color: theme.colorScheme.primary),
+                Icon(
+                  Icons.fact_check_outlined,
+                  color: theme.colorScheme.primary,
+                ),
                 const SizedBox(width: 8),
                 Text('Weekly pulse', style: theme.textTheme.titleSmall),
               ],
@@ -859,6 +3155,248 @@ class _WeeklyPulsePanel extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WeeklyReviewPanel extends StatelessWidget {
+  const _WeeklyReviewPanel({
+    required this.review,
+    required this.onCreateWeeklyReview,
+    required this.onRescheduleNode,
+    required this.onCompleteNode,
+    required this.onPinGoal,
+    required this.onCreateGoalNextAction,
+  });
+
+  final InsightsWeeklyReview review;
+  final Future<void> Function() onCreateWeeklyReview;
+  final Future<void> Function(MindmapNode node) onRescheduleNode;
+  final Future<void> Function(MindmapNode node) onCompleteNode;
+  final Future<void> Function(MindmapNode node) onPinGoal;
+  final Future<void> Function(MindmapNode node) onCreateGoalNextAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      key: const ValueKey('insights-weekly-review-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.fact_check_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Weekly review',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ),
+                FilledButton.icon(
+                  key: const ValueKey('insights-create-weekly-review'),
+                  onPressed: onCreateWeeklyReview,
+                  icon: const Icon(Icons.add_task_outlined, size: 16),
+                  label: const Text('Create review'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _MetricRail(
+              children: [
+                _MetricPill(
+                  icon: Icons.task_alt_outlined,
+                  label: _countLabel(
+                    review.completedTasks.length,
+                    'recent win',
+                  ),
+                ),
+                _MetricPill(
+                  icon: Icons.warning_amber_outlined,
+                  label: _countLabel(review.overdueTasks.length, 'overdue'),
+                ),
+                _MetricPill(
+                  icon: Icons.flag_outlined,
+                  label: _countLabel(
+                    review.activeGoals.length,
+                    'goal to review',
+                  ),
+                ),
+                _MetricPill(
+                  icon: Icons.rate_review_outlined,
+                  label: _countLabel(review.reviewNotes.length, 'review note'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _ReviewList(
+                  title: 'Wins',
+                  empty: 'No completed tasks this week',
+                  nodes: review.completedTasks,
+                  icon: Icons.emoji_events_outlined,
+                ),
+                _ReviewList(
+                  title: 'Needs attention',
+                  empty: 'No overdue tasks',
+                  nodes: review.overdueTasks,
+                  icon: Icons.priority_high_rounded,
+                  onRescheduleNode: onRescheduleNode,
+                  onCompleteNode: onCompleteNode,
+                ),
+                _ReviewList(
+                  title: 'Goals',
+                  empty: 'No active goals',
+                  nodes: review.activeGoals,
+                  icon: Icons.flag_outlined,
+                  onPinNode: onPinGoal,
+                  onCreateNextAction: onCreateGoalNextAction,
+                ),
+              ],
+            ),
+            if (review.suggestedActions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text('Suggested actions', style: theme.textTheme.labelMedium),
+              const SizedBox(height: 6),
+              for (final action in review.suggestedActions)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.arrow_right_rounded, size: 18),
+                      const SizedBox(width: 4),
+                      Expanded(child: Text(action)),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewList extends StatelessWidget {
+  const _ReviewList({
+    required this.title,
+    required this.empty,
+    required this.nodes,
+    required this.icon,
+    this.onRescheduleNode,
+    this.onCompleteNode,
+    this.onPinNode,
+    this.onCreateNextAction,
+  });
+
+  final String title;
+  final String empty;
+  final List<MindmapNode> nodes;
+  final IconData icon;
+  final Future<void> Function(MindmapNode node)? onRescheduleNode;
+  final Future<void> Function(MindmapNode node)? onCompleteNode;
+  final Future<void> Function(MindmapNode node)? onPinNode;
+  final Future<void> Function(MindmapNode node)? onCreateNextAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: 260,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.25,
+          ),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: theme.dividerColor.withValues(alpha: 0.65)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 16, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text(title, style: theme.textTheme.labelLarge),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (nodes.isEmpty)
+                Text(
+                  empty,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                for (final node in nodes)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '• ${node.title}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                        if (onRescheduleNode != null)
+                          IconButton(
+                            tooltip: 'Reschedule tomorrow',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.event_repeat, size: 16),
+                            onPressed: () => onRescheduleNode?.call(node),
+                          ),
+                        if (onCompleteNode != null)
+                          IconButton(
+                            tooltip: 'Mark done',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(
+                              Icons.check_circle_outline,
+                              size: 16,
+                            ),
+                            onPressed: () => onCompleteNode?.call(node),
+                          ),
+                        if (onPinNode != null)
+                          IconButton(
+                            tooltip: 'Pin goal',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.push_pin_outlined, size: 16),
+                            onPressed: () => onPinNode?.call(node),
+                          ),
+                        if (onCreateNextAction != null)
+                          IconButton(
+                            tooltip: 'Create next action',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.add_task_outlined, size: 16),
+                            onPressed: () => onCreateNextAction?.call(node),
+                          ),
+                      ],
+                    ),
+                  ),
+            ],
+          ),
         ),
       ),
     );
@@ -1458,6 +3996,33 @@ class _AutomationCenterDialogState
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('Preset library', style: theme.textTheme.labelLarge),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final preset in defaultAutomationRulePresets)
+                          FilterChip(
+                            key: ValueKey(
+                              'automation-center-preset-${preset.id}',
+                            ),
+                            avatar: Icon(
+                              _hasAutomationPreset(preset)
+                                  ? Icons.check_circle_outline
+                                  : Icons.add_outlined,
+                              size: 16,
+                            ),
+                            label: Text(preset.label),
+                            selected: _hasAutomationPreset(preset),
+                            onSelected:
+                                _isApplying || _hasAutomationPreset(preset)
+                                ? null
+                                : (_) => _installPresetRule(preset),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     if (_automationRules.isNotEmpty) ...[
                       Text('Custom rules', style: theme.textTheme.labelLarge),
                       const SizedBox(height: 4),
@@ -1749,6 +4314,33 @@ class _AutomationCenterDialogState
     final repository = ref.read(mindmapRepositoryProvider);
     final day = widget.suggestions.day.dateOnly;
     await repository.deleteNode(rule.nodeId);
+    _invalidateAutomationState(day);
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  bool _hasAutomationPreset(AutomationRulePreset preset) {
+    return _automationRules.any(
+      (rule) =>
+          rule.id == preset.id ||
+          (rule.label == preset.label && rule.templateId == preset.templateId),
+    );
+  }
+
+  Future<void> _installPresetRule(AutomationRulePreset preset) async {
+    setState(() => _isApplying = true);
+    final repository = ref.read(mindmapRepositoryProvider);
+    final day = widget.suggestions.day.dateOnly;
+    final now = DateTime.now();
+    await repository.saveNode(
+      createAutomationRuleNodeFromPreset(
+        id: preset.id,
+        preset: preset,
+        day: day,
+        now: now,
+      ),
+    );
     _invalidateAutomationState(day);
 
     if (!mounted) return;
@@ -2645,6 +5237,149 @@ class _SmartViewsBand extends StatelessWidget {
   }
 }
 
+class _InsightShortcutHintBar extends StatelessWidget {
+  const _InsightShortcutHintBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Insights keyboard shortcuts',
+      child: const SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _ShortcutHint(label: 'T', action: 'Today'),
+            SizedBox(width: 6),
+            _ShortcutHint(label: 'W', action: 'Week'),
+            SizedBox(width: 6),
+            _ShortcutHint(label: 'M', action: 'Month'),
+            SizedBox(width: 6),
+            _ShortcutHint(label: '/', action: 'Search'),
+            SizedBox(width: 6),
+            _ShortcutHint(label: 'E', action: 'Export'),
+            SizedBox(width: 6),
+            _ShortcutHint(label: 'R', action: 'Refresh'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShortcutHint extends StatelessWidget {
+  const _ShortcutHint({required this.label, required this.action});
+
+  final String label;
+  final String action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.45,
+        ),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(action, style: theme.textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightRangeFilterBar extends StatelessWidget {
+  const _InsightRangeFilterBar({
+    required this.rangePreset,
+    required this.typeFilter,
+    required this.tagFilter,
+    required this.nodes,
+    required this.onRangePresetChanged,
+    required this.onTypeChanged,
+    required this.onTagChanged,
+    required this.onClear,
+  });
+
+  final insight_filters.InsightRangePreset rangePreset;
+  final NodeType? typeFilter;
+  final String? tagFilter;
+  final List<MindmapNode> nodes;
+  final ValueChanged<insight_filters.InsightRangePreset> onRangePresetChanged;
+  final ValueChanged<NodeType> onTypeChanged;
+  final ValueChanged<String> onTagChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final tags = <String>{
+      for (final node in nodes)
+        for (final tag in node.tags)
+          if (tag.trim().isNotEmpty) tag,
+    }.toList()..sort();
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final preset in insight_filters.InsightRangePreset.values)
+          ChoiceChip(
+            label: Text(_rangePresetLabel(preset)),
+            selected: rangePreset == preset,
+            onSelected: (_) => onRangePresetChanged(preset),
+          ),
+        const SizedBox(width: 4),
+        for (final type in NodeType.values.take(8))
+          FilterChip(
+            label: Text(type.label),
+            selected: typeFilter == type,
+            onSelected: (_) => onTypeChanged(type),
+          ),
+        for (final tag in tags.take(6))
+          FilterChip(
+            label: Text('Tag: #$tag'),
+            selected: tagFilter == tag,
+            onSelected: (_) => onTagChanged(tag),
+          ),
+        TextButton.icon(
+          onPressed: onClear,
+          icon: const Icon(Icons.clear_all),
+          label: const Text('Clear filters'),
+        ),
+      ],
+    );
+  }
+}
+
+String _rangePresetLabel(insight_filters.InsightRangePreset preset) {
+  switch (preset) {
+    case insight_filters.InsightRangePreset.today:
+      return 'Today';
+    case insight_filters.InsightRangePreset.sevenDays:
+      return '7 days';
+    case insight_filters.InsightRangePreset.thirtyDays:
+      return '30 days';
+    case insight_filters.InsightRangePreset.thisMonth:
+      return 'This month';
+  }
+}
+
 class _MetricRail extends StatelessWidget {
   const _MetricRail({required this.children});
 
@@ -2881,21 +5616,26 @@ class _MetricPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: theme.colorScheme.primary),
-            const SizedBox(width: 8),
-            Text(label, style: theme.textTheme.labelMedium),
-          ],
+    return Semantics(
+      label: 'Insight metric: $label',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.5,
+          ),
+          border: Border.all(color: theme.dividerColor),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(label, style: theme.textTheme.labelMedium),
+            ],
+          ),
         ),
       ),
     );
@@ -3007,15 +5747,83 @@ class _MetadataPills extends StatelessWidget {
   }
 }
 
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: theme.colorScheme.primary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: theme.textTheme.titleSmall),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _EmptyResults extends StatelessWidget {
   const _EmptyResults();
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Center(
-      child: Text(
-        'No matching nodes',
-        style: Theme.of(context).textTheme.bodySmall,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.35,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.search_off_outlined,
+                color: theme.colorScheme.primary,
+                size: 32,
+              ),
+              const SizedBox(height: 10),
+              Text('No matching nodes', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text(
+                'Try clearing search, status, priority, workspace, or smart view filters.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3100,6 +5908,16 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.habit => Icons.repeat_outlined,
   NodeType.goal => Icons.flag_outlined,
   NodeType.link => Icons.link_outlined,
+  NodeType.event => Icons.event_outlined,
+  NodeType.decision => Icons.rule_outlined,
+  NodeType.resource => Icons.inventory_2_outlined,
+  NodeType.idea => Icons.lightbulb_outline,
+  NodeType.question => Icons.help_outline,
+  NodeType.contact => Icons.person_outline,
+  NodeType.metric => Icons.query_stats_outlined,
+  NodeType.expense => Icons.payments_outlined,
+  NodeType.bookmark => Icons.bookmark_border,
+  NodeType.routine => Icons.repeat_on_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 
@@ -3247,16 +6065,19 @@ class _AnimatedCounterState extends State<AnimatedCounter>
 }
 
 class _ExportDataDialog extends StatefulWidget {
-  const _ExportDataDialog({required this.nodes});
+  const _ExportDataDialog({required this.nodes, required this.markdownReport});
 
   final List<MindmapNode> nodes;
+  final String markdownReport;
 
   @override
   State<_ExportDataDialog> createState() => _ExportDataDialogState();
 }
 
+enum _ExportFormat { markdown, json, csv }
+
 class _ExportDataDialogState extends State<_ExportDataDialog> {
-  bool _isJson = true;
+  _ExportFormat _format = _ExportFormat.markdown;
   late String _data;
 
   @override
@@ -3266,7 +6087,9 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
   }
 
   void _generateData() {
-    if (_isJson) {
+    if (_format == _ExportFormat.markdown) {
+      _data = widget.markdownReport;
+    } else if (_format == _ExportFormat.json) {
       final list = widget.nodes
           .map(
             (n) => {
@@ -3313,7 +6136,7 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
     final theme = Theme.of(context);
 
     return AlertDialog(
-      title: const Text('Export Workspace Data'),
+      title: const Text('Export Insights Report'),
       content: SizedBox(
         width: 600,
         height: 450,
@@ -3323,12 +6146,25 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
             Row(
               children: [
                 ChoiceChip(
-                  label: const Text('JSON Format'),
-                  selected: _isJson,
+                  label: const Text('Markdown Report'),
+                  selected: _format == _ExportFormat.markdown,
                   onSelected: (val) {
                     if (val) {
                       setState(() {
-                        _isJson = true;
+                        _format = _ExportFormat.markdown;
+                        _generateData();
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(width: 10),
+                ChoiceChip(
+                  label: const Text('JSON Format'),
+                  selected: _format == _ExportFormat.json,
+                  onSelected: (val) {
+                    if (val) {
+                      setState(() {
+                        _format = _ExportFormat.json;
                         _generateData();
                       });
                     }
@@ -3337,11 +6173,11 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
                 const SizedBox(width: 10),
                 ChoiceChip(
                   label: const Text('CSV Format'),
-                  selected: !_isJson,
+                  selected: _format == _ExportFormat.csv,
                   onSelected: (val) {
                     if (val) {
                       setState(() {
-                        _isJson = false;
+                        _format = _ExportFormat.csv;
                         _generateData();
                       });
                     }
@@ -3384,7 +6220,7 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
             await Clipboard.setData(ClipboardData(text: _data));
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Copied data to clipboard!')),
+                const SnackBar(content: Text('Copied export to clipboard!')),
               );
               Navigator.pop(context);
             }
@@ -3397,10 +6233,298 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
   }
 }
 
+class _InsightDrillDownPanel extends StatelessWidget {
+  const _InsightDrillDownPanel({
+    required this.nodeIndex,
+    required this.contextHealth,
+    required this.habitSummary,
+    required this.reviewSummary,
+    required this.goalSummary,
+    required this.onProjectChanged,
+    required this.onAreaChanged,
+  });
+
+  final insight_cache.InsightNodeIndex nodeIndex;
+  final health.ContextHealthSummary contextHealth;
+  final habits.HabitInsightSummary habitSummary;
+  final reviews.ReviewInsightSummary reviewSummary;
+  final goals.GoalInsightSummary goalSummary;
+  final ValueChanged<String> onProjectChanged;
+  final ValueChanged<String> onAreaChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final overdue = nodeIndex.overdueTaskNodes.take(8).toList(growable: false);
+    final highPriority = nodeIndex.highPriorityOpenTaskNodes
+        .take(8)
+        .toList(growable: false);
+    final contextItems = contextHealth.items.take(8).toList(growable: false);
+    final habitsAtRisk =
+        [
+              if (habitSummary.streakAtRisk != null) habitSummary.streakAtRisk!,
+              ...habitSummary.streaks.where((streak) => streak.isAtRisk),
+            ]
+            .fold<Map<String, habits.HabitStreak>>(
+              <String, habits.HabitStreak>{},
+              (values, streak) =>
+                  values..putIfAbsent(streak.nodeId, () => streak),
+            )
+            .values
+            .toList(growable: false);
+    final reviewGaps = reviewSummary.reviewGaps.take(5).toList(growable: false);
+    final goalItems =
+        [...goalSummary.stalledGoals, ...goalSummary.needsNextActionGoals]
+            .fold<Map<String, goals.GoalProgressItem>>(
+              <String, goals.GoalProgressItem>{},
+              (values, item) => values..putIfAbsent(item.node.id, () => item),
+            )
+            .values
+            .take(8)
+            .toList(growable: false);
+
+    return DecoratedBox(
+      key: const ValueKey('insights-drill-down-panel'),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.unfold_more, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text('Drill-down panels', style: theme.textTheme.titleSmall),
+                ],
+              ),
+            ),
+            _DrillDownTile(
+              title: 'Overdue tasks detail',
+              count: overdue.length,
+              icon: Icons.warning_amber_outlined,
+              children: _nodeRows(context, overdue, empty: 'No overdue tasks.'),
+            ),
+            _DrillDownTile(
+              title: 'High-priority tasks detail',
+              count: highPriority.length,
+              icon: Icons.priority_high_outlined,
+              children: _nodeRows(
+                context,
+                highPriority,
+                empty: 'No high-priority open tasks.',
+              ),
+            ),
+            _DrillDownTile(
+              title: 'Project / area detail',
+              count: contextItems.length,
+              icon: Icons.workspaces_outline,
+              children: contextItems.isEmpty
+                  ? const [
+                      _EmptyDrillDownRow(
+                        message: 'No project or area activity.',
+                      ),
+                    ]
+                  : [
+                      for (final item in contextItems)
+                        ListTile(
+                          dense: true,
+                          leading: Icon(
+                            item.isProject
+                                ? Icons.folder_outlined
+                                : Icons.public_outlined,
+                          ),
+                          title: Text(item.name),
+                          subtitle: Text(
+                            '${item.openTasks} open · ${item.completedTasks} done · ${item.overdueTasks} overdue',
+                          ),
+                          trailing: Text(_contextStatusLabel(item.status)),
+                          onTap: () => item.isProject
+                              ? onProjectChanged(item.name)
+                              : onAreaChanged(item.name),
+                        ),
+                    ],
+            ),
+            _DrillDownTile(
+              title: 'Habit detail',
+              count: habitSummary.missedHabits.length + habitsAtRisk.length,
+              icon: Icons.repeat_on_outlined,
+              children: [
+                if (habitSummary.missedHabits.isEmpty && habitsAtRisk.isEmpty)
+                  const _EmptyDrillDownRow(message: 'No habit issues.'),
+                for (final node in habitSummary.missedHabits.take(6))
+                  _NodeDrillDownRow(
+                    node: node,
+                    subtitle: 'Missed in selected range',
+                  ),
+                for (final streak in habitsAtRisk.take(6))
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.local_fire_department_outlined),
+                    title: Text(streak.title),
+                    subtitle: Text(
+                      'Current ${streak.currentStreak} · Longest ${streak.longestStreak}',
+                    ),
+                  ),
+              ],
+            ),
+            _DrillDownTile(
+              title: 'Review detail',
+              count: reviewGaps.length,
+              icon: Icons.rate_review_outlined,
+              children: reviewGaps.isEmpty
+                  ? const [_EmptyDrillDownRow(message: 'No review gaps.')]
+                  : [
+                      for (final gap in reviewGaps)
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.event_busy_outlined),
+                          title: Text('${gap.dayCount} day gap'),
+                          subtitle: Text(
+                            '${dayKey(gap.start)} → ${dayKey(gap.end)}',
+                          ),
+                        ),
+                    ],
+            ),
+            _DrillDownTile(
+              title: 'Goal detail',
+              count: goalItems.length,
+              icon: Icons.track_changes_outlined,
+              children: goalItems.isEmpty
+                  ? const [_EmptyDrillDownRow(message: 'No goal issues.')]
+                  : [
+                      for (final item in goalItems)
+                        _NodeDrillDownRow(
+                          node: item.node,
+                          subtitle:
+                              '${(item.progress * 100).round()}% · ${item.isStalled ? 'stalled' : 'needs next action'}',
+                        ),
+                    ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _nodeRows(
+    BuildContext context,
+    List<MindmapNode> values, {
+    required String empty,
+  }) {
+    if (values.isEmpty) return [_EmptyDrillDownRow(message: empty)];
+    return [
+      for (final node in values)
+        _NodeDrillDownRow(node: node, subtitle: _nodeSubtitle(node)),
+    ];
+  }
+}
+
+class _DrillDownTile extends StatelessWidget {
+  const _DrillDownTile({
+    required this.title,
+    required this.count,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final int count;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+      childrenPadding: const EdgeInsets.only(left: 8, right: 8, bottom: 8),
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: Chip(
+        label: Text('$count'),
+        visualDensity: VisualDensity.compact,
+      ),
+      children: children,
+    );
+  }
+}
+
+class _NodeDrillDownRow extends StatelessWidget {
+  const _NodeDrillDownRow({required this.node, required this.subtitle});
+
+  final MindmapNode node;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      leading: Icon(_nodeIcon(node.type)),
+      title: Text(node.title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.open_in_new, size: 16),
+      onTap: () => context.go(
+        '/calendar/${dayKey(node.day)}/node/${Uri.encodeComponent(node.id)}',
+      ),
+    );
+  }
+}
+
+class _EmptyDrillDownRow extends StatelessWidget {
+  const _EmptyDrillDownRow({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.check_circle_outline),
+      title: Text(message),
+    );
+  }
+}
+
+String _nodeSubtitle(MindmapNode node) {
+  final parts = <String>[
+    node.status.label,
+    node.priority.label,
+    dayKey(node.day),
+    if (node.dueDate != null) 'due ${dayKey(node.dueDate!)}',
+    if (node.project.isNotEmpty) node.project,
+    if (node.area.isNotEmpty) node.area,
+    ...node.tags.map((tag) => '#$tag'),
+  ];
+  return parts.join(' · ');
+}
+
+String _contextStatusLabel(health.ContextHealthStatus status) {
+  switch (status) {
+    case health.ContextHealthStatus.good:
+      return 'good';
+    case health.ContextHealthStatus.watch:
+      return 'watch';
+    case health.ContextHealthStatus.stale:
+      return 'stale';
+    case health.ContextHealthStatus.critical:
+      return 'critical';
+  }
+}
+
 class _FocusTimerAnalyticsPanel extends StatelessWidget {
-  const _FocusTimerAnalyticsPanel({required this.summary, required this.today});
+  const _FocusTimerAnalyticsPanel({
+    required this.summary,
+    required this.focusSummary,
+    required this.today,
+  });
 
   final InsightsSummary summary;
+  final focus.FocusInsightSummary focusSummary;
   final DateTime today;
 
   @override
@@ -3428,10 +6552,17 @@ class _FocusTimerAnalyticsPanel extends StatelessWidget {
               children: [
                 Icon(Icons.hourglass_empty, color: theme.colorScheme.primary),
                 const SizedBox(width: 8),
-                Text(
-                  'Focus Session Analytics',
-                  style: theme.textTheme.titleSmall,
+                Expanded(
+                  child: Text(
+                    'Focus and time investment',
+                    style: theme.textTheme.titleSmall,
+                  ),
                 ),
+                if (focusSummary.hasLowFocusWarning)
+                  const _TrendChip(
+                    label: 'Low focus warning',
+                    direction: trends.InsightTrendDirection.volatile,
+                  ),
               ],
             ),
             const SizedBox(height: 10),
@@ -3439,14 +6570,24 @@ class _FocusTimerAnalyticsPanel extends StatelessWidget {
               children: [
                 _MetricPill(
                   icon: Icons.timer_outlined,
-                  label:
-                      '${summary.totalFocusMinutesToday} focus minutes today',
+                  label: '${focusSummary.totalMinutes} focus minutes',
                 ),
+                if (focusSummary.bestFocusDay != null)
+                  _MetricPill(
+                    icon: Icons.bolt_outlined,
+                    label:
+                        'Best ${DateFormat('E').format(focusSummary.bestFocusDay!)} ${focusSummary.bestFocusMinutes}m',
+                  ),
                 _MetricPill(
                   icon: Icons.alarm_on,
                   label:
                       '${summary.weeklyFocusSessionsCount} focus sessions this week',
                 ),
+                if (focusSummary.plannedOpenTasks > 0)
+                  _MetricPill(
+                    icon: Icons.task_alt_outlined,
+                    label: '${focusSummary.plannedOpenTasks} planned open',
+                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -3457,13 +6598,87 @@ class _FocusTimerAnalyticsPanel extends StatelessWidget {
                 for (final day in days)
                   () {
                     final key = dayKey(day);
-                    final mins = summary.focusMinutesByDay[key] ?? 0;
-                    return _FocusDayPill(day: day, focusMinutes: mins);
+                    final bucket = focusSummary.minutesByDay.firstWhere(
+                      (item) => item.label == key,
+                      orElse: () => focus.FocusBucket(label: key, minutes: 0),
+                    );
+                    return _FocusDayPill(
+                      day: day,
+                      focusMinutes: bucket.minutes,
+                    );
                   }(),
               ],
             ),
+            if (focusSummary.minutesByProject.isNotEmpty ||
+                focusSummary.minutesByArea.isNotEmpty ||
+                focusSummary.minutesByTag.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _FocusContextBuckets(summary: focusSummary),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FocusContextBuckets extends StatelessWidget {
+  const _FocusContextBuckets({required this.summary});
+
+  final focus.FocusInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (summary.minutesByProject.isNotEmpty)
+          _FocusBucketRail(
+            title: 'Projects',
+            buckets: summary.minutesByProject,
+          ),
+        if (summary.minutesByArea.isNotEmpty)
+          _FocusBucketRail(title: 'Areas', buckets: summary.minutesByArea),
+        if (summary.minutesByTag.isNotEmpty)
+          _FocusBucketRail(title: 'Tags', buckets: summary.minutesByTag),
+      ],
+    );
+  }
+}
+
+class _FocusBucketRail extends StatelessWidget {
+  const _FocusBucketRail({required this.title, required this.buckets});
+
+  final String title;
+  final List<focus.FocusBucket> buckets;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final bucket in buckets)
+                _MetricPill(
+                  icon: Icons.pie_chart_outline,
+                  label: '${bucket.label} ${bucket.minutes}m',
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

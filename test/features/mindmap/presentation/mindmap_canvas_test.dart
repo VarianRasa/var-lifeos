@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
@@ -55,6 +56,40 @@ void main() {
     },
   );
 
+  testWidgets('MindmapCanvas does not paint cursor trails on hover', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: const Scaffold(body: MindmapCanvas(nodes: [])),
+      ),
+    );
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(
+      location: tester.getCenter(find.byKey(const ValueKey('mindmap-canvas'))),
+    );
+    await tester.pump();
+    await gesture.moveBy(const Offset(24, 12));
+    await tester.pump();
+
+    final backgroundPaints = tester.widgetList<CustomPaint>(
+      find.byType(CustomPaint),
+    );
+    final hasCursorTrail = backgroundPaints.any((paint) {
+      final painter = paint.painter as dynamic;
+      try {
+        // ignore: avoid_dynamic_calls
+        return (painter.cursorTrail as List).isNotEmpty;
+      } catch (_) {
+        return false;
+      }
+    });
+
+    expect(hasCursorTrail, isFalse);
+  });
+
   testWidgets('MindmapCanvas exposes toolbar state and shortcut help', (
     tester,
   ) async {
@@ -64,6 +99,11 @@ void main() {
         home: const Scaffold(body: MindmapCanvas(nodes: [])),
       ),
     );
+
+    expect(find.text('100%'), findsOneWidget);
+
+    await tester.tap(find.text('100%'));
+    await tester.pumpAndSettle();
 
     expect(find.text('Grid on'), findsOneWidget);
     expect(find.text('Snap off'), findsOneWidget);
@@ -76,6 +116,71 @@ void main() {
     expect(find.text('Focus search'), findsOneWidget);
     expect(find.text('Ctrl+G'), findsOneWidget);
     expect(find.text('Toggle grid'), findsOneWidget);
+  });
+
+  testWidgets('MindmapCanvas disables primary-button canvas panning', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: const Scaffold(body: MindmapCanvas(nodes: [])),
+      ),
+    );
+
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byKey(const ValueKey('mindmap-canvas')),
+    );
+
+    expect(viewer.panEnabled, isFalse);
+  });
+
+  testWidgets('MindmapCanvas keeps node drag under cursor when zoomed out', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 6, 18);
+    final node = MindmapNode.create(
+      id: 'task-zoom',
+      type: NodeType.task,
+      title: 'Zoom drag',
+      day: day,
+      position: const CanvasPosition(-120, -40),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    CanvasPosition? movedPosition;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: Scaffold(
+          body: MindmapCanvas(
+            nodes: [node],
+            onNodeMoved: (_, position) {
+              movedPosition = position;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('Show canvas controls'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Zoom Out'));
+    await tester.pumpAndSettle();
+
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byKey(const ValueKey('mindmap-canvas')),
+    );
+    final scale = viewer.transformationController!.value.getMaxScaleOnAxis();
+    expect(scale, lessThan(1));
+
+    await tester.drag(
+      find.byKey(const ValueKey('mindmap-node-task-zoom')),
+      const Offset(32, 16),
+    );
+    await tester.pump();
+
+    expect(movedPosition, CanvasPosition(-120 + 32 / scale, -40 + 16 / scale));
   });
 
   testWidgets('MindmapCanvas reports a dragged node position', (tester) async {
@@ -213,10 +318,10 @@ void main() {
       ),
     );
 
-    await tester.tap(
+    await _pressButton(
+      tester,
       find.byKey(const ValueKey('mindmap-task-checklist-next-task-1')),
     );
-    await tester.pump();
 
     expect(advancedNode?.id, 'task-1');
     expect(selectedNode, isNull);
@@ -288,8 +393,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('mindmap-habit-log-habit-1')));
-    await tester.pump();
+    await _pressButton(
+      tester,
+      find.byKey(const ValueKey('mindmap-habit-log-habit-1')),
+    );
 
     expect(loggedNode?.id, 'habit-1');
   });
@@ -367,8 +474,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('mindmap-goal-advance-goal-1')));
-    await tester.pump();
+    await _pressButton(
+      tester,
+      find.byKey(const ValueKey('mindmap-goal-advance-goal-1')),
+    );
 
     expect(advancedNode?.id, 'goal-1');
     expect(selectedNode, isNull);
@@ -447,8 +556,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('mindmap-plan-advance-plan-1')));
-    await tester.pump();
+    await _pressButton(
+      tester,
+      find.byKey(const ValueKey('mindmap-plan-advance-plan-1')),
+    );
 
     expect(advancedNode?.id, 'plan-1');
     expect(selectedNode, isNull);
@@ -545,6 +656,9 @@ void main() {
       ),
     );
 
+    await tester.tap(find.text('Show search'));
+    await tester.pump();
+
     await tester.enterText(find.byType(TextField), 'missing');
     await tester.pump();
 
@@ -563,6 +677,62 @@ void main() {
       findsNothing,
     );
     expect(find.byKey(const ValueKey('mindmap-node-note-1')), findsOneWidget);
+  });
+
+  testWidgets('MindmapCanvas type filter chips filter visible nodes', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 6, 18);
+    final task = MindmapNode.create(
+      id: 'task-filter',
+      type: NodeType.task,
+      title: 'Task item',
+      day: day,
+      position: const CanvasPosition(-80, 0),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    final contact = MindmapNode.create(
+      id: 'contact-filter',
+      type: NodeType.contact,
+      title: 'Contact item',
+      day: day,
+      position: const CanvasPosition(80, 0),
+      now: DateTime(2026, 6, 18, 8),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: Scaffold(body: MindmapCanvas(nodes: [task, contact])),
+      ),
+    );
+
+    await tester.tap(find.text('Show search'));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('mindmap-search-filter-task')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('mindmap-node-task-filter')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('mindmap-node-contact-filter')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('mindmap-search-filter-all')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('mindmap-node-task-filter')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('mindmap-node-contact-filter')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('MindmapCanvas renders relation count metadata', (tester) async {
@@ -835,4 +1005,87 @@ void main() {
     expect(advancedCardId, 'card-1');
     expect(selectedNode, isNull);
   });
+
+  testWidgets(
+    'MindmapCanvas triggers onNodeDisconnected when re-linking connected nodes',
+    (tester) async {
+      final day = DateTime(2026, 6, 18);
+      final node1 = MindmapNode.create(
+        id: 'task-1',
+        type: NodeType.task,
+        title: 'Task 1',
+        day: day,
+        position: const CanvasPosition(-100, -100),
+        relatedNodeIds: ['task-2'],
+        now: day,
+      );
+      final node2 = MindmapNode.create(
+        id: 'task-2',
+        type: NodeType.task,
+        title: 'Task 2',
+        day: day,
+        position: const CanvasPosition(100, 100),
+        now: day,
+      );
+
+      MindmapNode? disconnectedSource;
+      MindmapNode? disconnectedTarget;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MindmapCanvas(
+              nodes: [node1, node2],
+              onNodeDisconnected: (src, tgt) {
+                disconnectedSource = src;
+                disconnectedTarget = tgt;
+              },
+            ),
+          ),
+        ),
+      );
+
+      final nodeFinder = find.byKey(const ValueKey('mindmap-node-task-1'));
+      final center = tester.getCenter(nodeFinder);
+
+      // Node is Size(340, 320). Port is at right: -6, top: 88 (center y is 88 + 9 = 97).
+      // Center of node is at (170, 160) local.
+      // Output port local coordinates: dx = 340 - 9 = 331. dy = 97.
+      // Offset from center to output port: dx = 331 - 170 = 161. dy = 97 - 160 = -63.
+      final portGlobal = center + const Offset(161, -63);
+
+      final gesture = await tester.startGesture(portGlobal);
+      await tester.pump();
+
+      // Drag to node 2 input port. Node 2 is at CanvasPosition(100, 100).
+      // Since it's shifted by (200, 200) relative to node 1.
+      // Node 2 input port local coordinates: dx = 9. dy = 97.
+      // Offset from node 2 center: dx = 9 - 170 = -161. dy = 97 - 160 = -63.
+      final node2Finder = find.byKey(const ValueKey('mindmap-node-task-2'));
+      final node2Center = tester.getCenter(node2Finder);
+      final targetPortGlobal = node2Center + const Offset(-161, -63);
+
+      await gesture.moveTo(targetPortGlobal);
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(disconnectedSource?.id, 'task-1');
+      expect(disconnectedTarget?.id, 'task-2');
+    },
+  );
+}
+
+Future<void> _pressButton(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pump();
+  final widget = tester.widget(finder);
+  if (widget is ButtonStyleButton) {
+    widget.onPressed?.call();
+  } else if (widget is IconButton) {
+    widget.onPressed?.call();
+  } else {
+    await tester.tap(finder, warnIfMissed: false);
+  }
+  await tester.pump();
 }

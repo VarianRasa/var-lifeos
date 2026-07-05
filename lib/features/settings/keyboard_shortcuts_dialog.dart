@@ -19,28 +19,79 @@ class ShortcutItem {
 const List<ShortcutGroup> _shortcutGroups = [
   ShortcutGroup('Global', [
     ShortcutItem(['Ctrl', 'K'], 'Open command palette'),
+    ShortcutItem(['Ctrl', 'T'], 'Jump to today'),
     ShortcutItem(['Ctrl', '/'], 'Show this shortcut reference'),
     ShortcutItem(['?'], 'Show this shortcut reference'),
   ]),
-  ShortcutGroup('Calendar', [
+  ShortcutGroup('Calendar / Agenda', [
     ShortcutItem(['←', '→'], 'Navigate months'),
-    ShortcutItem(['Ctrl', 'T'], 'Jump to today'),
     ShortcutItem(['Enter'], 'Open selected day'),
+    ShortcutItem(['1'], 'Agenda filter: all'),
+    ShortcutItem(['2'], 'Agenda filter: tasks'),
+    ShortcutItem(['3'], 'Agenda filter: events'),
+    ShortcutItem(['4'], 'Agenda filter: habits'),
+    ShortcutItem(['5'], 'Agenda filter: routines'),
+    ShortcutItem(['6'], 'Agenda filter: done'),
   ]),
-  ShortcutGroup('Mindmap', [
+  ShortcutGroup('Command grammar', [
+    ShortcutItem(['complete A'], 'Complete first matching node'),
+    ShortcutItem(['link A to B'], 'Create relation'),
+    ShortcutItem(['unlink A from B'], 'Remove relation'),
+    ShortcutItem(['tag A with x'], 'Add tag'),
+    ShortcutItem(['remove tag A with x'], 'Remove tag'),
+    ShortcutItem(['pin A / unpin A'], 'Pin or unpin node'),
+    ShortcutItem(['archive A / unarchive A'], 'Archive or restore node'),
+    ShortcutItem(['status A doing'], 'Set status'),
+    ShortcutItem(['clear status A'], 'Reset status to open'),
+    ShortcutItem(['priority A high'], 'Set priority'),
+    ShortcutItem(['clear priority A'], 'Reset priority'),
+    ShortcutItem(['type A note'], 'Convert node type'),
+    ShortcutItem(['due A tomorrow'], 'Set due date'),
+    ShortcutItem(['undue A'], 'Clear due date'),
+    ShortcutItem(['remove project A'], 'Clear project/area/tags aliases'),
+    ShortcutItem(['rename A to B'], 'Rename node'),
+    ShortcutItem(['append A with text'], 'Append body text'),
+    ShortcutItem(['replace body A with text'], 'Replace body text'),
+  ]),
+  ShortcutGroup('Day Mindmap', [
     ShortcutItem(['Ctrl', 'N'], 'Create new task node'),
     ShortcutItem(['Ctrl', 'Z'], 'Undo last action'),
     ShortcutItem(['Ctrl', 'Shift', 'Z'], 'Redo last undo'),
-    ShortcutItem(['Esc'], 'Deselect node / close panels'),
-    ShortcutItem(['Ctrl', 'Click'], 'Multi-select nodes'),
-    ShortcutItem(['Shift', 'Click'], 'Range-select nodes'),
+    ShortcutItem(['Esc'], 'Deselect node / clear focus'),
+    ShortcutItem(['Drag'], 'Move nodes on canvas'),
+    ShortcutItem(['Shift', 'Drag'], 'Lasso multi-select'),
+    ShortcutItem(['Ctrl', 'Click'], 'Toggle multi-select'),
+    ShortcutItem([
+      'Batch toolbar',
+    ], 'Status, priority, tag, project, area, due, archive'),
+    ShortcutItem([
+      'More batch edits',
+    ], 'Align/distribute selected nodes on canvas'),
+    ShortcutItem(['Connect'], 'Create labeled relations'),
   ]),
   ShortcutGroup('Node Editor', [
     ShortcutItem(['Ctrl', 'S'], 'Save current node'),
     ShortcutItem(['Delete'], 'Delete selected node'),
+    ShortcutItem(['Smart actions'], 'Complete, reschedule, pin, link, extract'),
+  ]),
+  ShortcutGroup('Automation', [
+    ShortcutItem(['Smart plan'], 'Apply routines and carry over work'),
+    ShortcutItem(['Insights'], 'Open Automation Center and presets'),
   ]),
   ShortcutGroup('Graph', [
     ShortcutItem(['Ctrl', 'F'], 'Search nodes in graph'),
+    ShortcutItem(['Save graph filter'], 'Persist current graph filters'),
+    ShortcutItem(['Edit edge'], 'Rename relation label from graph links'),
+  ]),
+  ShortcutGroup('Settings', [
+    ShortcutItem([
+      'Templates',
+    ], 'Edit fields, reorder, duplicate, import/export'),
+    ShortcutItem(['Saved views'], 'CRUD, duplicate, import/export'),
+    ShortcutItem(['Graph filters'], 'Rename, duplicate, delete, import/export'),
+    ShortcutItem([
+      'Reminders',
+    ], 'Time, snooze, preview, sync, copy/import payloads'),
   ]),
 ];
 

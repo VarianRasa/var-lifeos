@@ -5,6 +5,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../mindmap/domain/mindmap_node.dart';
 import '../../mindmap/domain/node_graph.dart';
+import '../application/graph_filters.dart';
 
 final class NodeGraphExplorerQuery {
   const NodeGraphExplorerQuery({
@@ -15,6 +16,8 @@ final class NodeGraphExplorerQuery {
     this.tagFilter,
     this.projectFilter,
     this.areaFilter,
+    this.relationLabelFilter,
+    this.relationState,
     this.crossDayOnly = false,
     this.focusedNodeId,
   });
@@ -26,6 +29,8 @@ final class NodeGraphExplorerQuery {
   final String? tagFilter;
   final String? projectFilter;
   final String? areaFilter;
+  final String? relationLabelFilter;
+  final GraphRelationState? relationState;
   final bool crossDayOnly;
   final String? focusedNodeId;
 
@@ -41,6 +46,8 @@ final class NodeGraphExplorerQuery {
         _hasStringFilter(areaFilter);
   }
 
+  bool get hasRelationFilter => _hasStringFilter(relationLabelFilter);
+
   bool get hasFocus => focusedNodeId != null && focusedNodeId!.isNotEmpty;
 
   int get activeFilterCount {
@@ -52,6 +59,8 @@ final class NodeGraphExplorerQuery {
       _hasStringFilter(tagFilter),
       _hasStringFilter(projectFilter),
       _hasStringFilter(areaFilter),
+      hasRelationFilter,
+      relationState != null,
       crossDayOnly,
       hasFocus,
     ].where((isActive) => isActive).length;
@@ -71,6 +80,10 @@ final class NodeGraphExplorerQuery {
     bool clearProjectFilter = false,
     String? areaFilter,
     bool clearAreaFilter = false,
+    String? relationLabelFilter,
+    bool clearRelationLabelFilter = false,
+    GraphRelationState? relationState,
+    bool clearRelationState = false,
     bool? crossDayOnly,
     String? focusedNodeId,
     bool clearFocus = false,
@@ -89,6 +102,12 @@ final class NodeGraphExplorerQuery {
           ? null
           : (projectFilter ?? this.projectFilter),
       areaFilter: clearAreaFilter ? null : (areaFilter ?? this.areaFilter),
+      relationLabelFilter: clearRelationLabelFilter
+          ? null
+          : (relationLabelFilter ?? this.relationLabelFilter),
+      relationState: clearRelationState
+          ? null
+          : (relationState ?? this.relationState),
       crossDayOnly: crossDayOnly ?? this.crossDayOnly,
       focusedNodeId: clearFocus ? null : (focusedNodeId ?? this.focusedNodeId),
     );
@@ -132,7 +151,12 @@ final class NodeGraphExplorerView {
   }) {
     final matchingNodeIds = {
       for (final node in graph.nodes)
-        if (query.matchesNode(node.node)) node.id,
+        if (query.matchesNode(node.node) &&
+            matchesGraphFilter(
+              node,
+              GraphFilterState(relationState: query.relationState),
+            ))
+          node.id,
     };
 
     final visibleEdges = [
@@ -144,7 +168,10 @@ final class NodeGraphExplorerView {
     if (query.hasFocus) {
       final focusedId = query.focusedNodeId!;
       if (graph.nodeFor(focusedId) != null) visibleNodeIds.add(focusedId);
-    } else if (!query.hasNodeFilter && !query.crossDayOnly) {
+    } else if (!query.hasNodeFilter &&
+        !query.hasRelationFilter &&
+        query.relationState == null &&
+        !query.crossDayOnly) {
       visibleNodeIds.addAll(graph.nodes.map((node) => node.id));
     } else if (query.hasNodeFilter) {
       visibleNodeIds.addAll(matchingNodeIds);
@@ -265,6 +292,10 @@ bool _edgeMatches(
   Set<String> matchingNodeIds,
 ) {
   if (query.crossDayOnly && !edge.isCrossDay) return false;
+  if (query.hasRelationFilter &&
+      _relationLabelFor(graph, edge) != query.relationLabelFilter) {
+    return false;
+  }
   if (query.hasFocus) {
     final focusedId = query.focusedNodeId!;
     if (edge.sourceId != focusedId && edge.targetId != focusedId) return false;
@@ -272,6 +303,20 @@ bool _edgeMatches(
   if (!query.hasNodeFilter) return true;
   return matchingNodeIds.contains(edge.sourceId) ||
       matchingNodeIds.contains(edge.targetId);
+}
+
+String _relationLabelFor(NodeGraph graph, NodeGraphEdge edge) {
+  final source = graph.nodeFor(edge.sourceId)?.node;
+  if (source == null) return 'relates to';
+  final rawRelations = source.data['relations'];
+  if (rawRelations is! List<Object?>) return 'relates to';
+  for (final item in rawRelations) {
+    if (item is! Map<Object?, Object?>) continue;
+    if (item['targetId'] != edge.targetId) continue;
+    final label = item['label'];
+    if (label is String && label.trim().isNotEmpty) return label.trim();
+  }
+  return 'relates to';
 }
 
 Map<String, _DegreeCount> _degreeCountsFor(List<NodeGraphEdge> edges) {

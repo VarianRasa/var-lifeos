@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
@@ -28,6 +31,44 @@ void main() {
     view.resetPhysicalSize();
     view.resetDevicePixelRatio();
   });
+  testWidgets('InsightsPage hides secondary dashboard panels until toggled', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 7, 2);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'done-task',
+          type: NodeType.task,
+          title: 'Done task',
+          day: today,
+          status: NodeStatus.done,
+          now: DateTime(2026, 7, 2, 9),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(home: InsightsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Show dashboard panels'), findsOneWidget);
+    expect(find.text('Life rhythm'), findsNothing);
+
+    await tester.tap(find.byTooltip('Show dashboard panels'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Hide dashboard panels'), findsOneWidget);
+    expect(find.text('Life rhythm'), findsOneWidget);
+  });
+
   testWidgets('InsightsPage searches and filters nodes by metadata', (
     tester,
   ) async {
@@ -64,7 +105,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -131,7 +174,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -193,7 +238,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -291,7 +338,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -368,7 +417,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -440,7 +491,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -522,7 +575,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -550,7 +605,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -590,7 +647,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(tuesday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -648,7 +707,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(tuesday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -723,7 +784,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(wednesday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -838,7 +901,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -886,7 +951,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -939,7 +1006,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -982,7 +1051,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1065,7 +1136,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1122,7 +1195,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1202,7 +1277,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(monday),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1346,7 +1423,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1428,7 +1507,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1488,7 +1569,9 @@ void main() {
           mindmapRepositoryProvider.overrideWithValue(repository),
           currentDateProvider.overrideWithValue(today),
         ],
-        child: const MaterialApp(home: InsightsPage()),
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1524,5 +1607,255 @@ void main() {
       find.descendant(of: graphPanel, matching: find.text('2 connections')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('InsightsPage shows drill-down expansion panels', (tester) async {
+    final today = DateTime(2026, 7, 2);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'late-task',
+          type: NodeType.task,
+          title: 'Late task detail',
+          day: yesterday,
+          priority: NodePriority.high,
+          dueDate: yesterday,
+          project: 'Launch',
+          now: yesterday,
+        ),
+        MindmapNode.create(
+          id: 'habit-risk',
+          type: NodeType.habit,
+          title: 'Morning routine',
+          day: today,
+          data: {
+            'completions': [dayKey(yesterday)],
+          },
+          now: today,
+        ),
+        MindmapNode.create(
+          id: 'stalled-goal',
+          type: NodeType.goal,
+          title: 'Stalled goal detail',
+          day: today,
+          now: today.subtract(const Duration(days: 20)),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('insights-drill-down-panel')),
+      800,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('insights-drill-down-panel')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Overdue tasks detail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Late task detail'), findsWidgets);
+
+    await tester.tap(find.text('Project / area detail'));
+    await tester.pumpAndSettle();
+    expect(find.text('Launch'), findsWidgets);
+  });
+
+  testWidgets('InsightsPage shows empty state for new workspace', (
+    tester,
+  ) async {
+    final repository = InMemoryMindmapRepository(seedNodes: const []);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('insights-empty-state')), findsOneWidget);
+    expect(find.text('No insight signals yet'), findsOneWidget);
+  });
+
+  testWidgets('InsightsPage shows loading skeleton', (tester) async {
+    final completer = Completer<Never>();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          smartNodeViewsProvider.overrideWith((ref) => completer.future),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.bySemanticsLabel('Loading insights'), findsWidgets);
+  });
+
+  testWidgets('InsightsPage shows retryable error state', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          smartNodeViewsProvider.overrideWith(
+            (ref) => throw StateError('boom'),
+          ),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Unable to load insights'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('InsightsPage keyboard slash focuses search', (tester) async {
+    final today = DateTime(2026, 7, 2);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'task',
+          type: NodeType.task,
+          title: 'Shortcut task',
+          day: today,
+          now: today,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.slash);
+    await tester.pumpAndSettle();
+
+    final textField = tester.widget<TextField>(find.byType(TextField));
+    expect(textField.focusNode?.hasFocus, isTrue);
+    expect(find.text('T'), findsOneWidget);
+    expect(find.text('Export'), findsOneWidget);
+  });
+
+  testWidgets('InsightsPage keyboard export copies markdown report', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 7, 2);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'task',
+          type: NodeType.task,
+          title: 'Export shortcut task',
+          day: today,
+          now: today,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Markdown report copied to clipboard'), findsOneWidget);
+  });
+
+  testWidgets('InsightsPage trend panel summarizes workload totals', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 7, 2);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'done-task',
+          type: NodeType.task,
+          title: 'Done trend task',
+          day: today,
+          status: NodeStatus.done,
+          now: today,
+        ),
+        MindmapNode.create(
+          id: 'late-high-task',
+          type: NodeType.task,
+          title: 'Late high trend task',
+          day: yesterday,
+          status: NodeStatus.doing,
+          priority: NodePriority.high,
+          dueDate: yesterday,
+          now: yesterday,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollable = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('insights-workload-trend-panel')),
+      700,
+      scrollable: scrollable,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Done 1'), findsOneWidget);
+    expect(find.text('Open 1'), findsOneWidget);
+    expect(find.text('Overdue 1'), findsOneWidget);
+    expect(find.text('High 1'), findsOneWidget);
   });
 }

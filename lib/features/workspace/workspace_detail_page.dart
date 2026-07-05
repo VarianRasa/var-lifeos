@@ -4,6 +4,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,6 +14,14 @@ import '../../core/utils/date_utils.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/workspace_context.dart';
+import 'application/workspace_goal_summary.dart';
+import 'application/workspace_health.dart';
+import 'application/workspace_markdown_export.dart';
+import 'application/workspace_next_actions.dart';
+import 'application/workspace_overview.dart';
+import 'application/workspace_recommendations.dart';
+import 'application/workspace_relationships.dart';
+import 'application/workspace_timeline.dart';
 
 /// View modes for the workspace detail page.
 enum _WorkspaceView { list, kanban, gantt }
@@ -93,11 +102,19 @@ class _WorkspaceDetailPageState extends ConsumerState<WorkspaceDetailPage> {
       body: contextsFuture.when(
         data: (contexts) {
           final workspace = contexts.contextFor(_type, widget.name);
-          return switch (_view) {
+          final detailView = switch (_view) {
             _WorkspaceView.list => _WorkspaceListView(workspace: workspace),
             _WorkspaceView.kanban => _WorkspaceKanbanView(workspace: workspace),
             _WorkspaceView.gantt => _WorkspaceGanttView(workspace: workspace),
           };
+
+          return Column(
+            children: [
+              if (_view != _WorkspaceView.list)
+                _WorkspaceDetailHeader(workspace: workspace),
+              Expanded(child: detailView),
+            ],
+          );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => Center(
@@ -116,6 +133,211 @@ class _WorkspaceDetailPageState extends ConsumerState<WorkspaceDetailPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+IconData _workspaceTypeIcon(WorkspaceContextType type) {
+  return switch (type) {
+    WorkspaceContextType.project => Icons.account_tree_outlined,
+    WorkspaceContextType.area => Icons.category_outlined,
+    WorkspaceContextType.daily => Icons.today_outlined,
+  };
+}
+
+class _WorkspaceDetailHeader extends ConsumerWidget {
+  const _WorkspaceDetailHeader({required this.workspace});
+
+  final WorkspaceContext workspace;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final today = DateTime.now();
+    final health = buildWorkspaceHealth(workspace, today);
+    final timeline = buildWorkspaceTimeline(workspace, today);
+    final goals = buildWorkspaceGoalSummary(workspace, today);
+    final relationships = buildWorkspaceRelationshipSummary(
+      workspace,
+      workspace.nodes,
+    );
+    final nextActions = buildWorkspaceNextActions(workspace, today);
+    final recommendations = buildWorkspaceRecommendations(
+      workspace,
+      today,
+      relationships,
+    );
+    final completion = (workspace.completionRate * 100).round();
+    final progress = (health.progress * 100).round();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.32,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _workspaceTypeIcon(workspace.type),
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      workspace.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  _HeaderChip(
+                    icon: Icons.monitor_heart_outlined,
+                    label: health.status.label,
+                  ),
+                  const SizedBox(width: 8),
+                  _HeaderChip(
+                    icon: Icons.schedule_outlined,
+                    label: workspaceLastActivityLabel(
+                      health.lastActivity,
+                      today,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _HeaderChip(
+                    icon: Icons.radio_button_checked,
+                    label: '${health.active} active',
+                  ),
+                  _HeaderChip(
+                    icon: Icons.check_circle_outline,
+                    label: '${health.done} done',
+                  ),
+                  _HeaderChip(
+                    icon: Icons.warning_amber_outlined,
+                    label: '${health.overdue} overdue',
+                  ),
+                  _HeaderChip(
+                    icon: Icons.priority_high_outlined,
+                    label: '${health.highPriority} high',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 8,
+                  value: health.progress.clamp(0, 1).toDouble(),
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$completion% complete • $progress% average progress',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => context.go(_graphUrl(workspace)),
+                    icon: const Icon(Icons.hub_outlined, size: 16),
+                    label: const Text('Graph'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => context.go(_insightsUrl(workspace)),
+                    icon: const Icon(Icons.bar_chart_outlined, size: 16),
+                    label: const Text('Insights'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final markdown = exportWorkspaceMarkdown(
+                        workspace: workspace,
+                        today: today,
+                        health: health,
+                        timeline: timeline,
+                        goals: goals,
+                        relationships: relationships,
+                        nextActions: nextActions,
+                        recommendations: recommendations,
+                      );
+                      await Clipboard.setData(ClipboardData(text: markdown));
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Workspace report copied'),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_all_outlined, size: 16),
+                    label: const Text('Copy report'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _graphUrl(WorkspaceContext workspace) {
+  return Uri(
+    path: '/graph',
+    queryParameters: {
+      if (workspace.type == WorkspaceContextType.project)
+        'project': workspace.name,
+      if (workspace.type == WorkspaceContextType.area) 'area': workspace.name,
+    },
+  ).toString();
+}
+
+String _insightsUrl(WorkspaceContext workspace) {
+  return Uri(
+    path: '/insights',
+    queryParameters: {
+      if (workspace.type == WorkspaceContextType.project)
+        'project': workspace.name,
+      if (workspace.type == WorkspaceContextType.area) 'area': workspace.name,
+    },
+  ).toString();
+}
+
+class _HeaderChip extends StatelessWidget {
+  const _HeaderChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: Icon(icon, size: 16),
+      label: Text(label),
+      backgroundColor: theme.colorScheme.surface,
+      side: BorderSide(color: theme.colorScheme.outlineVariant),
     );
   }
 }
@@ -167,7 +389,16 @@ class _WorkspaceListView extends StatelessWidget {
         _StatsRow(workspace: workspace),
         const SizedBox(height: 20),
 
-        // Active tasks
+        if (completed.isNotEmpty) ...[
+          Text(
+            'Completed (${completed.length})',
+            style: theme.textTheme.titleSmall?.copyWith(color: Colors.green),
+          ),
+          const SizedBox(height: 8),
+          ...completed.map((node) => _TaskListTile(node: node)),
+          const SizedBox(height: 20),
+        ],
+
         if (active.isNotEmpty) ...[
           Text(
             'Active (${active.length})',
@@ -179,16 +410,71 @@ class _WorkspaceListView extends StatelessWidget {
           ...active.map((node) => _TaskListTile(node: node)),
         ],
 
-        if (completed.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          Text(
-            'Completed (${completed.length})',
-            style: theme.textTheme.titleSmall?.copyWith(color: Colors.green),
-          ),
-          const SizedBox(height: 8),
-          ...completed.map((node) => _TaskListTile(node: node)),
-        ],
+        const SizedBox(height: 20),
+        _WorkspaceDrillPanels(workspace: workspace),
       ],
+    );
+  }
+}
+
+class _WorkspaceDrillPanels extends StatelessWidget {
+  const _WorkspaceDrillPanels({required this.workspace});
+
+  final WorkspaceContext workspace;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final overdue = workspace.activeNodes
+        .where((node) {
+          final due = node.dueDate;
+          return due != null &&
+              due.dateOnly.isBefore(today.dateOnly) &&
+              !node.isDone &&
+              node.status != NodeStatus.done;
+        })
+        .toList(growable: false);
+    final high = workspace.activeNodes
+        .where(
+          (node) =>
+              node.priority.index >= NodePriority.high.index &&
+              !node.isDone &&
+              node.status != NodeStatus.done,
+        )
+        .toList(growable: false);
+    final waiting = workspace.activeNodes
+        .where((node) => node.status == NodeStatus.waiting)
+        .toList(growable: false);
+    final goals = workspace.activeNodes
+        .where((node) => node.type == NodeType.goal)
+        .toList(growable: false);
+
+    return Column(
+      children: [
+        _DrillExpansion(title: 'Overdue nodes', nodes: overdue),
+        _DrillExpansion(title: 'High-priority nodes', nodes: high),
+        _DrillExpansion(title: 'Waiting / blocked nodes', nodes: waiting),
+        _DrillExpansion(title: 'Goals', nodes: goals),
+      ],
+    );
+  }
+}
+
+class _DrillExpansion extends StatelessWidget {
+  const _DrillExpansion({required this.title, required this.nodes});
+
+  final String title;
+  final List<MindmapNode> nodes;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      title: Text('$title (${nodes.length})'),
+      children: nodes.isEmpty
+          ? [const ListTile(dense: true, title: Text('No items'))]
+          : [for (final node in nodes) _TaskListTile(node: node)],
     );
   }
 }
@@ -301,7 +587,7 @@ class _TaskListTile extends StatelessWidget {
             dayKey(node.day),
             if (node.dueDate != null) 'Due ${dayKey(node.dueDate!)}',
             if (node.priority != NodePriority.none) node.priority.label,
-          ].join(' · '),
+          ].join(' Â· '),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -320,8 +606,10 @@ class _TaskListTile extends StatelessWidget {
 
 /// Column definitions for the Kanban board.
 enum _KanbanColumn {
-  todo('To Do', NodeStatus.open, Icons.radio_button_unchecked),
+  open('To Do', NodeStatus.open, Icons.radio_button_unchecked),
+  planned('Planned', NodeStatus.planned, Icons.event_outlined),
   doing('In Progress', NodeStatus.doing, Icons.sync_outlined),
+  waiting('Waiting', NodeStatus.waiting, Icons.hourglass_empty_outlined),
   done('Done', NodeStatus.done, Icons.check_circle_outlined);
 
   const _KanbanColumn(this.label, this.targetStatus, this.icon);
@@ -346,16 +634,18 @@ class _WorkspaceKanbanView extends ConsumerWidget {
     for (final node in active) {
       if (node.isDone || node.status == NodeStatus.done) {
         buckets[_KanbanColumn.done]!.add(node);
-      } else if (node.status == NodeStatus.doing) {
-        buckets[_KanbanColumn.doing]!.add(node);
       } else {
-        buckets[_KanbanColumn.todo]!.add(node);
+        final column = _KanbanColumn.values.firstWhere(
+          (item) => item.targetStatus == node.status,
+          orElse: () => _KanbanColumn.open,
+        );
+        buckets[column]!.add(node);
       }
     }
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columnWidth = math.max(280.0, (constraints.maxWidth - 48) / 3);
+        final columnWidth = math.max(240.0, (constraints.maxWidth - 72) / 5);
 
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -860,7 +1150,7 @@ class _GanttChartPainter extends CustomPainter {
 
       // Title label (truncated)
       final title = node.title.length > 22
-          ? '${node.title.substring(0, 20)}…'
+          ? '${node.title.substring(0, 20)}â€¦'
           : node.title;
       final tp = TextPainter(
         text: TextSpan(
@@ -869,7 +1159,7 @@ class _GanttChartPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
         maxLines: 1,
-        ellipsis: '…',
+        ellipsis: 'â€¦',
       )..layout(maxWidth: labelWidth - 16);
       tp.paint(canvas, Offset(8, y + (rowHeight - tp.height) / 2));
 
@@ -963,8 +1253,10 @@ Color _statusColor(NodeStatus status, ThemeData theme) => switch (status) {
 
 Color _columnHeaderColor(_KanbanColumn column, ThemeData theme) =>
     switch (column) {
-      _KanbanColumn.todo => theme.colorScheme.primary,
+      _KanbanColumn.open => theme.colorScheme.primary,
+      _KanbanColumn.planned => theme.colorScheme.tertiary,
       _KanbanColumn.doing => Colors.orange.shade400,
+      _KanbanColumn.waiting => theme.colorScheme.secondary,
       _KanbanColumn.done => Colors.green,
     };
 
@@ -977,5 +1269,15 @@ IconData _nodeTypeIcon(NodeType type) => switch (type) {
   NodeType.habit => Icons.repeat_outlined,
   NodeType.goal => Icons.flag_outlined,
   NodeType.link => Icons.link_outlined,
+  NodeType.event => Icons.event_outlined,
+  NodeType.decision => Icons.rule_outlined,
+  NodeType.resource => Icons.inventory_2_outlined,
+  NodeType.idea => Icons.lightbulb_outline,
+  NodeType.question => Icons.help_outline,
+  NodeType.contact => Icons.person_outline,
+  NodeType.metric => Icons.query_stats_outlined,
+  NodeType.expense => Icons.payments_outlined,
+  NodeType.bookmark => Icons.bookmark_border,
+  NodeType.routine => Icons.repeat_on_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };

@@ -48,13 +48,32 @@ final class SyncAuthState {
   bool get isSignedIn => status == SyncAuthStatus.signedIn && user != null;
 }
 
+final class SyncAuthException implements Exception {
+  const SyncAuthException(this.message, {this.cause});
+
+  final String message;
+  final Object? cause;
+
+  @override
+  String toString() => 'SyncAuthException: $message';
+}
+
 abstract interface class SyncAuthGateway {
   Future<SyncAuthState> currentState();
 
   Future<SyncAuthState> signIn({
     required String email,
+    String password = '',
     String displayName = '',
   });
+
+  Future<SyncAuthState> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  });
+
+  Future<void> sendPasswordResetEmail({required String email});
 
   Future<void> signOut();
 }

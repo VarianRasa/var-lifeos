@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:var_app/features/mindmap/domain/workspace_context.dart';
 import 'package:var_app/features/workspace/data/workspace_sort_repository.dart';
 import 'package:var_app/features/workspace/data/workspace_title_repository.dart';
@@ -8,10 +12,15 @@ import 'package:var_app/features/workspace/data/workspace_title_repository.dart'
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/layout/adaptive_scaffold.dart';
+import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/mindmap_node.dart';
+import 'application/workspace_filters.dart';
+import 'application/workspace_health.dart';
+import 'application/workspace_overview.dart';
 
 class WorkspacesPage extends ConsumerStatefulWidget {
   const WorkspacesPage({super.key});
@@ -23,6 +32,42 @@ class WorkspacesPage extends ConsumerStatefulWidget {
 class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  WorkspaceFilterState _filter = const WorkspaceFilterState();
+  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
+  static const _filterPrefsKey = 'workspace_last_filter';
+  bool _showStats = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFilter();
+  }
+
+  Future<void> _loadFilter() async {
+    final raw = await _prefs.getString(_filterPrefsKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, Object?> && mounted) {
+        setState(() => _filter = workspaceFilterStateFromJson(decoded));
+      }
+    } on FormatException {
+      // Ignore corrupt saved view.
+    }
+  }
+
+  Future<void> _setFilter(WorkspaceFilterState filter) async {
+    setState(() => _filter = filter);
+    await _prefs.setString(
+      _filterPrefsKey,
+      jsonEncode(workspaceFilterStateToJson(filter)),
+    );
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() => _searchQuery = '');
+  }
 
   @override
   void dispose() {
@@ -34,66 +79,101 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
   Widget build(BuildContext context) {
     final contexts = ref.watch(workspaceContextsProvider);
     final today = ref.watch(currentDateProvider);
-    final isDesktop = MediaQuery.sizeOf(context).width >= 840;
 
-    final hasContexts = (contexts.valueOrNull?.contexts.isNotEmpty) ?? false;
-    if (!hasContexts) {
-      final theme = Theme.of(context);
-      return Scaffold(
-        appBar: AppBar(title: const Text('Workspaces')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(40),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.workspaces_outlined,
-                  size: 64,
-                  color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                ),
-                const SizedBox(height: 16),
-                Text('No workspaces yet', style: theme.textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Text(
-                  'Create nodes with projects and areas to see them organized here',
-                  style: theme.textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-              ],
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.digit1): () {
+          _setFilter(_filter.copyWith(type: WorkspaceContextType.project));
+        },
+        const SingleActivator(LogicalKeyboardKey.digit2): () {
+          _setFilter(_filter.copyWith(type: WorkspaceContextType.area));
+        },
+        const SingleActivator(LogicalKeyboardKey.digit3): () {
+          _setFilter(_filter.copyWith(type: WorkspaceContextType.daily));
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          _clearSearch();
+          _setFilter(const WorkspaceFilterState());
+        },
+        const SingleActivator(LogicalKeyboardKey.keyR): () {
+          _clearSearch();
+          _setFilter(const WorkspaceFilterState());
+        },
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const AppRouteChromeTabs(currentRoute: AppRoute.workspaces),
+          actions: [
+            IconButton(
+              icon: Icon(
+                _showStats ? Icons.query_stats : Icons.query_stats_outlined,
+              ),
+              tooltip: _showStats ? 'Hide stats' : 'Show stats',
+              onPressed: () {
+                setState(() {
+                  _showStats = !_showStats;
+                });
+              },
             ),
-          ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: isDesktop ? const Text('Workspaces') : const Text('Workspaces'),
-        actions: [
-          SearchField(
-            controller: _searchController,
-            hintText: 'Filter workspaces...',
-            onChanged: (value) {
-              setState(() => _searchQuery = value.trim().toLowerCase());
-            },
-          ),
-          if (isDesktop)
-            const SizedBox(width: 460)
-          else
+            SearchField(
+              controller: _searchController,
+              hintText: 'Filter workspaces...',
+              onChanged: (value) {
+                setState(() => _searchQuery = value.trim().toLowerCase());
+              },
+            ),
             const SizedBox(width: 16),
-        ],
-      ),
-      body: contexts.when(
-        data: (value) => _WorkspacesBody(
-          contexts: value,
-          today: today,
-          searchQuery: _searchQuery,
+          ],
         ),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => ErrorMessage(
-          message: 'Unable to load workspaces',
-          onRetry: () => ref.invalidate(workspaceContextsProvider),
+        body: contexts.when(
+          data: (value) => value.contexts.isEmpty
+              ? const _WorkspacesEmptyState()
+              : _WorkspacesBody(
+                  contexts: value,
+                  today: today,
+                  searchQuery: _searchQuery,
+                  filter: _filter,
+                  onFilterChanged: _setFilter,
+                  onClearSearch: _clearSearch,
+                  showStats: _showStats,
+                ),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, _) => ErrorMessage(
+            message: 'Unable to load workspaces',
+            onRetry: () => ref.invalidate(workspaceContextsProvider),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspacesEmptyState extends StatelessWidget {
+  const _WorkspacesEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.workspaces_outlined,
+              size: 64,
+              color: theme.colorScheme.primary.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text('No workspaces yet', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'Create nodes with projects and areas to see them organized here',
+              style: theme.textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );
@@ -105,77 +185,116 @@ class _WorkspacesBody extends ConsumerWidget {
     required this.contexts,
     required this.today,
     required this.searchQuery,
+    required this.filter,
+    required this.onFilterChanged,
+    required this.onClearSearch,
+    required this.showStats,
   });
 
   final WorkspaceContexts contexts;
   final DateTime today;
   final String searchQuery;
+  final WorkspaceFilterState filter;
+  final ValueChanged<WorkspaceFilterState> onFilterChanged;
+  final VoidCallback onClearSearch;
+  final bool showStats;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
 
     final sortState = ref.watch(workspaceSortProvider);
+    final overview = buildWorkspaceOverview(contexts, today);
 
-    final filteredProjects = contexts.projects.where((w) {
+    final titleMap = ref.watch(workspaceTitleProvider);
+    bool matchesSearch(WorkspaceContext w) {
       if (searchQuery.isEmpty) return true;
-      final nameMatches = w.name.toLowerCase().contains(searchQuery);
-      final titleMap = ref.watch(workspaceTitleProvider);
       final titleKey = '${w.type.name}_${w.name}';
       final customTitle = titleMap[titleKey] ?? '';
-      final titleMatches = customTitle.toLowerCase().contains(searchQuery);
-      return nameMatches || titleMatches;
-    }).toList();
+      return w.name.toLowerCase().contains(searchQuery) ||
+          customTitle.toLowerCase().contains(searchQuery);
+    }
 
-    final filteredAreas = contexts.areas.where((w) {
-      if (searchQuery.isEmpty) return true;
-      final nameMatches = w.name.toLowerCase().contains(searchQuery);
-      final titleMap = ref.watch(workspaceTitleProvider);
-      final titleKey = '${w.type.name}_${w.name}';
-      final customTitle = titleMap[titleKey] ?? '';
-      final titleMatches = customTitle.toLowerCase().contains(searchQuery);
-      return nameMatches || titleMatches;
-    }).toList();
+    final filteredProjects = contexts.projects
+        .where(matchesSearch)
+        .where((w) => matchesWorkspaceFilter(w, filter, today))
+        .toList();
+    final filteredAreas = contexts.areas
+        .where(matchesSearch)
+        .where((w) => matchesWorkspaceFilter(w, filter, today))
+        .toList();
+    final filteredDailies = contexts.dailies
+        .where(matchesSearch)
+        .where((w) => matchesWorkspaceFilter(w, filter, today))
+        .toList();
 
-    final filteredDailies = contexts.dailies.where((w) {
-      if (searchQuery.isEmpty) return true;
-      final nameMatches = w.name.toLowerCase().contains(searchQuery);
-      final titleMap = ref.watch(workspaceTitleProvider);
-      final titleKey = '${w.type.name}_${w.name}';
-      final customTitle = titleMap[titleKey] ?? '';
-      final titleMatches = customTitle.toLowerCase().contains(searchQuery);
-      return nameMatches || titleMatches;
-    }).toList();
-
-    final sortedProjects = sortWorkspaces(
-      filteredProjects,
-      sortState.projectsOrder,
+    final sortedProjects = sortFilteredWorkspaces(
+      sortWorkspaces(filteredProjects, sortState.projectsOrder),
+      filter.sortMode,
+      today,
     );
-    final sortedAreas = sortWorkspaces(filteredAreas, sortState.areasOrder);
+    final sortedAreas = sortFilteredWorkspaces(
+      sortWorkspaces(filteredAreas, sortState.areasOrder),
+      filter.sortMode,
+      today,
+    );
+    final sortedDailies = sortFilteredWorkspaces(
+      filteredDailies,
+      filter.sortMode,
+      today,
+    );
+    final hasMatches =
+        sortedProjects.isNotEmpty ||
+        sortedAreas.isNotEmpty ||
+        sortedDailies.isNotEmpty;
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(spacing),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _WorkspaceMetricRail(contexts: contexts, today: today),
-          SizedBox(height: spacing),
-          _WorkspaceSection(
-            title: 'Projects',
-            contexts: sortedProjects,
-            today: today,
+          if (showStats) ...[
+            _WorkspaceMetricRail(summary: overview),
+            SizedBox(height: spacing),
+          ],
+          _WorkspaceFilterBar(
+            filter: filter,
+            onChanged: onFilterChanged,
+            onClearSearch: onClearSearch,
           ),
           SizedBox(height: spacing),
-          _WorkspaceSection(
-            title: 'Areas',
-            contexts: sortedAreas,
-            today: today,
-          ),
-          SizedBox(height: spacing),
-          if (filteredDailies.isNotEmpty) ...[
+          if (showStats) ...[
+            _WorkspaceFocusStrip(
+              contexts: contexts,
+              visibleCount:
+                  sortedProjects.length +
+                  sortedAreas.length +
+                  sortedDailies.length,
+              hasSearch: searchQuery.isNotEmpty,
+              today: today,
+            ),
+            SizedBox(height: spacing),
+          ],
+          if (!hasMatches)
+            const _WorkspaceNoMatches()
+          else ...[
+            _WorkspaceSection(
+              title: 'Projects',
+              contexts: sortedProjects,
+              today: today,
+            ),
+            SizedBox(height: spacing),
+            _WorkspaceSection(
+              title: 'Areas',
+              contexts: sortedAreas,
+              today: today,
+            ),
+            SizedBox(height: spacing),
+          ],
+          if (hasMatches && sortedDailies.isNotEmpty) ...[
             _WorkspaceSection(
               title: 'Dailies',
-              contexts: filteredDailies,
+              contexts: sortedDailies,
               today: today,
             ),
             SizedBox(height: spacing),
@@ -186,50 +305,384 @@ class _WorkspacesBody extends ConsumerWidget {
   }
 }
 
-class _WorkspaceMetricRail extends StatelessWidget {
-  const _WorkspaceMetricRail({required this.contexts, required this.today});
+class _WorkspaceFilterBar extends StatefulWidget {
+  const _WorkspaceFilterBar({
+    required this.filter,
+    required this.onChanged,
+    required this.onClearSearch,
+  });
+
+  final WorkspaceFilterState filter;
+  final ValueChanged<WorkspaceFilterState> onChanged;
+  final VoidCallback onClearSearch;
+
+  @override
+  State<_WorkspaceFilterBar> createState() => _WorkspaceFilterBarState();
+}
+
+class _WorkspaceFilterBarState extends State<_WorkspaceFilterBar> {
+  bool _expanded = false;
+
+  bool get _hasActiveFilters =>
+      widget.filter.type != null ||
+      widget.filter.health != null ||
+      widget.filter.overdueOnly ||
+      widget.filter.staleOnly ||
+      widget.filter.activeOnly ||
+      widget.filter.sortMode != WorkspaceSortMode.manual;
+
+  void _clearFilters() {
+    widget.onClearSearch();
+    widget.onChanged(const WorkspaceFilterState());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final filter = widget.filter;
+    return Semantics(
+      label: 'Workspace filters and shortcuts',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: _expanded ? 0.22 : 0.12,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const ValueKey('workspace-filter-toggle'),
+                      onPressed: () => setState(() => _expanded = !_expanded),
+                      icon: Icon(
+                        _expanded ? Icons.tune : Icons.tune_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _expanded
+                            ? 'Hide filters'
+                            : _hasActiveFilters
+                            ? 'Filters active'
+                            : 'Show filters',
+                      ),
+                    ),
+                  ),
+                  if (_hasActiveFilters) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Clear workspace filters',
+                      onPressed: _clearFilters,
+                      icon: const Icon(Icons.restart_alt),
+                    ),
+                  ],
+                ],
+              ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: _expanded
+                    ? Padding(
+                        key: const ValueKey('workspace-filter-panel'),
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            DropdownButton<WorkspaceContextType?>(
+                              value: filter.type,
+                              hint: const Text('Type'),
+                              items: const [
+                                DropdownMenuItem<WorkspaceContextType?>(
+                                  value: null,
+                                  child: Text('All types'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceContextType.project,
+                                  child: Text('Projects'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceContextType.area,
+                                  child: Text('Areas'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceContextType.daily,
+                                  child: Text('Dailies'),
+                                ),
+                              ],
+                              onChanged: (value) => widget.onChanged(
+                                filter.copyWith(
+                                  type: value,
+                                  clearType: value == null,
+                                ),
+                              ),
+                            ),
+                            DropdownButton<WorkspaceHealthStatus?>(
+                              value: filter.health,
+                              hint: const Text('Health'),
+                              items: const [
+                                DropdownMenuItem<WorkspaceHealthStatus?>(
+                                  value: null,
+                                  child: Text('All health'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceHealthStatus.healthy,
+                                  child: Text('Healthy'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceHealthStatus.quiet,
+                                  child: Text('Quiet'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceHealthStatus.busy,
+                                  child: Text('Busy'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceHealthStatus.atRisk,
+                                  child: Text('At risk'),
+                                ),
+                              ],
+                              onChanged: (value) => widget.onChanged(
+                                filter.copyWith(
+                                  health: value,
+                                  clearHealth: value == null,
+                                ),
+                              ),
+                            ),
+                            DropdownButton<WorkspaceSortMode>(
+                              value: filter.sortMode,
+                              items: const [
+                                DropdownMenuItem(
+                                  value: WorkspaceSortMode.manual,
+                                  child: Text('Manual'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceSortMode.name,
+                                  child: Text('Name'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceSortMode.activity,
+                                  child: Text('Activity'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceSortMode.risk,
+                                  child: Text('Risk'),
+                                ),
+                                DropdownMenuItem(
+                                  value: WorkspaceSortMode.progress,
+                                  child: Text('Progress'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) {
+                                  widget.onChanged(
+                                    filter.copyWith(sortMode: value),
+                                  );
+                                }
+                              },
+                            ),
+                            FilterChip(
+                              label: const Text('Overdue'),
+                              selected: filter.overdueOnly,
+                              onSelected: (value) => widget.onChanged(
+                                filter.copyWith(overdueOnly: value),
+                              ),
+                            ),
+                            FilterChip(
+                              label: const Text('Stale'),
+                              selected: filter.staleOnly,
+                              onSelected: (value) => widget.onChanged(
+                                filter.copyWith(staleOnly: value),
+                              ),
+                            ),
+                            FilterChip(
+                              label: const Text('Active'),
+                              selected: filter.activeOnly,
+                              onSelected: (value) => widget.onChanged(
+                                filter.copyWith(activeOnly: value),
+                              ),
+                            ),
+                            ActionChip(
+                              avatar: const Icon(Icons.restart_alt, size: 16),
+                              label: const Text('Clear filters'),
+                              onPressed: _clearFilters,
+                            ),
+                            const Chip(
+                              label: Text('/ search - 1/2/3 type - R reset'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceFocusStrip extends StatelessWidget {
+  const _WorkspaceFocusStrip({
+    required this.contexts,
+    required this.visibleCount,
+    required this.hasSearch,
+    required this.today,
+  });
 
   final WorkspaceContexts contexts;
+  final int visibleCount;
+  final bool hasSearch;
   final DateTime today;
 
   @override
   Widget build(BuildContext context) {
-    final activeNodes = contexts.contexts.fold<int>(
-      0,
-      (total, context) => total + context.activeNodeCount,
-    );
+    final theme = Theme.of(context);
     final overdue = contexts.contexts.fold<int>(
       0,
-      (total, context) => total + context.overdueCount(today),
+      (total, workspace) => total + workspace.overdueCount(today),
+    );
+    final active = contexts.contexts.fold<int>(
+      0,
+      (total, workspace) => total + workspace.activeNodeCount,
     );
 
+    return DecoratedBox(
+      key: const ValueKey('workspace-focus-strip'),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.32,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              Icons.dashboard_customize_outlined,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Workspace command center',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasSearch
+                        ? '$visibleCount matching workspaces'
+                        : '$active active nodes • $overdue overdue across workspaces',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceNoMatches extends StatelessWidget {
+  const _WorkspaceNoMatches();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SizedBox(
+      height: 220,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off_outlined,
+              size: 40,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Text('No matching workspaces', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              'Try another project, area, daily title, or custom workspace title.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceMetricRail extends StatelessWidget {
+  const _WorkspaceMetricRail({required this.summary});
+
+  final WorkspaceOverviewSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
           _WorkspaceMetricPill(
             icon: Icons.workspaces_outline,
-            label: _countLabel(contexts.contexts.length, 'workspace'),
+            label: _countLabel(summary.totalWorkspaces, 'workspace'),
           ),
           const SizedBox(width: 10),
           _WorkspaceMetricPill(
             icon: Icons.account_tree_outlined,
-            label: _countLabel(contexts.projects.length, 'project'),
+            label: _countLabel(summary.projects, 'project'),
           ),
           const SizedBox(width: 10),
           _WorkspaceMetricPill(
             icon: Icons.category_outlined,
-            label: _countLabel(contexts.areas.length, 'area'),
+            label: _countLabel(summary.areas, 'area'),
+          ),
+          const SizedBox(width: 10),
+          _WorkspaceMetricPill(
+            icon: Icons.today_outlined,
+            label: _countLabel(summary.dailies, 'daily'),
           ),
           const SizedBox(width: 10),
           _WorkspaceMetricPill(
             icon: Icons.radio_button_checked,
-            label: '$activeNodes active',
+            label: '${summary.activeNodes} active',
           ),
           const SizedBox(width: 10),
           _WorkspaceMetricPill(
             icon: Icons.warning_amber_outlined,
-            label: '$overdue overdue total',
+            label: '${summary.overdueNodes} overdue total',
+          ),
+          const SizedBox(width: 10),
+          _WorkspaceMetricPill(
+            icon: Icons.priority_high_outlined,
+            label: '${summary.highPriorityOpenNodes} high open',
+          ),
+          const SizedBox(width: 10),
+          _WorkspaceMetricPill(
+            icon: Icons.hourglass_empty_outlined,
+            label: '${summary.staleWorkspaces} stale',
           ),
         ],
       ),
@@ -317,6 +770,7 @@ class _WorkspaceContextCard extends ConsumerStatefulWidget {
 
 class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
   bool _isHovered = false;
+  bool _detailsExpanded = false;
   OverlayEntry? _overlayEntry;
 
   @override
@@ -484,6 +938,11 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
     final progressPercent = (widget.contextSummary.averageProgress * 100)
         .round();
     final overdue = widget.contextSummary.overdueCount(widget.today);
+    final health = classifyWorkspaceHealth(widget.contextSummary, widget.today);
+    final healthSummary = buildWorkspaceHealth(
+      widget.contextSummary,
+      widget.today,
+    );
 
     final titleMap = ref.watch(workspaceTitleProvider);
     final titleKey =
@@ -495,65 +954,22 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
       key: ValueKey(
         'workspace-context-${widget.contextSummary.type.name}-${workspaceContextKey(widget.contextSummary.name)}',
       ),
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutBack,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
       transformAlignment: Alignment.center,
-      transform: Matrix4.translationValues(0.0, _isHovered ? -6.0 : 0.0, 0.0)
-        ..multiply(
-          Matrix4.diagonal3Values(
-            1.0 + (_isHovered ? 0.03 : 0.0),
-            1.0 + (_isHovered ? 0.03 : 0.0),
-            1.0,
+      transform: Matrix4.translationValues(0.0, _isHovered ? -4.0 : 0.0, 0.0),
+      decoration: ShapeDecoration(
+        color: _isHovered
+            ? theme.colorScheme.primary.withValues(alpha: 0.06)
+            : theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(
+            color: _isHovered ? theme.colorScheme.primary : theme.dividerColor,
+            width: _isHovered ? 1.8 : 1.0,
           ),
+          radius: 12,
+          wobble: _isHovered ? 2.0 : 1.2,
         ),
-      decoration: BoxDecoration(
-        color: _isHovered ? null : theme.colorScheme.surface,
-        gradient: _isHovered
-            ? LinearGradient(
-                colors: [
-                  theme.colorScheme.primary.withValues(alpha: 0.15),
-                  theme.colorScheme.secondaryContainer.withValues(alpha: 0.05),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              )
-            : null,
-        border: Border.all(
-          color: _isHovered
-              ? theme.colorScheme.primary.withValues(alpha: 0.6)
-              : theme.dividerColor,
-          width: _isHovered ? 2.0 : 1.0,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: _isHovered
-            ? [
-                BoxShadow(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.25),
-                  blurRadius: 24,
-                  spreadRadius: 4,
-                  offset: const Offset(0, 12),
-                ),
-                BoxShadow(
-                  color: theme.colorScheme.secondary.withValues(alpha: 0.1),
-                  blurRadius: 10,
-                  spreadRadius: -2,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : [
-                BoxShadow(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.0),
-                  blurRadius: 24,
-                  spreadRadius: 4,
-                  offset: const Offset(0, 12),
-                ),
-                BoxShadow(
-                  color: theme.colorScheme.secondary.withValues(alpha: 0.0),
-                  blurRadius: 10,
-                  spreadRadius: -2,
-                  offset: const Offset(0, 4),
-                ),
-              ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -569,15 +985,20 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    hasCustomTitle
-                        ? customTitle
-                        : '${widget.contextSummary.type.label} ${widget.contextSummary.name}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: _isHovered ? FontWeight.bold : null,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      Text(
+                        hasCustomTitle
+                            ? customTitle
+                            : '${widget.contextSummary.type.label} ${widget.contextSummary.name}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: _isHovered ? FontWeight.bold : null,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
                 AnimatedOpacity(
@@ -676,45 +1097,109 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
                   side: BorderSide.none,
                 ),
                 Chip(
-                  label: Text('$progressPercent% progress'),
+                  label: Text(health.label),
+                  backgroundColor: _healthColor(theme, health),
                   side: BorderSide.none,
                 ),
-                if (overdue > 0)
-                  Chip(
-                    label: Text('$overdue overdue'),
-                    backgroundColor: theme.colorScheme.errorContainer,
-                    labelStyle: TextStyle(
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                    side: BorderSide.none,
-                  ),
-                if (widget.contextSummary.highPriorityCount > 0)
-                  Chip(
-                    label: Text(
-                      '${widget.contextSummary.highPriorityCount} high',
-                    ),
-                    backgroundColor: theme.colorScheme.tertiaryContainer,
-                    labelStyle: TextStyle(
-                      color: theme.colorScheme.onTertiaryContainer,
-                    ),
-                    side: BorderSide.none,
-                  ),
               ],
             ),
-            if (nextActions.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text(
-                'Next actions',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.primary,
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: ValueKey(
+                  'workspace-context-details-${widget.contextSummary.type.name}-${workspaceContextKey(widget.contextSummary.name)}',
                 ),
+                onPressed: () =>
+                    setState(() => _detailsExpanded = !_detailsExpanded),
+                icon: Icon(
+                  _detailsExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                ),
+                label: Text(_detailsExpanded ? 'Hide details' : 'Show details'),
               ),
-              const SizedBox(height: 8),
-              for (final node in nextActions) ...[
-                _WorkspaceActionTile(node: node),
-                if (node != nextActions.last) const SizedBox(height: 6),
-              ],
-            ],
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: _detailsExpanded
+                  ? Column(
+                      key: ValueKey(
+                        'workspace-context-detail-panel-${widget.contextSummary.type.name}-${workspaceContextKey(widget.contextSummary.name)}',
+                      ),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 2),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            Chip(
+                              label: Text('$progressPercent% progress'),
+                              side: BorderSide.none,
+                            ),
+                            if (overdue > 0)
+                              Chip(
+                                label: Text('$overdue overdue'),
+                                backgroundColor:
+                                    theme.colorScheme.errorContainer,
+                                labelStyle: TextStyle(
+                                  color: theme.colorScheme.onErrorContainer,
+                                ),
+                                side: BorderSide.none,
+                              ),
+                            if (isWorkspaceStale(
+                              widget.contextSummary,
+                              widget.today,
+                            ))
+                              const Chip(
+                                label: Text('Stale'),
+                                side: BorderSide.none,
+                              ),
+                            if (healthSummary.lastActivity != null)
+                              Chip(
+                                label: Text(
+                                  workspaceLastActivityLabel(
+                                    healthSummary.lastActivity,
+                                    widget.today,
+                                  ),
+                                ),
+                                side: BorderSide.none,
+                              ),
+                            for (final tag in healthSummary.tags.take(3))
+                              Chip(label: Text('#$tag'), side: BorderSide.none),
+                            if (widget.contextSummary.highPriorityCount > 0)
+                              Chip(
+                                label: Text(
+                                  '${widget.contextSummary.highPriorityCount} high',
+                                ),
+                                backgroundColor:
+                                    theme.colorScheme.tertiaryContainer,
+                                labelStyle: TextStyle(
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                                side: BorderSide.none,
+                              ),
+                          ],
+                        ),
+                        if (nextActions.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'Next actions',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          for (final node in nextActions) ...[
+                            _WorkspaceActionTile(node: node),
+                            if (node != nextActions.last)
+                              const SizedBox(height: 6),
+                          ],
+                        ],
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+            ),
           ],
         ),
       ),
@@ -722,9 +1207,11 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
 
     return MouseRegion(
       onEnter: (_) => _onHoverChange(true),
+      onHover: (_) => _onHoverChange(true),
       onExit: (_) => _onHoverChange(false),
       cursor: SystemMouseCursors.click,
       child: Listener(
+        onPointerHover: (_) => _onHoverChange(true),
         onPointerDown: (event) {
           // Fallback for right-click on web where onSecondaryTap might be swallowed
           if (event.buttons == 2) {
@@ -874,6 +1361,15 @@ String _actionSubtitle(MindmapNode node) {
   ].join(' - ');
 }
 
+Color _healthColor(ThemeData theme, WorkspaceHealthStatus health) {
+  return switch (health) {
+    WorkspaceHealthStatus.healthy => Colors.green.withValues(alpha: 0.18),
+    WorkspaceHealthStatus.quiet => theme.colorScheme.surfaceContainerHighest,
+    WorkspaceHealthStatus.busy => theme.colorScheme.primaryContainer,
+    WorkspaceHealthStatus.atRisk => theme.colorScheme.errorContainer,
+  };
+}
+
 IconData _workspaceIcon(WorkspaceContextType type) => switch (type) {
   WorkspaceContextType.project => Icons.account_tree_outlined,
   WorkspaceContextType.area => Icons.category_outlined,
@@ -889,6 +1385,16 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.habit => Icons.repeat_outlined,
   NodeType.goal => Icons.flag_outlined,
   NodeType.link => Icons.link_outlined,
+  NodeType.event => Icons.event_outlined,
+  NodeType.decision => Icons.rule_outlined,
+  NodeType.resource => Icons.inventory_2_outlined,
+  NodeType.idea => Icons.lightbulb_outline,
+  NodeType.question => Icons.help_outline,
+  NodeType.contact => Icons.person_outline,
+  NodeType.metric => Icons.query_stats_outlined,
+  NodeType.expense => Icons.payments_outlined,
+  NodeType.bookmark => Icons.bookmark_border,
+  NodeType.routine => Icons.repeat_on_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 

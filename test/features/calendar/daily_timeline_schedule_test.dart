@@ -14,10 +14,14 @@ Widget _buildTestApp({
   required List<MindmapNode> nodes,
   required void Function(MindmapNode) onNodeSelected,
   required void Function(MindmapNode, bool) onTaskDoneChanged,
+  InMemoryMindmapRepository? repository,
 }) {
-  final repository = InMemoryMindmapRepository(seedNodes: nodes);
+  final effectiveRepository =
+      repository ?? InMemoryMindmapRepository(seedNodes: nodes);
   return ProviderScope(
-    overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+    overrides: [
+      mindmapRepositoryProvider.overrideWithValue(effectiveRepository),
+    ],
     child: MaterialApp(
       home: Scaffold(
         body: DailyTimelineSchedule(
@@ -71,6 +75,10 @@ void main() {
 
       expect(find.text('Scheduled Task 1'), findsOneWidget);
       expect(find.text('09:00 - 10:00 • Task'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('timeline-state-node-1-Scheduled')),
+        findsOneWidget,
+      );
 
       final checkbox = find.byType(Checkbox);
       expect(checkbox, findsOneWidget);
@@ -108,6 +116,97 @@ void main() {
 
       expect(find.textContaining('Unscheduled'), findsAtLeastNWidgets(1));
       expect(find.text('Unscheduled Note'), findsOneWidget);
+    });
+
+    testWidgets('schedule next available schedules unscheduled node', (
+      tester,
+    ) async {
+      final day = DateTime(2026, 6, 25);
+      final repository = InMemoryMindmapRepository(seedNodes: const []);
+      final unscheduled = MindmapNode.create(
+        id: 'node-next',
+        type: NodeType.task,
+        title: 'Schedule me',
+        day: day,
+        now: DateTime(2026, 6, 25, 8),
+      );
+      await repository.saveNode(unscheduled);
+
+      await tester.pumpWidget(
+        _buildTestApp(
+          day: day,
+          nodes: [unscheduled],
+          repository: repository,
+          onNodeSelected: (_) {},
+          onTaskDoneChanged: (_, _) {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byTooltip('Schedule next available'));
+      await tester.tap(find.byTooltip('Schedule next available'));
+      await tester.pumpAndSettle();
+
+      final saved = (await repository.listNodes(day: day)).single;
+      final block = saved.data['time_block']! as Map<String, Object?>;
+      expect(block['startMinute'], 8 * 60);
+      expect(block['endMinute'], 9 * 60);
+    });
+
+    testWidgets('scheduled card can extend and clear schedule', (tester) async {
+      final day = DateTime(2026, 6, 25);
+      final scheduled =
+          MindmapNode.create(
+            id: 'node-actions',
+            type: NodeType.task,
+            title: 'Adjust schedule',
+            day: day,
+            now: DateTime(2026, 6, 25, 8),
+          ).copyWith(
+            data: {
+              'time_block': {'startTime': '09:00', 'endTime': '10:00'},
+            },
+          );
+      final repository = InMemoryMindmapRepository(seedNodes: [scheduled]);
+
+      await tester.pumpWidget(
+        _buildTestApp(
+          day: day,
+          nodes: [scheduled],
+          repository: repository,
+          onNodeSelected: (_) {},
+          onTaskDoneChanged: (_, _) {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Schedule actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Extend 15m'));
+      await tester.pumpAndSettle();
+
+      var saved = (await repository.listNodes(day: day)).single;
+      final block = saved.data['time_block']! as Map<String, Object?>;
+      expect(block['endMinute'], 10 * 60 + 15);
+
+      await tester.pumpWidget(
+        _buildTestApp(
+          day: day,
+          nodes: [saved],
+          repository: repository,
+          onNodeSelected: (_) {},
+          onTaskDoneChanged: (_, _) {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Schedule actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Clear schedule'));
+      await tester.pumpAndSettle();
+
+      saved = (await repository.listNodes(day: day)).single;
+      expect(saved.data.containsKey('time_block'), isFalse);
     });
   });
 
@@ -176,6 +275,63 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Overlap 1'), findsOneWidget);
       expect(find.text('Overlap 2'), findsOneWidget);
+    });
+
+    testWidgets('shows conflict lane for overlapping blocks', (tester) async {
+      final day = DateTime(2026, 6, 25);
+      final node1 =
+          MindmapNode.create(
+            id: 'c1',
+            type: NodeType.task,
+            title: 'Conflict 1',
+            day: day,
+            now: DateTime(2026, 6, 25, 8),
+          ).copyWith(
+            data: {
+              'time_block': {'startTime': '09:00', 'endTime': '10:00'},
+            },
+          );
+      final node2 =
+          MindmapNode.create(
+            id: 'c2',
+            type: NodeType.task,
+            title: 'Conflict 2',
+            day: day,
+            now: DateTime(2026, 6, 25, 8),
+          ).copyWith(
+            data: {
+              'time_block': {'startTime': '09:30', 'endTime': '10:30'},
+            },
+          );
+
+      await tester.pumpWidget(
+        _buildTestApp(
+          day: day,
+          nodes: [node1, node2],
+          onNodeSelected: (_) {},
+          onTaskDoneChanged: (_, _) {},
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('timeline-conflict-lane')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Schedule conflicts'), findsOneWidget);
+      expect(find.textContaining('Overlap'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('timeline-state-c1-Conflict')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-conflict-icon-c1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-conflict-icon-c2')),
+        findsOneWidget,
+      );
     });
   });
 }

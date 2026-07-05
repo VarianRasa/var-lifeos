@@ -188,6 +188,10 @@ final class SyncController extends StateNotifier<SyncControllerState> {
   int _activitySequence = 0;
   int _restorePointSequence = 0;
 
+  bool get isSignedIn => state.isSignedIn;
+
+  String get lastMessage => state.lastMessage;
+
   Future<void> load() async {
     try {
       final authState = await _authGateway.currentState();
@@ -205,11 +209,16 @@ final class SyncController extends StateNotifier<SyncControllerState> {
     }
   }
 
-  Future<void> signIn({required String email, String displayName = ''}) async {
+  Future<void> signIn({
+    required String email,
+    String password = '',
+    String displayName = '',
+  }) async {
     state = state.copyWith(isBusy: true, lastMessage: '');
     try {
       final authState = await _authGateway.signIn(
         email: email,
+        password: password,
         displayName: displayName,
       );
       _pendingConflictResolutions.clear();
@@ -219,6 +228,44 @@ final class SyncController extends StateNotifier<SyncControllerState> {
         lastMessage: 'Signed in',
         lastConflictCount: 0,
         pendingConflicts: const [],
+      );
+    } on Object catch (error) {
+      _reportFailure(error);
+    }
+  }
+
+  Future<void> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  }) async {
+    state = state.copyWith(isBusy: true, lastMessage: '');
+    try {
+      final authState = await _authGateway.register(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+      _pendingConflictResolutions.clear();
+      state = state.copyWith(
+        authState: authState,
+        isBusy: false,
+        lastMessage: 'Account created',
+        lastConflictCount: 0,
+        pendingConflicts: const [],
+      );
+    } on Object catch (error) {
+      _reportFailure(error);
+    }
+  }
+
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    state = state.copyWith(isBusy: true, lastMessage: '');
+    try {
+      await _authGateway.sendPasswordResetEmail(email: email);
+      state = state.copyWith(
+        isBusy: false,
+        lastMessage: 'Password reset email sent',
       );
     } on Object catch (error) {
       _reportFailure(error);
@@ -711,6 +758,11 @@ final class SyncController extends StateNotifier<SyncControllerState> {
     }
   }
 
+  Future<void> createRestorePoint({required String label}) async {
+    final document = await _backupService.createBackup();
+    await _recordRestorePoint(label: label, document: document);
+  }
+
   Future<void> importPortableBackup({
     required String package,
     required String passphrase,
@@ -974,6 +1026,9 @@ String _conflictKindLabel(SyncConflictKind kind) {
 
 String _failureMessage(Object error) {
   if (error is SyncRemoteStoreException) {
+    return error.message;
+  }
+  if (error is SyncAuthException) {
     return error.message;
   }
   if (error is PortableBackupException) {

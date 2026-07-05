@@ -781,7 +781,7 @@ void main() {
       final state = container.read(syncControllerProvider);
       expect(state.isBusy, isFalse);
       expect(state.isSignedIn, isFalse);
-      expect(state.lastMessage, 'Remote auth request was rejected.');
+      expect(state.lastMessage, 'Email or password is incorrect.');
     },
   );
 
@@ -884,8 +884,23 @@ final class _FailingAuthGateway implements SyncAuthGateway {
   @override
   Future<SyncAuthState> signIn({
     required String email,
+    String password = '',
     String displayName = '',
   }) async {
+    throw const SyncAuthException('Email or password is incorrect.');
+  }
+
+  @override
+  Future<SyncAuthState> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  }) async {
+    throw const SyncRemoteStoreException('Remote auth request was rejected.');
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
     throw const SyncRemoteStoreException('Remote auth request was rejected.');
   }
 

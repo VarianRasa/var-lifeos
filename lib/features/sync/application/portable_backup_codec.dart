@@ -90,7 +90,7 @@ final class PortableMindmapBackupCodec {
     final plainText = await _decrypt(secretBox, secretKey);
     try {
       final decoded = jsonDecode(utf8.decode(plainText));
-      if (decoded is! Map) {
+      if (decoded is! Map<Object?, Object?>) {
         throw const PortableBackupException('Backup document is invalid.');
       }
 
@@ -129,7 +129,7 @@ final class PortableMindmapBackupCodec {
     } on FormatException {
       throw const PortableBackupException('Backup package is invalid.');
     }
-    if (decoded is! Map) {
+    if (decoded is! Map<Object?, Object?>) {
       throw const PortableBackupException('Backup package is invalid.');
     }
     final json = decoded.cast<String, Object?>();
@@ -165,7 +165,7 @@ final class PortableMindmapBackupCodec {
 
   Map<String, Object?> _readKdf(Map<String, Object?> packageJson) {
     final rawKdf = packageJson['kdf'];
-    if (rawKdf is! Map) {
+    if (rawKdf is! Map<Object?, Object?>) {
       throw const PortableBackupException('Backup KDF metadata is invalid.');
     }
     return rawKdf.cast<String, Object?>();

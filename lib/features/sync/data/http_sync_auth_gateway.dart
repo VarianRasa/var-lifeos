@@ -45,7 +45,9 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
     if (value == null) return const SyncAuthState.signedOut();
 
     final rawUser = value['user'];
-    if (rawUser is! Map) return const SyncAuthState.signedOut();
+    if (rawUser is! Map<Object?, Object?>) {
+      return const SyncAuthState.signedOut();
+    }
 
     final accessToken = value['accessToken'] as String?;
     return SyncAuthState.signedIn(
@@ -57,8 +59,33 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
   @override
   Future<SyncAuthState> signIn({
     required String email,
+    String password = '',
     String displayName = '',
   }) async {
+    return _authenticate(
+      path: 'auth/sign-in',
+      email: email,
+      password: password,
+      displayName: displayName,
+    );
+  }
+
+  @override
+  Future<SyncAuthState> register({
+    required String email,
+    required String password,
+    String displayName = '',
+  }) async {
+    return _authenticate(
+      path: 'auth/register',
+      email: email,
+      password: password,
+      displayName: displayName,
+    );
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
     final normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail.isEmpty) {
       throw ArgumentError.value(email, 'email', 'Email is required.');
@@ -66,22 +93,15 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
 
     final response = await _send(
       () => _client.post(
-        _endpoint.resolve('auth/sign-in'),
+        _endpoint.resolve('auth/password-reset'),
         headers: const {
           'accept': 'application/json',
           'content-type': 'application/json; charset=utf-8',
         },
-        body: jsonEncode({
-          'email': normalizedEmail,
-          'displayName': displayName.trim(),
-        }),
+        body: jsonEncode({'email': normalizedEmail}),
       ),
     );
-    _requireSuccess(response, accepted: const {200, 201});
-
-    final state = _authStateFromResponse(response.body);
-    await _saveState(state);
-    return state;
+    _requireSuccess(response, accepted: const {200, 202, 204});
   }
 
   @override
@@ -103,6 +123,38 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
 
     final db = await _db;
     await _store.record(_stateKey).delete(db);
+  }
+
+  Future<SyncAuthState> _authenticate({
+    required String path,
+    required String email,
+    String password = '',
+    String displayName = '',
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      throw ArgumentError.value(email, 'email', 'Email is required.');
+    }
+
+    final response = await _send(
+      () => _client.post(
+        _endpoint.resolve(path),
+        headers: const {
+          'accept': 'application/json',
+          'content-type': 'application/json; charset=utf-8',
+        },
+        body: jsonEncode({
+          'email': normalizedEmail,
+          if (password.isNotEmpty) 'password': password,
+          'displayName': displayName.trim(),
+        }),
+      ),
+    );
+    _requireSuccess(response, accepted: const {200, 201});
+
+    final state = _authStateFromResponse(response.body);
+    await _saveState(state);
+    return state;
   }
 
   Future<http.Response> _send(
@@ -137,13 +189,13 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
   SyncAuthState _authStateFromResponse(String body) {
     try {
       final decoded = jsonDecode(body);
-      if (decoded is! Map) {
+      if (decoded is! Map<Object?, Object?>) {
         throw const FormatException('Auth response must be an object.');
       }
       final json = decoded.cast<String, Object?>();
       final rawUser = json['user'];
       final accessToken = json['accessToken'] as String? ?? '';
-      if (rawUser is! Map || accessToken.trim().isEmpty) {
+      if (rawUser is! Map<Object?, Object?> || accessToken.trim().isEmpty) {
         throw const FormatException('Auth response is missing session data.');
       }
 

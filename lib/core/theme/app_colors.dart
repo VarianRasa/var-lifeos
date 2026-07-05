@@ -1,9 +1,7 @@
 /// Centralized color tokens for the Var design language.
 ///
-/// Dark-first palette tuned for a "pro & data-dense" feel (closer to
-/// Obsidian/Linear/Things than to playful consumer apps). Colors are exposed
-/// both as raw [Color] constants (used by painters and custom widgets) and
-/// folded into [AppTheme] for the Material scheme.
+/// DoodleCal-inspired blackboard palette: off-white marker outlines, neon lime
+/// actions, magenta pins, and small cyan/yellow highlights.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,14 +10,24 @@ import 'package:flutter/material.dart';
 class NodeColors {
   const NodeColors._();
 
-  static const Color task = Color(0xFF6C8EEF); // indigo-blue
-  static const Color kanban = Color(0xFF8B5CF6); // violet
-  static const Color plan = Color(0xFF22A06B); // green
-  static const Color note = Color(0xFFE2B33C); // amber
-  static const Color journal = Color(0xFF4FD1C5); // teal
-  static const Color habit = Color(0xFFEC6EAD); // pink-magenta
-  static const Color goal = Color(0xFFF27457); // coral-orange
-  static const Color link = Color(0xFF7A869A); // slate gray
+  static const Color task = Color(0xFFB6FF00);
+  static const Color kanban = Color(0xFFFFEA00);
+  static const Color plan = Color(0xFF80ECFF);
+  static const Color note = Color(0xFFF8F1E7);
+  static const Color journal = Color(0xFFFF4FD8);
+  static const Color habit = Color(0xFF7CFF8E);
+  static const Color goal = Color(0xFFFF8C1A);
+  static const Color link = Color(0xFF73D7FF);
+  static const Color event = Color(0xFFFF5ACD);
+  static const Color decision = Color(0xFFFFD166);
+  static const Color resource = Color(0xFFB6FF00);
+  static const Color idea = Color(0xFFFFEA00);
+  static const Color question = Color(0xFF80ECFF);
+  static const Color contact = Color(0xFF7CFF8E);
+  static const Color metric = Color(0xFFFF5ACD);
+  static const Color expense = Color(0xFFFF8C1A);
+  static const Color bookmark = Color(0xFFCBA6FF);
+  static const Color routine = Color(0xFFB6FF00);
 
   /// Ordered list matching a typical toolbar layout.
   static const List<Color> all = [
@@ -31,6 +39,16 @@ class NodeColors {
     habit,
     goal,
     link,
+    event,
+    decision,
+    resource,
+    idea,
+    question,
+    contact,
+    metric,
+    expense,
+    bookmark,
+    routine,
   ];
 }
 
@@ -38,65 +56,58 @@ class NodeColors {
 class StatusColors {
   const StatusColors._();
 
-  static const Color success = Color(0xFF22A06B);
-  static const Color warning = Color(0xFFE2B33C);
-  static const Color error = Color(0xFFEF4444);
-  static const Color info = Color(0xFF6C8EEF);
+  static const Color success = Color(0xFF7CFF8E);
+  static const Color warning = Color(0xFFFFEA00);
+  static const Color error = Color(0xFFFF6B6B);
+  static const Color info = Color(0xFF80ECFF);
 
-  static const Color successBg = Color(0xFF0D3B2E);
-  static const Color warningBg = Color(0xFF3B3316);
-  static const Color errorBg = Color(0xFF3B1616);
-  static const Color infoBg = Color(0xFF1A2742);
+  static const Color successBg = Color(0xFF123B1C);
+  static const Color warningBg = Color(0xFF3F3600);
+  static const Color errorBg = Color(0xFF451718);
+  static const Color infoBg = Color(0xFF0D3540);
 
-  // Light mode backgrounds
-  static const Color successBgLight = Color(0xFFE8F5E9);
-  static const Color warningBgLight = Color(0xFFFFF8E1);
-  static const Color errorBgLight = Color(0xFFFFEBEE);
-  static const Color infoBgLight = Color(0xFFE3F2FD);
+  static const Color successBgLight = Color(0xFFD7FFDD);
+  static const Color warningBgLight = Color(0xFFFFF7B8);
+  static const Color errorBgLight = Color(0xFFFFDCDC);
+  static const Color infoBgLight = Color(0xFFD9F8FF);
 }
 
-/// Gradient definitions for premium card backgrounds and headers.
+/// Gradient definitions for card backgrounds and headers.
 class GradientColors {
   const GradientColors._();
 
-  /// Subtle dark card gradient
   static const darkCardGradient = LinearGradient(
-    colors: [Color(0xFF161A21), Color(0xFF1A1F28)],
+    colors: [Color(0xFF121214), Color(0xFF202024)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Accent header gradient (primary-tinted)
   static const primaryGradient = LinearGradient(
-    colors: [Color(0xFF4A6CF7), Color(0xFF6C8EEF)],
+    colors: [Color(0xFFB6FF00), Color(0xFFFFEA00), Color(0xFFFF4FD8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Success gradient for completed items
   static const successGradient = LinearGradient(
-    colors: [Color(0xFF0D8050), Color(0xFF22A06B)],
+    colors: [Color(0xFF123B1C), Color(0xFF7CFF8E)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Warm gradient for attention items
   static const warmGradient = LinearGradient(
-    colors: [Color(0xFFE2884C), Color(0xFFF27457)],
+    colors: [Color(0xFF3F3600), Color(0xFFFFEA00)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Premium glassmorphic surface gradient (dark)
   static const glassGradientDark = LinearGradient(
-    colors: [Color(0x14FFFFFF), Color(0x08FFFFFF)],
+    colors: [Color(0x33111111), Color(0x12000000)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  /// Premium glassmorphic surface gradient (light)
   static const glassGradientLight = LinearGradient(
-    colors: [Color(0x20FFFFFF), Color(0x10FFFFFF)],
+    colors: [Color(0xE6FFF7DF), Color(0xCCF8F1E7)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -106,21 +117,21 @@ class GradientColors {
 class NeutralColors {
   const NeutralColors._();
 
-  // Dark ramp (primary experience)
-  static const Color darkBg = Color(0xFF0F1115);
-  static const Color darkSurface = Color(0xFF161A21);
-  static const Color darkSurfaceHigh = Color(0xFF1E232C);
-  static const Color darkBorder = Color(0xFF2A313C);
-  static const Color darkTextPrimary = Color(0xFFE6E9EF);
-  static const Color darkTextSecondary = Color(0xFF9BA3B0);
-  static const Color darkTextDisabled = Color(0xFF5C6470);
+  // Dark blackboard ramp.
+  static const Color darkBg = Color(0xFF0B0B0D);
+  static const Color darkSurface = Color(0xF2111114);
+  static const Color darkSurfaceHigh = Color(0xFF202024);
+  static const Color darkBorder = Color(0xFFEDE7F6);
+  static const Color darkTextPrimary = Color(0xFFF8F1E7);
+  static const Color darkTextSecondary = Color(0xFFC9C3B8);
+  static const Color darkTextDisabled = Color(0xFF77736E);
 
-  // Light ramp (secondary experience)
-  static const Color lightBg = Color(0xFFFBFBFC);
-  static const Color lightSurface = Color(0xFFFFFFFF);
-  static const Color lightSurfaceHigh = Color(0xFFF1F3F6);
-  static const Color lightBorder = Color(0xFFE1E5EA);
-  static const Color lightTextPrimary = Color(0xFF1B1E24);
-  static const Color lightTextSecondary = Color(0xFF5C6470);
-  static const Color lightTextDisabled = Color(0xFFA0A7B2);
+  // Light fallback keeps same doodle language, but on cream.
+  static const Color lightBg = Color(0xFFFFF4D7);
+  static const Color lightSurface = Color(0xFFFFF9E8);
+  static const Color lightSurfaceHigh = Color(0xFFFFEFB8);
+  static const Color lightBorder = Color(0xFF1B1B1F);
+  static const Color lightTextPrimary = Color(0xFF111114);
+  static const Color lightTextSecondary = Color(0xFF4C463D);
+  static const Color lightTextDisabled = Color(0xFF8C8273);
 }

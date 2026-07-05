@@ -8,6 +8,20 @@ import '../../calendar/domain/time_block.dart';
 import '../../mindmap/domain/mindmap_node.dart';
 import '../../mindmap/domain/mindmap_node_data.dart';
 
+final class _StructuredQuickCreate {
+  const _StructuredQuickCreate({
+    required this.title,
+    this.body = '',
+    this.data = const {},
+    this.checklistTitles = const [],
+  });
+
+  final String title;
+  final String body;
+  final Map<String, Object?> data;
+  final List<String> checklistTitles;
+}
+
 final class QuickCreateCommand {
   const QuickCreateCommand({
     required this.type,
@@ -113,6 +127,12 @@ QuickCreateCommand? quickCreateCommandFromQuery(
       final parsedPriority = _priorityFromToken(token.substring(1));
       if (parsedPriority == null) return null;
       priority = parsedPriority;
+      continue;
+    }
+
+    final compactPriority = _priorityFromToken(token);
+    if (compactPriority != null && token.toLowerCase().startsWith('p')) {
+      priority = compactPriority;
       continue;
     }
 
@@ -370,6 +390,11 @@ QuickCreateCommand? quickCreateCommandFromQuery(
     body = switch (calendarKind) {
       CalendarNodeKind.meeting => agenda ?? title,
       CalendarNodeKind.decision => optionsText ?? '',
+      CalendarNodeKind.metric => _metricBody(
+        title: title,
+        value: metricValue,
+        unit: metricUnit,
+      ),
       _ => '',
     };
 
@@ -378,6 +403,18 @@ QuickCreateCommand? quickCreateCommandFromQuery(
       payload: calendarPayload,
       timeBlock: timeBlock,
     );
+  }
+
+  if (calendarKind == null) {
+    final structured = _structuredBodyForType(type, title);
+    title = structured.title;
+    body = structured.body;
+    data = structured.data;
+    if (structured.checklistTitles.isNotEmpty) {
+      for (final item in structured.checklistTitles) {
+        if (!checklistTitles.contains(item)) checklistTitles.add(item);
+      }
+    }
   }
 
   if (title.isEmpty) return null;
@@ -414,13 +451,111 @@ NodeType? _typeFromToken(String token) {
     'habit' => NodeType.habit,
     'goal' => NodeType.goal,
     'link' => NodeType.link,
-    'event' => NodeType.task,
+    'event' || 'meeting' => NodeType.event,
     'reminder' || 'remind' => NodeType.task,
-    'meeting' => NodeType.note,
-    'metric' => NodeType.task,
-    'decision' => NodeType.note,
+    'metric' || 'measure' || 'kpi' => NodeType.metric,
+    'decision' => NodeType.decision,
+    'resource' || 'reference' || 'ref' => NodeType.resource,
+    'idea' || 'spark' => NodeType.idea,
+    'question' || 'ask' => NodeType.question,
+    'contact' || 'person' => NodeType.contact,
+    'expense' || 'cost' || 'spend' => NodeType.expense,
+    'bookmark' || 'save' => NodeType.bookmark,
+    'routine' || 'ritual' => NodeType.routine,
     _ => null,
   };
+}
+
+_StructuredQuickCreate _structuredBodyForType(NodeType type, String title) {
+  return switch (type) {
+    NodeType.expense => _expenseQuickCreate(title),
+    NodeType.contact => _contactQuickCreate(title),
+    NodeType.bookmark => _bookmarkQuickCreate(title),
+    NodeType.question => _bodyQuickCreate(
+      title,
+      '## Question\n$title\n\n## Context\n\n## Possible answers\n- ',
+    ),
+    NodeType.routine => _routineQuickCreate(title),
+    NodeType.idea => _bodyQuickCreate(
+      title,
+      '## Spark\n$title\n\n## Why it matters\n\n## Next experiment\n',
+    ),
+    _ => _StructuredQuickCreate(title: title),
+  };
+}
+
+_StructuredQuickCreate _bodyQuickCreate(String title, String body) {
+  return _StructuredQuickCreate(title: title, body: body);
+}
+
+_StructuredQuickCreate _expenseQuickCreate(String title) {
+  final parts = title.split(RegExp(r'\s+'));
+  final amountIndex = parts.indexWhere(_looksLikeAmount);
+  final amount = amountIndex == -1 ? '' : parts[amountIndex];
+  final remaining = [
+    for (var i = 0; i < parts.length; i++)
+      if (i != amountIndex) parts[i],
+  ];
+  final cleanTitle = remaining.isEmpty ? title : remaining.join(' ');
+  return _StructuredQuickCreate(
+    title: cleanTitle,
+    body:
+        '## Expense\n\nAmount: $amount\nCategory: ${remaining.isEmpty ? '' : remaining.first}\nNotes: ${remaining.skip(1).join(' ')}',
+  );
+}
+
+_StructuredQuickCreate _contactQuickCreate(String title) {
+  final emailMatch = RegExp(r'\b[\w.+-]+@[\w.-]+\.\w+\b').firstMatch(title);
+  final email = emailMatch?.group(0) ?? '';
+  var name = title.replaceAll(RegExp(r'\bemail\b', caseSensitive: false), '');
+  if (email.isNotEmpty) name = name.replaceAll(email, '');
+  name = name.trim().replaceAll(RegExp(r'\s+'), ' ');
+  return _StructuredQuickCreate(
+    title: name.isEmpty ? title : name,
+    body:
+        '## Contact\n\nName: ${name.isEmpty ? title : name}\nRole:\nEmail: $email\nNotes:',
+  );
+}
+
+_StructuredQuickCreate _bookmarkQuickCreate(String title) {
+  final urlMatch = RegExp(r'https?://\S+').firstMatch(title);
+  final url = urlMatch?.group(0) ?? '';
+  final label = title.replaceAll(url, '').trim();
+  return _StructuredQuickCreate(
+    title: label.isEmpty ? (url.isEmpty ? title : url) : label,
+    body: '## Bookmark\n\nURL: $url\nWhy saved: ${label.isEmpty ? '' : label}',
+    data: url.isEmpty
+        ? const <String, Object?>{}
+        : {
+            'link': {'url': url},
+          },
+  );
+}
+
+_StructuredQuickCreate _routineQuickCreate(String title) {
+  final steps = title
+      .split(RegExp(r'\s*(?:,|\+|->)\s*'))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+  return _StructuredQuickCreate(
+    title: title,
+    body:
+        '## Routine\n\nTrigger: $title\nSteps:\n${steps.map((s) => '- $s').join('\n')}',
+    checklistTitles: steps.length > 1 ? steps : const [],
+  );
+}
+
+String _metricBody({
+  required String title,
+  required String? value,
+  required String? unit,
+}) {
+  return '## Metric\n\nValue: ${value ?? ''}\nUnit: ${unit ?? ''}\nTrend:';
+}
+
+bool _looksLikeAmount(String token) {
+  return RegExp(r'^(?:rp)?\d+[\dkKmMbB.,]*$').hasMatch(token.toLowerCase());
 }
 
 CalendarNodeKind? _calendarKindFromToken(String token) {
@@ -444,6 +579,9 @@ NodeStatus? _statusFromToken(String token) {
 
 NodePriority? _priorityFromToken(String token) {
   final value = token.trim().toLowerCase();
+  if (value == 'p1' || value == '1') return NodePriority.high;
+  if (value == 'p2' || value == '2') return NodePriority.medium;
+  if (value == 'p3' || value == '3') return NodePriority.low;
   for (final priority in NodePriority.values) {
     if (priority.name == value) return priority;
   }

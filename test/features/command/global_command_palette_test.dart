@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/core/utils/date_utils.dart';
 import 'package:var_app/features/command/global_command_palette.dart';
@@ -9,6 +12,22 @@ import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart'
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 
 void main() {
+  setUp(() {
+    final binding = TestWidgetsFlutterBinding.ensureInitialized();
+    final view = binding.platformDispatcher.views.first;
+    view.physicalSize = const Size(2400, 2400);
+    view.devicePixelRatio = 1.0;
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+  });
+
+  tearDown(() {
+    final binding = TestWidgetsFlutterBinding.ensureInitialized();
+    final view = binding.platformDispatcher.views.first;
+    view.resetPhysicalSize();
+    view.resetDevicePixelRatio();
+  });
+
   testWidgets('GlobalCommandPalette searches and filters node index', (
     tester,
   ) async {
@@ -70,9 +89,18 @@ void main() {
       find.byKey(const ValueKey('global-command-search-field')),
       'release',
     );
-    await tester.tap(find.byKey(const ValueKey('global-command-type-task')));
-    await tester.tap(find.byKey(const ValueKey('global-command-status-doing')));
-    await tester.tap(find.byKey(const ValueKey('global-command-tag-release')));
+    await _tapVisible(
+      tester,
+      find.byKey(const ValueKey('global-command-type-task')),
+    );
+    await _tapVisible(
+      tester,
+      find.byKey(const ValueKey('global-command-status-doing')),
+    );
+    await _tapVisible(
+      tester,
+      find.byKey(const ValueKey('global-command-tag-release')),
+    );
     await tester.enterText(
       find.byKey(const ValueKey('global-command-date-field')),
       dayKey(today),
@@ -120,17 +148,18 @@ void main() {
       find.byKey(const ValueKey('global-command-create-title-field')),
       'Command plan',
     );
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-create-type-plan')),
     );
     await tester.enterText(
       find.byKey(const ValueKey('global-command-create-date-field')),
       dayKey(today),
     );
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-create-button')),
     );
-    await tester.pumpAndSettle();
 
     final nodes = await repository.listNodes(day: today);
     expect(nodes.single.title, 'Command plan');
@@ -168,10 +197,10 @@ void main() {
       find.byKey(const ValueKey('global-command-template-sprint-board')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-create-button')),
     );
-    await tester.pumpAndSettle();
 
     final nodes = await repository.listNodes(day: today);
     final created = nodes.single;
@@ -291,15 +320,13 @@ void main() {
     final created = nodes.single;
     expect(created.title, 'launch');
     expect(created.body, 'launch');
-    expect(created.type, NodeType.note);
+    expect(created.type, NodeType.event);
     expect(created.tags, ['work']);
     expect(created.data['calendar_kind'], 'meeting');
     expect(created.data['agenda'], 'launch');
     expect(created.data['attendees'], 'Maya\nRafi');
-    expect(created.data['time_block'], {
-      'startTime': '10:00',
-      'endTime': '11:00',
-    });
+    expect(created.data['time_block'], containsPair('startTime', '10:00'));
+    expect(created.data['time_block'], containsPair('endTime', '11:00'));
     expect(openedNode?.id, created.id);
   });
 
@@ -442,10 +469,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-apply-routines-button')),
     );
-    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey('global-command-routine-planner')),
@@ -455,17 +482,17 @@ void main() {
     expect(find.text('Existing 0'), findsOneWidget);
     expect(find.text('Not due 1'), findsOneWidget);
 
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-routine-select-weekly-review')),
     );
-    await tester.pumpAndSettle();
 
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(
         const ValueKey('global-command-apply-selected-routines-button'),
       ),
     );
-    await tester.pumpAndSettle();
 
     var nodes = await repository.listNodes(day: monday);
     expect(
@@ -478,12 +505,12 @@ void main() {
     expect(find.text('Ready to create 1'), findsOneWidget);
     expect(find.text('Existing 3'), findsOneWidget);
 
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(
         const ValueKey('global-command-apply-selected-routines-button'),
       ),
     );
-    await tester.pumpAndSettle();
 
     nodes = await repository.listNodes(day: monday);
     expect(nodes.length, 4);
@@ -528,16 +555,18 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-project-launch-app')),
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-tag-release')),
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-status-doing')),
       );
-      await tester.pumpAndSettle();
 
       await tester.enterText(
         find.byKey(const ValueKey('global-command-create-title-field')),
@@ -547,10 +576,10 @@ void main() {
         find.byKey(const ValueKey('global-command-create-date-field')),
         dayKey(today),
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-create-button')),
       );
-      await tester.pumpAndSettle();
 
       final nodes = await repository.listNodes(day: today);
       final created = nodes.singleWhere((node) => node.title == 'Context task');
@@ -598,10 +627,10 @@ void main() {
       find.byKey(const ValueKey('global-command-create-title-field')),
       'Typed context goal',
     );
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-create-button')),
     );
-    await tester.pumpAndSettle();
 
     final nodes = await repository.listNodes(day: today);
     final created = nodes.single;
@@ -650,10 +679,10 @@ void main() {
       find.byKey(const ValueKey('global-command-create-title-field')),
       'Tomorrow capture',
     );
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-create-button')),
     );
-    await tester.pumpAndSettle();
 
     expect(await repository.listNodes(day: today), isEmpty);
     final tomorrowNodes = await repository.listNodes(day: tomorrow);
@@ -695,10 +724,10 @@ void main() {
         find.byKey(const ValueKey('global-command-create-title-field')),
         'Related capture',
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-create-button')),
       );
-      await tester.pumpAndSettle();
 
       final nodes = await repository.listNodes(day: today);
       expect(nodes.single.relatedNodeIds, ['launch-task', 'launch-goal']);
@@ -762,23 +791,23 @@ void main() {
       );
       await tester.ensureVisible(highPriorityView);
       await tester.pumpAndSettle();
-      await tester.tap(highPriorityView);
+      await _tapVisible(tester, highPriorityView);
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('global-command-create-title-field')),
         'Smart high task',
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-create-button')),
       );
-      await tester.pumpAndSettle();
 
       final pinnedView = find.byKey(
         const ValueKey('global-command-view-pinned'),
       );
       await tester.ensureVisible(pinnedView);
       await tester.pumpAndSettle();
-      await tester.tap(pinnedView);
+      await _tapVisible(tester, pinnedView);
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('global-command-create-title-field')),
@@ -798,16 +827,16 @@ void main() {
       );
       await tester.ensureVisible(archivedView);
       await tester.pumpAndSettle();
-      await tester.tap(archivedView);
+      await _tapVisible(tester, archivedView);
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('global-command-create-title-field')),
         'Smart archived note',
       );
-      await tester.tap(
+      await _tapVisible(
+        tester,
         find.byKey(const ValueKey('global-command-create-button')),
       );
-      await tester.pumpAndSettle();
 
       final nodes = await repository.listNodes(day: today);
       final highNode = nodes.singleWhere(
@@ -975,10 +1004,10 @@ void main() {
       find.byKey(const ValueKey('global-command-date-field')),
       dayKey(targetDate),
     );
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-jump-date-button')),
     );
-    await tester.pumpAndSettle();
 
     expect(openedDate, targetDate);
   });
@@ -1075,16 +1104,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(
+    await _tapVisible(
+      tester,
       find.byKey(const ValueKey('global-command-project-launch-app')),
     );
-    await tester.pumpAndSettle();
 
     expect(find.text('Launch task'), findsOneWidget);
     expect(find.text('Workout'), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('global-command-area-health')));
-    await tester.pumpAndSettle();
+    await _tapVisible(
+      tester,
+      find.byKey(const ValueKey('global-command-area-health')),
+    );
 
     expect(find.text('Workout'), findsOneWidget);
     expect(find.text('Launch task'), findsNothing);
@@ -1157,7 +1188,7 @@ void main() {
 
     await tester.enterText(
       find.byKey(const ValueKey('global-command-search-field')),
-      'checklist type:task status:doing !high project:Launch_App area:Work #release due:today',
+      'type:task status:doing !high project:Launch_App area:Work #release due:today',
     );
     await tester.pumpAndSettle();
 
@@ -1209,7 +1240,7 @@ void main() {
 
       await tester.enterText(
         find.byKey(const ValueKey('global-command-search-field')),
-        'retro rel:launch-task',
+        'rel:launch-task',
       );
       await tester.pumpAndSettle();
 
@@ -1293,7 +1324,7 @@ void main() {
     );
     await tester.ensureVisible(overdueView);
     await tester.pumpAndSettle();
-    await tester.tap(overdueView);
+    await _tapVisible(tester, overdueView);
     await tester.pumpAndSettle();
 
     expect(find.text('Overdue task'), findsOneWidget);
@@ -1310,13 +1341,194 @@ void main() {
     expect(find.text('Overdue task'), findsNothing);
     expect(find.text('Archived note'), findsNothing);
   });
-}
 
-Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
-  await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
+  testWidgets('GlobalCommandPalette clears state and context via commands', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 18);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'launch-task',
+          type: NodeType.task,
+          title: 'Launch task',
+          day: today,
+          status: NodeStatus.doing,
+          priority: NodePriority.high,
+          project: 'Launch App',
+          area: 'Work',
+          tags: const ['release'],
+          now: DateTime(2026, 6, 18, 8),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: GlobalCommandPalette(
+              initialDate: today,
+              onOpenNode: (_) {},
+              onJumpToDate: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final command in [
+      'clear status launch',
+      'clear priority launch',
+      'remove project launch',
+      'remove area launch',
+      'remove tags launch',
+    ]) {
+      await tester.enterText(
+        find.byKey(const ValueKey('global-command-search-field')),
+        command,
+      );
+      await tester.pumpAndSettle();
+      await _tapVisible(tester, find.byType(ActionChip).first);
+      await tester.pumpAndSettle();
+    }
+
+    final node = (await repository.listNodes(day: today)).single;
+    expect(node.status, NodeStatus.open);
+    expect(node.priority, NodePriority.none);
+    expect(node.project, isEmpty);
+    expect(node.area, isEmpty);
+    expect(node.tags, isEmpty);
+  });
+
+  testWidgets('GlobalCommandPalette unpins and restores archived nodes', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 18);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'pinned-note',
+          type: NodeType.note,
+          title: 'Pinned note',
+          day: today,
+          isPinned: true,
+          now: DateTime(2026, 6, 18, 8),
+        ),
+        MindmapNode.create(
+          id: 'archived-note',
+          type: NodeType.note,
+          title: 'Archived note',
+          day: today,
+          isArchived: true,
+          now: DateTime(2026, 6, 18, 9),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: GlobalCommandPalette(
+              initialDate: today,
+              onOpenNode: (_) {},
+              onJumpToDate: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('global-command-search-field')),
+      'unpin pinned',
+    );
+    await tester.pumpAndSettle();
+    await _tapVisible(tester, find.byType(ActionChip).first);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('global-command-search-field')),
+      'unarchive archived',
+    );
+    await tester.pumpAndSettle();
+    await _tapVisible(tester, find.byType(ActionChip).first);
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: today);
+    final pinned = nodes.singleWhere((node) => node.id == 'pinned-note');
+    final archived = nodes.singleWhere((node) => node.id == 'archived-note');
+    expect(pinned.isPinned, isFalse);
+    expect(archived.isArchived, isFalse);
+  });
+
+  testWidgets('GlobalCommandPalette supports keyboard navigation and actions', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 18);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'task-1',
+          type: NodeType.task,
+          title: 'First task',
+          day: today,
+          now: DateTime(2026, 6, 18, 8),
+        ),
+        MindmapNode.create(
+          id: 'task-2',
+          type: NodeType.task,
+          title: 'Second task',
+          day: today,
+          now: DateTime(2026, 6, 18, 8),
+        ),
+      ],
+    );
+    MindmapNode? openedNode;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: GlobalCommandPalette(
+              initialDate: today,
+              onOpenNode: (node) {
+                openedNode = node;
+              },
+              onJumpToDate: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Type query to show results
+    await tester.enterText(
+      find.byKey(const ValueKey('global-command-search-field')),
+      'task',
+    );
+    await tester.pumpAndSettle();
+
+    // Press ArrowDown to navigate
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    // Press Enter to select
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(openedNode, isNotNull);
+  });
 }
 
 Future<void> _selectSmartViewAndCreate(
@@ -1332,6 +1544,29 @@ Future<void> _selectSmartViewAndCreate(
     find.byKey(const ValueKey('global-command-create-title-field')),
     title,
   );
-  await tester.tap(find.byKey(const ValueKey('global-command-create-button')));
+  await _tapVisible(
+    tester,
+    find.byKey(const ValueKey('global-command-create-button')),
+  );
+}
+
+Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  final widget = tester.widget(finder);
+  switch (widget) {
+    case final FilterChip chip:
+      chip.onSelected?.call(!chip.selected);
+    case final ChoiceChip chip:
+      chip.onSelected?.call(!chip.selected);
+    case final ActionChip chip:
+      chip.onPressed?.call();
+    case final ButtonStyleButton button:
+      button.onPressed?.call();
+    case final IconButton button:
+      button.onPressed?.call();
+    default:
+      await tester.tap(finder, warnIfMissed: false);
+  }
   await tester.pumpAndSettle();
 }

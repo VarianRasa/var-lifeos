@@ -120,6 +120,16 @@ final class InsightsSummary {
             NodeType.plan ||
             NodeType.note ||
             NodeType.link ||
+            NodeType.event ||
+            NodeType.decision ||
+            NodeType.resource ||
+            NodeType.idea ||
+            NodeType.question ||
+            NodeType.contact ||
+            NodeType.metric ||
+            NodeType.expense ||
+            NodeType.bookmark ||
+            NodeType.routine ||
             NodeType.empty:
           break;
       }
@@ -177,6 +187,85 @@ final class InsightsDayPulse {
   final int nodeCount;
 
   bool get isActive => nodeCount > 0;
+}
+
+final class InsightsWeeklyReview {
+  const InsightsWeeklyReview({
+    required this.completedTasks,
+    required this.overdueTasks,
+    required this.activeGoals,
+    required this.reviewNotes,
+    required this.suggestedActions,
+  });
+
+  factory InsightsWeeklyReview.fromNodes({
+    required DateTime today,
+    required Iterable<MindmapNode> nodes,
+  }) {
+    final normalizedToday = today.dateOnly;
+    final windowStart = normalizedToday.addDays(-6);
+    final completedTasks = <MindmapNode>[];
+    final overdueTasks = <MindmapNode>[];
+    final activeGoals = <MindmapNode>[];
+    final reviewNotes = <MindmapNode>[];
+
+    for (final node in nodes) {
+      if (node.isArchived) continue;
+      final inWeek = _isInRange(node.day, windowStart, normalizedToday);
+      if (inWeek && node.type == NodeType.task && _isComplete(node)) {
+        completedTasks.add(node);
+      }
+      if (node.type == NodeType.task &&
+          !_isComplete(node) &&
+          node.dueDate != null &&
+          node.dueDate!.dateOnly.isBefore(normalizedToday)) {
+        overdueTasks.add(node);
+      }
+      if (node.type == NodeType.goal && !node.isDone) {
+        activeGoals.add(node);
+      }
+      if (inWeek &&
+          node.type == NodeType.journal &&
+          (_sectionData(node.data, 'journal')['isWeeklyReview'] == true ||
+              node.tags.contains('weekly-review'))) {
+        reviewNotes.add(node);
+      }
+    }
+
+    completedTasks.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    overdueTasks.sort((a, b) {
+      final aDue = a.dueDate ?? a.day;
+      final bDue = b.dueDate ?? b.day;
+      return aDue.compareTo(bDue);
+    });
+    activeGoals.sort(
+      (a, b) => LifeOsSummary.goalProgressFor(
+        a,
+      ).compareTo(LifeOsSummary.goalProgressFor(b)),
+    );
+    reviewNotes.sort((a, b) => b.day.compareTo(a.day));
+
+    return InsightsWeeklyReview(
+      completedTasks: List.unmodifiable(completedTasks.take(5)),
+      overdueTasks: List.unmodifiable(overdueTasks.take(5)),
+      activeGoals: List.unmodifiable(activeGoals.take(5)),
+      reviewNotes: List.unmodifiable(reviewNotes.take(3)),
+      suggestedActions: List.unmodifiable(
+        _weeklyReviewActions(
+          completedTasks: completedTasks.length,
+          overdueTasks: overdueTasks.length,
+          activeGoals: activeGoals.length,
+          reviewNotes: reviewNotes.length,
+        ),
+      ),
+    );
+  }
+
+  final List<MindmapNode> completedTasks;
+  final List<MindmapNode> overdueTasks;
+  final List<MindmapNode> activeGoals;
+  final List<MindmapNode> reviewNotes;
+  final List<String> suggestedActions;
 }
 
 final class InsightsWeeklyPulse {
@@ -275,6 +364,24 @@ DateTime? _busiestDay(Map<DateTime, int> dayCounts) {
     }
   }
   return result;
+}
+
+List<String> _weeklyReviewActions({
+  required int completedTasks,
+  required int overdueTasks,
+  required int activeGoals,
+  required int reviewNotes,
+}) {
+  return [
+    if (reviewNotes == 0)
+      'Create a weekly review journal before planning next week.',
+    if (overdueTasks > 0) 'Reschedule or close $overdueTasks overdue tasks.',
+    if (completedTasks > 0)
+      'Capture wins from $completedTasks completed tasks.',
+    if (activeGoals > 3) 'Pick the top 3 goals to protect focus.',
+    if (completedTasks == 0 && overdueTasks == 0)
+      'Add one concrete next action for tomorrow.',
+  ];
 }
 
 InsightsDayPulse? _busiestPulseDay(List<InsightsDayPulse> days) {

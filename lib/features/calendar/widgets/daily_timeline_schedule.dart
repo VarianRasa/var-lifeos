@@ -182,6 +182,20 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
     final theme = Theme.of(context);
     final parsedNodes = _ParsedTimelineNodes.fromNodes(widget.nodes);
     final scheduledEntries = _layoutOverlaps(parsedNodes.scheduled);
+    final conflicts = detectTimeBlockConflicts([
+      for (final entry in parsedNodes.scheduled)
+        DayTimeBlock(
+          id: entry.node.id,
+          block: entry.block,
+          isHighPriority:
+              entry.node.priority == NodePriority.high ||
+              entry.node.priority == NodePriority.urgent,
+          isDone: entry.node.isDone || entry.node.status == NodeStatus.done,
+        ),
+    ]);
+    final conflictingNodeIds = {
+      for (final conflict in conflicts) ...conflict.nodeIds,
+    };
     final today = ref.watch(currentDateProvider);
     final showNowMarker = widget.day.isSameDay(today);
     final now = DateTime.now();
@@ -207,6 +221,13 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
               title: 'Unscheduled',
               nodes: parsedNodes.unscheduled,
               onNodeSelected: widget.onNodeSelected,
+              onScheduleNext: _scheduleNextAvailable,
+            ),
+          if (conflicts.isNotEmpty)
+            _ConflictLane(
+              key: const ValueKey('timeline-conflict-lane'),
+              conflicts: conflicts,
+              nodesById: {for (final node in widget.nodes) node.id: node},
             ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -265,20 +286,37 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
                               ),
                             ),
                           Positioned.fill(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              onTapUp: (details) {
-                                final localOffset = details.localPosition;
-                                final hour =
-                                    (localOffset.dy - 8.0) ~/ _hourHeight;
-                                if (hour >= 0 && hour < 24) {
-                                  final subHourY =
-                                      (localOffset.dy - 8.0) % _hourHeight;
-                                  final minute = subHourY >= (_hourHeight / 2)
-                                      ? 30
-                                      : 0;
-                                  _showScheduleDialog(context, hour, minute);
-                                }
+                            child: DragTarget<MindmapNode>(
+                              onAcceptWithDetails: (details) {
+                                final box =
+                                    context.findRenderObject() as RenderBox?;
+                                if (box == null) return;
+                                final localOffset = box.globalToLocal(
+                                  details.offset,
+                                );
+                                final slot = _slotFromDy(localOffset.dy);
+                                if (slot == null) return;
+                                _scheduleAt(
+                                  details.data,
+                                  slot.startMinute,
+                                  slot.endMinute,
+                                );
+                              },
+                              builder: (context, candidateData, rejectedData) {
+                                return GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTapUp: (details) {
+                                    final slot = _slotFromDy(
+                                      details.localPosition.dy,
+                                    );
+                                    if (slot == null) return;
+                                    _showScheduleDialog(
+                                      context,
+                                      slot.startMinute ~/ 60,
+                                      slot.startMinute % 60,
+                                    );
+                                  },
+                                );
                               },
                             ),
                           ),
@@ -335,9 +373,14 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
                                 right: rightItem,
                                 child: _TimelineNodeCard(
                                   entry: entry,
+                                  hasConflict: conflictingNodeIds.contains(
+                                    entry.node.id,
+                                  ),
                                   onNodeSelected: widget.onNodeSelected,
                                   onTaskDoneChanged: widget.onTaskDoneChanged,
                                   onUnschedule: () => _unschedule(entry.node),
+                                  onExtend: () =>
+                                      _extend(entry.node, entry.block),
                                 ),
                               );
                             }()),
@@ -357,20 +400,61 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
   Future<void> _unschedule(MindmapNode node) async {
     await ref.read(mindmapMutationControllerProvider).unscheduleNode(node);
   }
+
+  Future<void> _scheduleAt(
+    MindmapNode node,
+    int startMinute,
+    int endMinute,
+  ) async {
+    final updated = await ref
+        .read(mindmapMutationControllerProvider)
+        .scheduleNode(
+          node,
+          TimeBlock(startMinute: startMinute, endMinute: endMinute),
+        );
+    widget.onNodeSelected(updated);
+  }
+
+  Future<void> _extend(MindmapNode node, TimeBlock block) async {
+    final nextEnd = (block.endMinute + 15).clamp(block.startMinute + 1, 1440);
+    await ref
+        .read(mindmapMutationControllerProvider)
+        .scheduleNode(
+          node,
+          TimeBlock(startMinute: block.startMinute, endMinute: nextEnd),
+        );
+  }
+
+  Future<void> _scheduleNextAvailable(MindmapNode node) async {
+    final parsedNodes = _ParsedTimelineNodes.fromNodes(widget.nodes);
+    final startMinute = _nextAvailableStart(parsedNodes.scheduled);
+    final block = TimeBlock(
+      startMinute: startMinute,
+      endMinute: (startMinute + 60).clamp(startMinute + 1, 1440),
+    );
+    final updated = await ref
+        .read(mindmapMutationControllerProvider)
+        .scheduleNode(node, block);
+    widget.onNodeSelected(updated);
+  }
 }
 
 class _TimelineNodeCard extends StatelessWidget {
   const _TimelineNodeCard({
     required this.entry,
+    required this.hasConflict,
     required this.onNodeSelected,
     required this.onTaskDoneChanged,
     required this.onUnschedule,
+    required this.onExtend,
   });
 
   final _TimelineEntry entry;
+  final bool hasConflict;
   final ValueChanged<MindmapNode> onNodeSelected;
   final void Function(MindmapNode, bool) onTaskDoneChanged;
   final VoidCallback onUnschedule;
+  final VoidCallback onExtend;
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +462,18 @@ class _TimelineNodeCard extends StatelessWidget {
     final block = entry.block;
     final theme = Theme.of(context);
     final color = nodeColor(node.type);
+    final isDone = node.isDone || node.status == NodeStatus.done;
+    final borderColor = hasConflict ? theme.colorScheme.error : color;
+    final stateLabel = isDone
+        ? 'Done'
+        : hasConflict
+        ? 'Conflict'
+        : 'Scheduled';
+    final stateColor = isDone
+        ? theme.colorScheme.tertiary
+        : hasConflict
+        ? theme.colorScheme.error
+        : color;
     final height = (block.durationMinutes / 60.0) * _hourHeight;
 
     return ClipRRect(
@@ -387,9 +483,16 @@ class _TimelineNodeCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
+            color: isDone
+                ? theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.35,
+                  )
+                : color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: color.withValues(alpha: 0.6), width: 1.5),
+            border: Border.all(
+              color: borderColor.withValues(alpha: hasConflict ? 0.9 : 0.6),
+              width: hasConflict ? 2 : 1.5,
+            ),
           ),
           child: Row(
             children: [
@@ -405,6 +508,15 @@ class _TimelineNodeCard extends StatelessWidget {
                   ),
                 ),
               Icon(nodeIcon(node.type), size: 16, color: color),
+              if (hasConflict) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.report_problem_outlined,
+                  key: ValueKey('timeline-conflict-icon-${node.id}'),
+                  size: 15,
+                  color: theme.colorScheme.error,
+                ),
+              ],
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -416,9 +528,7 @@ class _TimelineNodeCard extends StatelessWidget {
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
-                        decoration: node.isDone
-                            ? TextDecoration.lineThrough
-                            : null,
+                        decoration: isDone ? TextDecoration.lineThrough : null,
                         color: theme.colorScheme.onSurface,
                       ),
                       maxLines: height < 40 ? 1 : 2,
@@ -436,14 +546,54 @@ class _TimelineNodeCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                    if (height >= 52)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: stateColor.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: stateColor.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            child: Text(
+                              stateLabel,
+                              key: ValueKey(
+                                'timeline-state-${node.id}-$stateLabel',
+                              ),
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: stateColor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.close, size: 14),
-                visualDensity: VisualDensity.compact,
-                tooltip: 'Unschedule',
-                onPressed: onUnschedule,
+              PopupMenuButton<String>(
+                tooltip: 'Schedule actions',
+                icon: const Icon(Icons.more_vert, size: 16),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'extend':
+                      onExtend();
+                    case 'clear':
+                      onUnschedule();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'extend', child: Text('Extend 15m')),
+                  PopupMenuItem(value: 'clear', child: Text('Clear schedule')),
+                ],
               ),
             ],
           ),
@@ -460,12 +610,14 @@ class _NodeLane extends StatelessWidget {
     required this.title,
     required this.nodes,
     required this.onNodeSelected,
+    this.onScheduleNext,
   });
 
   final IconData icon;
   final String title;
   final List<MindmapNode> nodes;
   final ValueChanged<MindmapNode> onNodeSelected;
+  final ValueChanged<MindmapNode>? onScheduleNext;
 
   @override
   Widget build(BuildContext context) {
@@ -505,17 +657,111 @@ class _NodeLane extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   for (final node in nodes)
-                    ActionChip(
-                      avatar: Icon(
-                        nodeIcon(node.type),
-                        size: 16,
-                        color: nodeColor(node.type),
+                    Draggable<MindmapNode>(
+                      data: node,
+                      feedback: Material(
+                        color: Colors.transparent,
+                        child: Chip(
+                          avatar: Icon(nodeIcon(node.type), size: 16),
+                          label: Text(node.title),
+                        ),
                       ),
-                      label: Text(node.title),
-                      onPressed: () => onNodeSelected(node),
+                      childWhenDragging: Opacity(
+                        opacity: 0.45,
+                        child: _ScheduleNodeChip(
+                          node: node,
+                          onNodeSelected: onNodeSelected,
+                          onScheduleNext: onScheduleNext,
+                        ),
+                      ),
+                      child: _ScheduleNodeChip(
+                        node: node,
+                        onNodeSelected: onNodeSelected,
+                        onScheduleNext: onScheduleNext,
+                      ),
                     ),
                 ],
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScheduleNodeChip extends StatelessWidget {
+  const _ScheduleNodeChip({
+    required this.node,
+    required this.onNodeSelected,
+    required this.onScheduleNext,
+  });
+
+  final MindmapNode node;
+  final ValueChanged<MindmapNode> onNodeSelected;
+  final ValueChanged<MindmapNode>? onScheduleNext;
+
+  @override
+  Widget build(BuildContext context) {
+    return InputChip(
+      avatar: Icon(nodeIcon(node.type), size: 16, color: nodeColor(node.type)),
+      label: Text(node.title),
+      onPressed: () => onNodeSelected(node),
+      onDeleted: onScheduleNext == null ? null : () => onScheduleNext!(node),
+      deleteIcon: const Icon(Icons.schedule_send_outlined),
+      deleteButtonTooltipMessage: 'Schedule next available',
+    );
+  }
+}
+
+class _ConflictLane extends StatelessWidget {
+  const _ConflictLane({
+    super.key,
+    required this.conflicts,
+    required this.nodesById,
+  });
+
+  final List<TimeBlockConflict> conflicts;
+  final Map<String, MindmapNode> nodesById;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.error;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.45)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.report_problem_outlined, size: 16, color: color),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Schedule conflicts (${conflicts.length})',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              for (final conflict in conflicts.take(4))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '${_conflictLabel(conflict)} · ${conflict.rangeLabel} · ${_conflictNodeTitles(conflict, nodesById)}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: color),
+                  ),
+                ),
             ],
           ),
         ),
@@ -625,6 +871,63 @@ List<_TimelineEntry> _layoutOverlaps(List<_TimelineEntry> entries) {
     index = cursor;
   }
   return laidOut;
+}
+
+final class _TimelineSlot {
+  const _TimelineSlot({required this.startMinute, required this.endMinute});
+
+  final int startMinute;
+  final int endMinute;
+}
+
+_TimelineSlot? _slotFromDy(double dy) {
+  final adjusted = dy - 8.0;
+  if (adjusted < 0) return null;
+  final hour = adjusted ~/ _hourHeight;
+  if (hour < 0 || hour >= 24) return null;
+  final subHourY = adjusted % _hourHeight;
+  final minute = subHourY >= (_hourHeight / 2) ? 30 : 0;
+  final startMinute = (hour * 60) + minute;
+  return _TimelineSlot(
+    startMinute: startMinute,
+    endMinute: (startMinute + 60).clamp(startMinute + 1, 1440),
+  );
+}
+
+int _nextAvailableStart(List<_TimelineEntry> scheduled) {
+  const dayStart = 8 * 60;
+  const dayEnd = 18 * 60;
+  const duration = 60;
+  final sorted = [...scheduled]
+    ..sort((a, b) => a.block.startMinute.compareTo(b.block.startMinute));
+
+  for (var start = dayStart; start + duration <= dayEnd; start += 30) {
+    final end = start + duration;
+    final hasOverlap = sorted.any(
+      (entry) => start < entry.block.endMinute && end > entry.block.startMinute,
+    );
+    if (!hasOverlap) return start;
+  }
+
+  return dayStart;
+}
+
+String _conflictLabel(TimeBlockConflict conflict) {
+  switch (conflict.type) {
+    case TimeBlockConflictType.overlap:
+      return 'Overlap';
+    case TimeBlockConflictType.highPriorityOverload:
+      return 'High-priority overload';
+  }
+}
+
+String _conflictNodeTitles(
+  TimeBlockConflict conflict,
+  Map<String, MindmapNode> nodesById,
+) {
+  return conflict.nodeIds
+      .map((id) => nodesById[id]?.title.trim() ?? id)
+      .join(' / ');
 }
 
 String _nodeSubtitle(MindmapNode node) {

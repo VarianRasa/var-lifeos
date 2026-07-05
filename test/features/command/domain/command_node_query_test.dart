@@ -31,6 +31,32 @@ void main() {
     expect(query.hasFilters, isFalse);
   });
 
+  test('matches nodes with light fuzzy search typos', () {
+    final today = DateTime(2026, 6, 18);
+    final node = MindmapNode.create(
+      id: 'launch-task',
+      type: NodeType.task,
+      title: 'Launch checklist',
+      body: 'Release candidate notes',
+      day: today,
+      tags: const ['release'],
+      now: today,
+    );
+
+    expect(
+      commandNodeQueryFromText('launch', today: today).matches(node),
+      isTrue,
+    );
+    expect(
+      commandNodeQueryFromText('rlse notes', today: today).matches(node),
+      isTrue,
+    );
+    expect(
+      commandNodeQueryFromText('xyz', today: today).matches(node),
+      isFalse,
+    );
+  });
+
   test('parses relation filters from command query', () {
     final today = DateTime(2026, 6, 18);
 

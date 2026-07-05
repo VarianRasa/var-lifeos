@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'doodle_border.dart';
+
 class SearchField extends StatelessWidget {
   const SearchField({
     required this.controller,
@@ -14,6 +16,7 @@ class SearchField extends StatelessWidget {
     this.hintText = 'Search...',
     this.desktopWidth = 240,
     this.mobileWidth = 160,
+    this.focusNode,
     super.key,
   });
 
@@ -22,6 +25,7 @@ class SearchField extends StatelessWidget {
   final String hintText;
   final double desktopWidth;
   final double mobileWidth;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +36,7 @@ class SearchField extends StatelessWidget {
           ? desktopWidth
           : mobileWidth,
       child: TextField(
+        focusNode: focusNode,
         controller: controller,
         style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
@@ -55,9 +60,10 @@ class SearchField extends StatelessWidget {
                   },
                 )
               : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+          border: DoodleInputBorder(
             borderSide: BorderSide(color: theme.colorScheme.outlineVariant),
+            radius: 10,
+            wobble: 1.4,
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 8,

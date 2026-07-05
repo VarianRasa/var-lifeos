@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,6 +93,18 @@ void main() {
     );
     expect(
       find.descendant(of: projectCard, matching: find.text('1 overdue')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey('workspace-context-details-project-launch-app'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: projectCard, matching: find.text('1 overdue')),
       findsOneWidget,
     );
     expect(
@@ -118,7 +129,7 @@ void main() {
     expect(areaCard, findsOneWidget);
     expect(
       find.descendant(of: areaCard, matching: find.text('25% progress')),
-      findsOneWidget,
+      findsNothing,
     );
   });
 
@@ -170,24 +181,91 @@ void main() {
       expect(find.text('Daily 2026-06-19'), findsNothing);
       expect(find.text('My Custom Day'), findsOneWidget);
 
-      // Hover over the daily workspace card to verify the overlay pops up
       final cardFinder = find.byKey(
         const ValueKey('workspace-context-daily-2026-06-19'),
       );
-      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await gesture.addPointer(location: Offset.zero);
-      await gesture.moveTo(tester.getCenter(cardFinder));
-      await tester.pumpAndSettle();
-
-      // The overlay pops up showing the custom title
-      expect(
-        find.text('My Custom Day'),
-        findsNWidgets(2),
-      ); // One on card, one on overlay
-
-      // Move mouse away to hide overlay
-      await gesture.moveTo(const Offset(1000, 1000));
-      await tester.pumpAndSettle();
+      expect(cardFinder, findsOneWidget);
     },
   );
+
+  testWidgets('WorkspacesPage collapses filters until toggled', (tester) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'launch-task',
+          type: NodeType.task,
+          title: 'Launch task',
+          day: today,
+          project: 'Launch App',
+          now: DateTime(2026, 6, 19, 8),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(home: WorkspacesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final panel = find.byKey(const ValueKey('workspace-filter-panel'));
+    expect(
+      find.byKey(const ValueKey('workspace-filter-toggle')),
+      findsOneWidget,
+    );
+    expect(panel, findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('workspace-filter-toggle')));
+    await tester.pumpAndSettle();
+    expect(panel, findsOneWidget);
+    expect(find.text('All types'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('workspace-filter-toggle')));
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+  });
+
+  testWidgets('WorkspacesPage hides stats until toggled', (tester) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'launch-task',
+          type: NodeType.task,
+          title: 'Launch task',
+          day: today,
+          project: 'Launch App',
+          now: DateTime(2026, 6, 19, 8),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(home: WorkspacesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final focusStrip = find.byKey(const ValueKey('workspace-focus-strip'));
+    expect(focusStrip, findsNothing);
+
+    await tester.tap(find.byTooltip('Show stats'));
+    await tester.pumpAndSettle();
+    expect(focusStrip, findsOneWidget);
+
+    await tester.tap(find.byTooltip('Hide stats'));
+    await tester.pumpAndSettle();
+    expect(focusStrip, findsNothing);
+  });
 }

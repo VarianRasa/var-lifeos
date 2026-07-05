@@ -61,6 +61,16 @@ final class LifeOsSummary {
             NodeType.plan ||
             NodeType.note ||
             NodeType.link ||
+            NodeType.event ||
+            NodeType.decision ||
+            NodeType.resource ||
+            NodeType.idea ||
+            NodeType.question ||
+            NodeType.contact ||
+            NodeType.metric ||
+            NodeType.expense ||
+            NodeType.bookmark ||
+            NodeType.routine ||
             NodeType.empty:
           break;
       }
@@ -173,6 +183,16 @@ final class LifeOsRhythm {
             NodeType.note ||
             NodeType.goal ||
             NodeType.link ||
+            NodeType.event ||
+            NodeType.decision ||
+            NodeType.resource ||
+            NodeType.idea ||
+            NodeType.question ||
+            NodeType.contact ||
+            NodeType.metric ||
+            NodeType.expense ||
+            NodeType.bookmark ||
+            NodeType.routine ||
             NodeType.empty:
           break;
       }

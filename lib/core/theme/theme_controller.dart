@@ -9,7 +9,7 @@ final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>((
   return ThemeModeNotifier();
 });
 
-/// Current accent color preference. Defaults to indigo-blue.
+/// Current accent color preference. Defaults to lime marker.
 final themeAccentColorProvider =
     StateNotifierProvider<ThemeAccentColorNotifier, Color>((ref) {
       return ThemeAccentColorNotifier();
@@ -43,7 +43,7 @@ ThemeMode? _themeModeFromName(String? name) {
 }
 
 class ThemeAccentColorNotifier extends StateNotifier<Color> {
-  ThemeAccentColorNotifier() : super(const Color(0xFF6C8EEF)) {
+  ThemeAccentColorNotifier() : super(const Color(0xFFB6FF00)) {
     _loadAccentColor();
   }
 

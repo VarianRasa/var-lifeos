@@ -8,11 +8,11 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/config/runtime_config.dart';
 import '../../mindmap/application/mindmap_providers.dart';
+import '../data/firebase_sync_auth_gateway.dart';
+import '../data/firestore_sync_remote_backup_store.dart';
 import '../data/http_sync_auth_gateway.dart';
 import '../data/http_sync_remote_backup_store.dart';
-import '../data/in_memory_sync_remote_backup_store.dart';
 import '../data/sembast_sync_activity_store.dart';
-import '../data/sembast_sync_auth_gateway.dart';
 import '../data/sembast_sync_device_identity_store.dart';
 import '../data/sembast_sync_restore_point_store.dart';
 import '../data/sembast_sync_state_store.dart';
@@ -57,7 +57,7 @@ final syncAuthGatewayProvider = Provider<SyncAuthGateway>((ref) {
     );
   }
 
-  return SembastSyncAuthGateway(database: ref.watch(mindmapDatabaseProvider));
+  return FirebaseSyncAuthGateway();
 });
 
 final syncRemoteBackupStoreProvider = Provider<SyncRemoteBackupStore>((ref) {
@@ -76,7 +76,7 @@ final syncRemoteBackupStoreProvider = Provider<SyncRemoteBackupStore>((ref) {
     );
   }
 
-  return InMemorySyncRemoteBackupStore();
+  return FirestoreSyncRemoteBackupStore();
 });
 
 final syncStateStoreProvider = Provider<SyncStateStore>((ref) {

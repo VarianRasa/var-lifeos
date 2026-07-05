@@ -76,12 +76,12 @@ final class MindmapBackupDocument {
     }
 
     final rawDevice = json['sourceDevice'];
-    final sourceDevice = rawDevice is Map
+    final sourceDevice = rawDevice is Map<Object?, Object?>
         ? SyncDeviceIdentity.fromJson(rawDevice.cast<String, Object?>())
         : throw const FormatException('Backup sourceDevice is invalid.');
 
     final rawNodes = json['nodes'];
-    if (rawNodes is! List) {
+    if (rawNodes is! List<Object?>) {
       throw const FormatException('Backup nodes must be a list.');
     }
 
@@ -92,7 +92,7 @@ final class MindmapBackupDocument {
       sourceDevice: sourceDevice,
       nodes: [
         for (final rawNode in rawNodes)
-          if (rawNode is Map)
+          if (rawNode is Map<Object?, Object?>)
             MindmapNode.fromJson(rawNode.cast<String, Object?>()),
       ],
     );

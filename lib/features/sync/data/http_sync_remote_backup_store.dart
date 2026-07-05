@@ -116,10 +116,14 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
   MindmapBackupDocument _decodeDocument(String body) {
     try {
       final decoded = jsonDecode(body);
-      final payload = decoded is Map && decoded['backup'] is Map
-          ? decoded['backup']
-          : decoded;
-      if (payload is! Map) {
+      final Object? payload;
+      if (decoded is Map<Object?, Object?> &&
+          decoded['backup'] is Map<Object?, Object?>) {
+        payload = decoded['backup'];
+      } else {
+        payload = decoded;
+      }
+      if (payload is! Map<Object?, Object?>) {
         throw const FormatException('Backup response must be a JSON object.');
       }
       return MindmapBackupDocument.fromJson(payload.cast<String, Object?>());

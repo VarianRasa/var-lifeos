@@ -3,6 +3,39 @@ library;
 
 enum TimeBlockStatus { unscheduled, valid, invalid }
 
+enum TimeBlockConflictType { overlap, highPriorityOverload }
+
+final class DayTimeBlock {
+  const DayTimeBlock({
+    required this.id,
+    required this.block,
+    this.isHighPriority = false,
+    this.isDone = false,
+  });
+
+  final String id;
+  final TimeBlock block;
+  final bool isHighPriority;
+  final bool isDone;
+}
+
+final class TimeBlockConflict {
+  const TimeBlockConflict({
+    required this.type,
+    required this.nodeIds,
+    required this.startMinute,
+    required this.endMinute,
+  });
+
+  final TimeBlockConflictType type;
+  final List<String> nodeIds;
+  final int startMinute;
+  final int endMinute;
+
+  String get rangeLabel =>
+      '${formatTimeOfDay(startMinute)} - ${formatTimeOfDay(endMinute)}';
+}
+
 final class ParsedTimeBlock {
   const ParsedTimeBlock._({required this.status, this.block});
 
@@ -38,7 +71,14 @@ final class TimeBlock {
   String get rangeLabel => '$startLabel - $endLabel';
 
   Map<String, Object?> toJson() {
-    return {'startTime': startLabel, 'endTime': endLabel};
+    return {
+      'startTime': startLabel,
+      'endTime': endLabel,
+      'startMinute': startMinute,
+      'endMinute': endMinute,
+      'timeBlockStart': startMinute,
+      'timeBlockEnd': endMinute,
+    };
   }
 }
 
@@ -50,11 +90,13 @@ ParsedTimeBlock parseTimeBlock(Object? raw) {
   final startMinute =
       _minuteFromValue(map['startMinute']) ??
       _minuteFromValue(map['start']) ??
-      _minuteFromValue(map['startTime']);
+      _minuteFromValue(map['startTime']) ??
+      _minuteFromValue(map['timeBlockStart']);
   final endMinute =
       _minuteFromValue(map['endMinute']) ??
       _minuteFromValue(map['end']) ??
-      _minuteFromValue(map['endTime']);
+      _minuteFromValue(map['endTime']) ??
+      _minuteFromValue(map['timeBlockEnd']);
 
   if (startMinute == null || endMinute == null) {
     return const ParsedTimeBlock.invalid();
@@ -71,6 +113,67 @@ ParsedTimeBlock parseTimeBlock(Object? raw) {
   );
 }
 
+List<TimeBlockConflict> detectTimeBlockConflicts(
+  List<DayTimeBlock> blocks, {
+  int highPriorityLimitPerWindow = 2,
+  int highPriorityWindowMinutes = 120,
+}) {
+  final activeBlocks = blocks.where((block) => !block.isDone).toList()
+    ..sort((a, b) => a.block.startMinute.compareTo(b.block.startMinute));
+  final conflicts = <TimeBlockConflict>[];
+
+  for (var i = 0; i < activeBlocks.length; i += 1) {
+    final current = activeBlocks[i];
+    for (var j = i + 1; j < activeBlocks.length; j += 1) {
+      final other = activeBlocks[j];
+      if (other.block.startMinute >= current.block.endMinute) break;
+      conflicts.add(
+        TimeBlockConflict(
+          type: TimeBlockConflictType.overlap,
+          nodeIds: [current.id, other.id],
+          startMinute: _max(current.block.startMinute, other.block.startMinute),
+          endMinute: _min(current.block.endMinute, other.block.endMinute),
+        ),
+      );
+    }
+  }
+
+  final highPriorityBlocks = activeBlocks
+      .where((block) => block.isHighPriority)
+      .toList();
+  for (final anchor in highPriorityBlocks) {
+    final windowEnd = (anchor.block.startMinute + highPriorityWindowMinutes)
+        .clamp(1, 1440);
+    final inWindow = highPriorityBlocks
+        .where(
+          (block) =>
+              block.block.startMinute >= anchor.block.startMinute &&
+              block.block.startMinute < windowEnd,
+        )
+        .toList();
+    if (inWindow.length <= highPriorityLimitPerWindow) continue;
+
+    final ids = inWindow.map((block) => block.id).toList();
+    final alreadyReported = conflicts.any(
+      (conflict) =>
+          conflict.type == TimeBlockConflictType.highPriorityOverload &&
+          _sameIds(conflict.nodeIds, ids),
+    );
+    if (alreadyReported) continue;
+
+    conflicts.add(
+      TimeBlockConflict(
+        type: TimeBlockConflictType.highPriorityOverload,
+        nodeIds: ids,
+        startMinute: anchor.block.startMinute,
+        endMinute: windowEnd,
+      ),
+    );
+  }
+
+  return List.unmodifiable(conflicts);
+}
+
 String formatTimeOfDay(int minuteOfDay) {
   var clamped = minuteOfDay;
   if (clamped < 0) clamped = 0;
@@ -79,6 +182,16 @@ String formatTimeOfDay(int minuteOfDay) {
   final minute = clamped % 60;
   return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
 }
+
+bool _sameIds(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  final leftSet = left.toSet();
+  return right.every(leftSet.contains);
+}
+
+int _min(int left, int right) => left < right ? left : right;
+
+int _max(int left, int right) => left > right ? left : right;
 
 int? _minuteFromValue(Object? value) {
   if (value is int) return value;

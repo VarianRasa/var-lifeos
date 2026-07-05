@@ -26,7 +26,7 @@ final class SyncSnapshot {
     }
 
     final rawBaseline = json['baseline'];
-    final baseline = rawBaseline is Map
+    final baseline = rawBaseline is Map<Object?, Object?>
         ? MindmapBackupDocument.fromJson(rawBaseline.cast<String, Object?>())
         : throw const FormatException('Sync snapshot baseline is invalid.');
 

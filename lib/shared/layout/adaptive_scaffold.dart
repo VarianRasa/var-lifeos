@@ -6,6 +6,8 @@
 /// route navigation and the global command palette button.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +19,7 @@ import '../../core/utils/date_utils.dart';
 import '../../features/command/global_command_palette.dart';
 import '../../features/mindmap/application/focus_timer_provider.dart';
 import '../../features/mindmap/application/mindmap_providers.dart';
+import '../widgets/doodle_border.dart';
 
 class AdaptiveScaffold extends StatelessWidget {
   const AdaptiveScaffold({required this.body, super.key});
@@ -29,6 +32,10 @@ class AdaptiveScaffold extends StatelessWidget {
     final route = _routeFromLocation(location);
     final isDesktop =
         MediaQuery.sizeOf(context).width >= LayoutConstants.desktopBreakpoint;
+    final theme = Theme.of(context);
+    final pageTheme = theme.copyWith(
+      scaffoldBackgroundColor: Colors.transparent,
+    );
 
     return CallbackShortcuts(
       bindings: {
@@ -42,29 +49,17 @@ class AdaptiveScaffold extends StatelessWidget {
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          backgroundColor: theme.scaffoldBackgroundColor,
           body: Stack(
             children: [
-              // Main content fills the entire viewport
-              Positioned.fill(child: body),
-
-              // Desktop: floating nav + command button
-              if (isDesktop) ...[
-                const Positioned(
-                  top: 10,
-                  right: 310,
-                  child: _FocusTimerButton(),
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _PaperDoodlePainter(theme.colorScheme),
                 ),
-                const Positioned(
-                  top: 10,
-                  right: 260,
-                  child: _GlobalCommandButton(),
-                ),
-                Positioned(
-                  top: 10,
-                  right: 64,
-                  child: _FloatingNavigationMenu(route: route),
-                ),
-              ],
+              ),
+              Positioned.fill(
+                child: Theme(data: pageTheme, child: body),
+              ),
             ],
           ),
 
@@ -72,6 +67,86 @@ class AdaptiveScaffold extends StatelessWidget {
           bottomNavigationBar: isDesktop
               ? null
               : _MobileBottomNav(route: route),
+        ),
+      ),
+    );
+  }
+}
+
+class AppRouteChromeTabs extends StatelessWidget {
+  const AppRouteChromeTabs({required this.currentRoute, super.key});
+
+  final AppRoute currentRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final route in AppRoute.values)
+                _AppRouteChromeTab(
+                  route: route,
+                  selected: route == currentRoute,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppRouteChromeTab extends StatelessWidget {
+  const _AppRouteChromeTab({required this.route, required this.selected});
+
+  final AppRoute route;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: route.label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: selected ? null : () => _go(context, route),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: selected
+              ? DoodleUnderlineDecoration(
+                  color: theme.colorScheme.primary,
+                  strokeWidth: 2.2,
+                )
+              : null,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                selected ? route.selectedIcon : route.icon,
+                size: 16,
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                route.label,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: selected
+                      ? theme.colorScheme.onSurface
+                      : theme.colorScheme.onSurfaceVariant,
+                  fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -134,22 +209,20 @@ class _GlobalCommandButtonState extends State<_GlobalCommandButton> {
           1.0,
         ),
         transformAlignment: Alignment.center,
-        child: Material(
-          elevation: 0,
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+        child: CustomPaint(
+          foregroundPainter: DoodleBorderPainter(
+            color: _isHovered
+                ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                : theme.colorScheme.outlineVariant,
+            radius: 10,
+            wobble: 1.3,
+          ),
+          child: DecoratedBox(
             decoration: BoxDecoration(
               color: theme.colorScheme.surfaceContainerHighest.withValues(
                 alpha: 0.4,
               ),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: _isHovered
-                    ? theme.colorScheme.primary.withValues(alpha: 0.5)
-                    : theme.colorScheme.outlineVariant,
-              ),
             ),
             child: SizedBox.square(
               dimension: 36,
@@ -199,7 +272,11 @@ class _FloatingNavigationMenuState extends State<_FloatingNavigationMenu> {
         offset: const Offset(0, 8),
         constraints: const BoxConstraints(minWidth: 200),
         color: theme.colorScheme.surfaceContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+          radius: 12,
+          wobble: 1.6,
+        ),
         onSelected: (destination) => _go(context, destination),
         itemBuilder: (context) => [
           for (final destination in AppRoute.values)
@@ -222,22 +299,20 @@ class _FloatingNavigationMenuState extends State<_FloatingNavigationMenu> {
             1.0,
           ),
           transformAlignment: Alignment.center,
-          child: Material(
-            elevation: 0,
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+          child: CustomPaint(
+            foregroundPainter: DoodleBorderPainter(
+              color: _isHovered
+                  ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                  : theme.colorScheme.outlineVariant,
+              radius: 10,
+              wobble: 1.3,
+            ),
+            child: DecoratedBox(
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest.withValues(
                   alpha: 0.4,
                 ),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: _isHovered
-                      ? theme.colorScheme.primary.withValues(alpha: 0.5)
-                      : theme.colorScheme.outlineVariant,
-                ),
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -365,6 +440,151 @@ AppRoute _routeFromLocation(String location) {
   return AppRoute.calendar;
 }
 
+class _PaperDoodlePainter extends CustomPainter {
+  const _PaperDoodlePainter(this.scheme);
+
+  final ColorScheme scheme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final isDark = scheme.brightness == Brightness.dark;
+    final rect = Offset.zero & size;
+    final paperPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: isDark
+            ? const [Color(0xFF090B09), Color(0xFF11130F), Color(0xFF070807)]
+            : const [Color(0xFFFFF7E4), Color(0xFFF7EBCB), Color(0xFFFFF4D7)],
+      ).createShader(rect);
+    canvas.drawRect(rect, paperPaint);
+
+    _drawPaperGrain(canvas, size, isDark);
+    _drawPaperFibers(canvas, size, isDark);
+    _drawVignette(canvas, rect, isDark);
+
+    final chalkPaint = Paint()
+      ..color = scheme.outline.withValues(alpha: isDark ? 0.12 : 0.14)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = 2;
+    _drawWiggle(canvas, [
+      const Offset(24, 90),
+      const Offset(76, 62),
+      const Offset(130, 94),
+      const Offset(190, 68),
+    ], chalkPaint);
+    _drawWiggle(canvas, [
+      Offset(size.width - 228, size.height - 86),
+      Offset(size.width - 172, size.height - 116),
+      Offset(size.width - 112, size.height - 82),
+      Offset(size.width - 40, size.height - 110),
+    ], chalkPaint);
+
+    final markerPaint = Paint()
+      ..color = scheme.primary.withValues(alpha: isDark ? 0.22 : 0.18)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+    canvas.drawCircle(Offset(size.width - 64, 76), 24, markerPaint);
+    canvas.drawCircle(
+      Offset(size.width - 64, 76),
+      14,
+      markerPaint..color = scheme.primary.withValues(alpha: 0.14),
+    );
+
+    final dotPaint = Paint()..style = PaintingStyle.fill;
+    for (final dot in <({Offset offset, Color color})>[
+      (offset: const Offset(34, 164), color: scheme.primary),
+      (offset: const Offset(92, 126), color: scheme.secondary),
+      (offset: Offset(size.width - 116, 150), color: scheme.tertiary),
+      (offset: Offset(size.width - 52, size.height - 178), color: scheme.error),
+      (offset: Offset(size.width * 0.42, 36), color: scheme.secondary),
+    ]) {
+      dotPaint.color = dot.color.withValues(alpha: isDark ? 0.46 : 0.38);
+      canvas.drawCircle(dot.offset, 3, dotPaint);
+    }
+  }
+
+  void _drawPaperGrain(Canvas canvas, Size size, bool isDark) {
+    final grainPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..strokeCap = StrokeCap.round;
+    const count = 280;
+
+    for (var i = 0; i < count; i += 1) {
+      final x = _unitNoise(i * 17 + 3) * size.width;
+      final y = _unitNoise(i * 29 + 11) * size.height;
+      final alpha = (isDark ? 0.018 : 0.04) + _unitNoise(i * 37 + 7) * 0.025;
+      final radius = 0.4 + _unitNoise(i * 43 + 19) * 1.4;
+      grainPaint.color = (isDark ? scheme.outlineVariant : scheme.outline)
+          .withValues(alpha: alpha);
+      canvas.drawCircle(Offset(x, y), radius, grainPaint);
+    }
+  }
+
+  void _drawPaperFibers(Canvas canvas, Size size, bool isDark) {
+    final fiberPaint = Paint()
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    const count = 72;
+
+    for (var i = 0; i < count; i += 1) {
+      final start = Offset(
+        _unitNoise(i * 47 + 5) * size.width,
+        _unitNoise(i * 59 + 13) * size.height,
+      );
+      final length = 28 + _unitNoise(i * 61 + 23) * 128;
+      final angle = (_unitNoise(i * 67 + 31) - 0.5) * 0.42;
+      final alpha = (isDark ? 0.025 : 0.05) + _unitNoise(i * 71 + 41) * 0.035;
+      fiberPaint
+        ..color = (isDark ? scheme.outlineVariant : scheme.outline).withValues(
+          alpha: alpha,
+        )
+        ..strokeWidth = 0.5 + _unitNoise(i * 73 + 43) * 1.0;
+      canvas.drawLine(
+        start,
+        start + Offset(math.cos(angle) * length, math.sin(angle) * length),
+        fiberPaint,
+      );
+    }
+  }
+
+  void _drawVignette(Canvas canvas, Rect rect, bool isDark) {
+    final vignettePaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          Colors.transparent,
+          Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
+        ],
+        stops: const [0.58, 1],
+      ).createShader(rect);
+    canvas.drawRect(rect, vignettePaint);
+  }
+
+  void _drawWiggle(Canvas canvas, List<Offset> points, Paint paint) {
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var i = 1; i < points.length; i++) {
+      final previous = points[i - 1];
+      final current = points[i];
+      final mid = Offset.lerp(previous, current, 0.5)!;
+      path.quadraticBezierTo(previous.dx, previous.dy, mid.dx, mid.dy);
+    }
+    path.lineTo(points.last.dx, points.last.dy);
+    canvas.drawPath(path, paint);
+  }
+
+  double _unitNoise(int seed) {
+    final value = math.sin(seed * 12.9898) * 43758.5453;
+    return value - value.floorToDouble();
+  }
+
+  @override
+  bool shouldRepaint(covariant _PaperDoodlePainter oldDelegate) {
+    return oldDelegate.scheme != scheme;
+  }
+}
+
 class _FocusTimerButton extends ConsumerStatefulWidget {
   const _FocusTimerButton();
 
@@ -409,7 +629,11 @@ class _FocusTimerButtonState extends ConsumerState<_FocusTimerButton> {
         offset: const Offset(0, 8),
         constraints: const BoxConstraints(minWidth: 260, maxWidth: 300),
         color: theme.colorScheme.surfaceContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+          radius: 12,
+          wobble: 1.6,
+        ),
         itemBuilder: (context) => [
           PopupMenuItem<void>(
             enabled: false,
@@ -624,83 +848,88 @@ class _FocusTimerButtonState extends ConsumerState<_FocusTimerButton> {
             1.0,
           ),
           transformAlignment: Alignment.center,
-          child: Material(
-            elevation: 0,
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: CustomPaint(
+            foregroundPainter: DoodleBorderPainter(
+              color: _isHovered
+                  ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                  : theme.colorScheme.outlineVariant,
+              radius: 10,
+              wobble: 1.3,
+            ),
+            child: DecoratedBox(
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest.withValues(
                   alpha: 0.4,
                 ),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: _isHovered
-                      ? theme.colorScheme.primary.withValues(alpha: 0.5)
-                      : theme.colorScheme.outlineVariant,
-                ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Stack(
-                    alignment: Alignment.center,
+              child: SizedBox(
+                height: 36,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          value: timerState.progress,
-                          strokeWidth: 2,
-                          backgroundColor:
-                              theme.colorScheme.surfaceContainerHighest,
-                          color: progressColor,
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              value: timerState.progress,
+                              strokeWidth: 2,
+                              backgroundColor:
+                                  theme.colorScheme.surfaceContainerHighest,
+                              color: progressColor,
+                            ),
+                          ),
+                          Icon(
+                            timerState.isRunning
+                                ? Icons.pause
+                                : Icons.play_arrow,
+                            size: 12,
+                            color: progressColor,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatDuration(timerState.remainingSeconds),
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                      if (timerState.selectedNodeTitle != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 1,
+                          height: 14,
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 80),
+                          child: Text(
+                            timerState.selectedNodeTitle!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 10,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 4),
                       Icon(
-                        timerState.isRunning ? Icons.pause : Icons.play_arrow,
-                        size: 12,
-                        color: progressColor,
+                        Icons.arrow_drop_down,
+                        size: 16,
+                        color: theme.textTheme.bodySmall?.color,
                       ),
                     ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _formatDuration(timerState.remainingSeconds),
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (timerState.selectedNodeTitle != null) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      width: 1,
-                      height: 14,
-                      color: theme.colorScheme.outlineVariant,
-                    ),
-                    const SizedBox(width: 6),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 80),
-                      child: Text(
-                        timerState.selectedNodeTitle!,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 10,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.arrow_drop_down,
-                    size: 16,
-                    color: theme.textTheme.bodySmall?.color,
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -730,7 +959,7 @@ class _DurationPresetButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           side: BorderSide(color: theme.colorScheme.outlineVariant),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: const DoodleShapeBorder(radius: 7, wobble: 1.1),
         ),
         onPressed: () => notifier.setDuration(value),
         child: Text(

@@ -196,8 +196,88 @@ bool _matchesSearchText(MindmapNode node, String searchText) {
     if (node.dueDate != null) dayKey(node.dueDate!),
     for (final tag in node.tags) tag,
     for (final nodeId in node.relatedNodeIds) nodeId,
+    ..._dataSearchValues(node.data),
   ];
-  return values.any((value) => value.toLowerCase().contains(query));
+  final tokens = query.split(RegExp(r'\s+')).where((token) => token.isNotEmpty);
+  return tokens.every(
+    (token) =>
+        values.any((value) => _fuzzyContains(value.toLowerCase(), token)),
+  );
+}
+
+bool _fuzzyContains(String value, String query) {
+  if (value.contains(query)) return true;
+  if (query.length < 4) return false;
+  final words = value
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((word) => word.isNotEmpty);
+  for (final word in words) {
+    if (_isSubsequence(query, word)) return true;
+    final maxDistance = query.length <= 6 ? 1 : 2;
+    if ((word.length - query.length).abs() <= maxDistance &&
+        _editDistanceAtMost(word, query, maxDistance)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _isSubsequence(String query, String value) {
+  if (query.length > value.length || query.length < 4) return false;
+  var index = 0;
+  for (final unit in value.codeUnits) {
+    if (unit == query.codeUnitAt(index)) index++;
+    if (index == query.length) return true;
+  }
+  return false;
+}
+
+bool _editDistanceAtMost(String a, String b, int maxDistance) {
+  var previous = List<int>.generate(b.length + 1, (index) => index);
+  for (var i = 1; i <= a.length; i++) {
+    final current = List<int>.filled(b.length + 1, i);
+    var rowMin = current.first;
+    for (var j = 1; j <= b.length; j++) {
+      final cost = a.codeUnitAt(i - 1) == b.codeUnitAt(j - 1) ? 0 : 1;
+      current[j] = [
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + cost,
+      ].reduce((min, value) => value < min ? value : min);
+      if (current[j] < rowMin) rowMin = current[j];
+    }
+    if (rowMin > maxDistance) return false;
+    previous = current;
+  }
+  return previous.last <= maxDistance;
+}
+
+List<String> _dataSearchValues(Map<String, Object?> data) {
+  final values = <String>[];
+  void collect(Object? value) {
+    switch (value) {
+      case String():
+        values.add(value);
+      case num() || bool():
+        values.add('$value');
+      case Map<Object?, Object?>():
+        for (final entry in value.entries) {
+          collect(entry.key);
+          collect(entry.value);
+        }
+      case Iterable<Object?>():
+        for (final item in value) {
+          collect(item);
+        }
+      case null:
+        break;
+      default:
+        values.add(value.toString());
+    }
+  }
+
+  collect(data);
+  return values;
 }
 
 NodeType? _typeFromText(String value) {

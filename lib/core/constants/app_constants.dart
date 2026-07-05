@@ -23,6 +23,16 @@ enum NodeType {
   habit,
   goal,
   link,
+  event,
+  decision,
+  resource,
+  idea,
+  question,
+  contact,
+  metric,
+  expense,
+  bookmark,
+  routine,
   empty;
 
   /// Human-readable label for chips, menus, and dialogs.
@@ -44,6 +54,26 @@ enum NodeType {
         return 'Goal';
       case NodeType.link:
         return 'Link';
+      case NodeType.event:
+        return 'Event';
+      case NodeType.decision:
+        return 'Decision';
+      case NodeType.resource:
+        return 'Resource';
+      case NodeType.idea:
+        return 'Idea';
+      case NodeType.question:
+        return 'Question';
+      case NodeType.contact:
+        return 'Contact';
+      case NodeType.metric:
+        return 'Metric';
+      case NodeType.expense:
+        return 'Expense';
+      case NodeType.bookmark:
+        return 'Bookmark';
+      case NodeType.routine:
+        return 'Routine';
       case NodeType.empty:
         return 'Empty';
     }

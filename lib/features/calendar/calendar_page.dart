@@ -5,10 +5,13 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
@@ -16,7 +19,12 @@ import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/layout/adaptive_scaffold.dart';
+import '../../shared/widgets/animated_empty_state.dart';
+import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/search_field.dart';
+import '../../shared/widgets/skeleton_loader.dart';
+import '../command/domain/quick_create_command_parser.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/application/recurring_routine_application.dart';
@@ -28,11 +36,51 @@ import '../mindmap/domain/workspace_context.dart';
 import '../mindmap/presentation/add_node_dialog.dart';
 import '../onboarding/onboarding_overlay.dart';
 import '../workspace/data/workspace_title_repository.dart';
+import 'application/calendar_agenda_builder.dart';
+import 'application/calendar_day_summary.dart';
+import 'application/calendar_heatmap.dart';
+import 'application/calendar_markdown_export.dart';
+import 'application/calendar_planning_engine.dart';
+import 'application/calendar_range_summary.dart';
+import 'application/calendar_template_planner.dart';
 import 'application/calendar_view_controller.dart';
+import 'application/calendar_week_summary.dart';
+import 'application/day_templates.dart';
+import 'application/node_filtering.dart';
+import 'application/workload_balancer.dart';
 import 'domain/calendar_node_payload.dart';
 
 final calendarSearchQueryProvider = StateProvider<String>((ref) => '');
+
+enum CalendarDensityMode { compact, comfortable, detailed }
+
+final calendarTypeFiltersProvider = StateProvider<Set<NodeType>>((ref) => {});
+final calendarDoneFilterProvider = StateProvider<bool>((ref) => false);
+final calendarDensityModeProvider = StateProvider<CalendarDensityMode>(
+  (ref) => CalendarDensityMode.compact,
+);
 final selectedAgendaNodeIdProvider = StateProvider<String?>((ref) => null);
+final calendarHeatmapModeProvider = StateProvider<CalendarHeatmapMode>(
+  (ref) => CalendarHeatmapMode.workload,
+);
+final calendarRangeSelectionProvider = StateProvider<Set<DateTime>>(
+  (ref) => {},
+);
+final calendarActivityLogProvider = StateProvider<List<String>>((ref) => []);
+final calendarUndoStackProvider = StateProvider<List<CalendarUndoAction>>(
+  (ref) => [],
+);
+final calendarAdvancedFilterProvider = StateProvider<CalendarNodeFilter>(
+  (ref) => const CalendarNodeFilter(),
+);
+
+final class CalendarUndoAction {
+  const CalendarUndoAction({required this.label, required this.undo});
+
+  final String label;
+  final Future<void> Function(WidgetRef ref) undo;
+}
+
 final calendarRoutinePlanProvider = FutureProvider.autoDispose
     .family<RecurringRoutinePlan, DateTime>((ref, day) async {
       return previewRecurringRoutines(
@@ -83,9 +131,12 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   late DateTime _visibleMonth;
   late DateTime _focusedDay;
   DateTime? _previewDay;
+  bool _isPreviewPanelCollapsed = false;
+  bool _showCalendarControls = false;
   bool _slideForward = true;
   final Set<String> _dismissedMonths = {};
   final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -93,11 +144,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final now = ref.read(currentDateProvider);
     _visibleMonth = now.dateOnly.firstOfMonth;
     _focusedDay = now.dateOnly;
+    _previewDay = now.dateOnly;
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -107,20 +160,97 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     setState(() {});
   }
 
+  void _resetAgendaFilters() {
+    _clearCalendarSearch();
+    unawaited(
+      ref.read(agendaFilterProvider.notifier).setFilter(AgendaFilter.all),
+    );
+    ref.read(calendarTypeFiltersProvider.notifier).state = {};
+    ref.read(calendarDoneFilterProvider.notifier).state = false;
+    ref.read(calendarAdvancedFilterProvider.notifier).state =
+        const CalendarNodeFilter();
+  }
+
+  bool _isTextEntryFocused() {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    return context.widget is EditableText ||
+        context.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  Future<void> _showCalendarControlsSheet(Widget controlsPanel) {
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SizedBox(height: 520, child: controlsPanel),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCalendarActionsSheet({required DateTime selectedDay}) {
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _QuickAddToolbar(
+                  selectedDay: selectedDay,
+                  onAddNode: _addNodeQuick,
+                  onQuickCapture: _showQuickCaptureSheet,
+                ),
+                const SizedBox(height: 12),
+                _CalendarAdvancedTools(
+                  focusedDay: selectedDay,
+                  onApplyTemplate: _showTemplatePicker,
+                  onExportDay: _copyFocusedDayMarkdown,
+                  onExportWeek: _copyWeekMarkdown,
+                  onExportMonth: _copyVisibleMonthMarkdown,
+                  onBalanceWeek: _balanceFocusedWeek,
+                  onUndoLast: _undoLastCalendarAction,
+                  onToggleFocusedDay: _toggleFocusedRangeDay,
+                  onSelectFocusedWeek: _selectFocusedWeek,
+                  onBalanceRange: _balanceSelectedRange,
+                  onClearRange: _clearRangeSelection,
+                  onExportRange: _copySelectedRangeMarkdown,
+                  onApplyRangeTemplate: _showSelectedRangeTemplatePicker,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final today = ref.watch(currentDateProvider);
     final viewMode = ref.watch(calendarViewModeProvider);
+    final typeFilters = ref.watch(calendarTypeFiltersProvider);
+    final doneOnly = ref.watch(calendarDoneFilterProvider);
     final isDesktop =
         MediaQuery.sizeOf(context).width >= LayoutConstants.desktopBreakpoint;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Calendar'),
+        title: const AppRouteChromeTabs(currentRoute: AppRoute.calendar),
         actions: [
           SearchField(
             key: const ValueKey('calendar-search-field'),
             controller: _searchController,
+            focusNode: _searchFocusNode,
             hintText: 'Search calendar...',
             onChanged: (value) {
               ref.read(calendarSearchQueryProvider.notifier).state = value
@@ -130,11 +260,17 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           ),
           const SizedBox(width: 12),
           Tooltip(
+            message: 'Quick add (Ctrl+N)',
+            child: IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: () => _showQuickCaptureSheet(_focusedDay),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Tooltip(
             message: 'Today',
-            child: OutlinedButton.icon(
-              onPressed: () {
-                _showFocusedDay(today);
-              },
+            child: OutlinedButton(
+              onPressed: () => _jumpToToday(today),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.onSurface,
                 backgroundColor: Theme.of(
@@ -143,24 +279,24 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 side: BorderSide(
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: const DoodleShapeBorder(radius: 10, wobble: 1.4),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 36),
                 fixedSize: const Size.fromHeight(36),
               ),
-              icon: const Icon(Icons.today, size: 16),
-              label: const Row(
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
-                children: [Text('Today'), SizedBox(width: 6), _PulsingDot()],
+                children: [
+                  _PulsingDot(),
+                  SizedBox(width: 6),
+                  Icon(Icons.today, size: 16),
+                  SizedBox(width: 6),
+                  Text('Today'),
+                ],
               ),
             ),
           ),
-          if (isDesktop)
-            const SizedBox(width: 460)
-          else
-            const SizedBox(width: 16),
+          const SizedBox(width: 8),
         ],
       ),
       body: Stack(
@@ -171,6 +307,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               autofocus: true,
               onKeyEvent: (FocusNode node, KeyEvent event) {
                 if (event is KeyDownEvent) {
+                  if (_isTextEntryFocused()) return KeyEventResult.ignored;
                   final shortcutResult = _handleCalendarShortcut(
                     event,
                     viewMode,
@@ -189,8 +326,14 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     nextDay = _focusedDay.subtract(const Duration(days: 7));
                   } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
                     nextDay = _focusedDay.add(const Duration(days: 7));
-                  } else if (event.logicalKey == LogicalKeyboardKey.enter ||
-                      event.logicalKey == LogicalKeyboardKey.space) {
+                  } else if (event.logicalKey == LogicalKeyboardKey.enter) {
+                    try {
+                      context.go('/calendar/${dayKey(_focusedDay)}');
+                    } on AssertionError {
+                      _openDayPreview(_focusedDay);
+                    }
+                    return KeyEventResult.handled;
+                  } else if (event.logicalKey == LogicalKeyboardKey.space) {
                     _openDayPreview(_focusedDay);
                     return KeyEventResult.handled;
                   } else if (event.logicalKey == LogicalKeyboardKey.escape &&
@@ -209,6 +352,16 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final previewDay = _previewDay;
+                  final useSideControls = isDesktop && _showCalendarControls;
+                  final controlsPanel = _CalendarControlPanel(
+                    focusedDay: _focusedDay,
+                    today: today,
+                    selectedTypes: typeFilters,
+                    doneOnly: doneOnly,
+                    onClose: isDesktop
+                        ? () => setState(() => _showCalendarControls = false)
+                        : null,
+                  );
                   final calendarContent = Column(
                     children: [
                       _MonthHeader(
@@ -220,9 +373,64 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                         onJumpToDate: _showDatePicker,
                       ),
                       const SizedBox(height: 8),
-                      const _CalendarViewModeSwitch(),
-                      const SizedBox(height: 4),
-                      _WeeklySummaryStrip(today: today),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            if (!useSideControls) ...[
+                              OutlinedButton.icon(
+                                key: const ValueKey('calendar-controls-toggle'),
+                                onPressed: () {
+                                  if (isDesktop) {
+                                    setState(
+                                      () => _showCalendarControls = true,
+                                    );
+                                    return;
+                                  }
+                                  _showCalendarControlsSheet(controlsPanel);
+                                },
+                                icon: const Icon(Icons.tune_outlined, size: 18),
+                                label: const Text('Tools'),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            const _CalendarViewModeSwitch(),
+                            if (!useSideControls &&
+                                viewMode != CalendarViewMode.agenda) ...[
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                key: const ValueKey(
+                                  'calendar-filter-advanced-inline',
+                                ),
+                                onPressed: () =>
+                                    _showAdvancedCalendarFilters(context, ref),
+                                icon: const Icon(
+                                  Icons.filter_alt_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('Advanced'),
+                              ),
+                              const SizedBox(width: 8),
+                              _CalendarFilterStrip(
+                                selectedTypes: typeFilters,
+                                doneOnly: doneOnly,
+                                wrap: true,
+                                showAdvancedChip: false,
+                              ),
+                            ],
+                            const SizedBox(width: 8),
+                            IconButton.outlined(
+                              key: const ValueKey('calendar-actions-menu'),
+                              tooltip: 'Calendar actions',
+                              icon: const Icon(Icons.more_horiz, size: 18),
+                              onPressed: () => _showCalendarActionsSheet(
+                                selectedDay: _previewDay ?? _focusedDay,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       if (viewMode == CalendarViewMode.agenda)
                         _RoutineApplyBanner(day: today),
                       const SizedBox(height: 8),
@@ -281,15 +489,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                                       today: today,
                                       onAddNode: _addNodeForDay,
                                       onClearSearch: _clearCalendarSearch,
-                                      onShowAllFilter: () {
-                                        unawaited(
-                                          ref
-                                              .read(
-                                                agendaFilterProvider.notifier,
-                                              )
-                                              .setFilter(AgendaFilter.all),
-                                        );
-                                      },
+                                      onResetFilters: _resetAgendaFilters,
                                     ),
                                 },
                               ),
@@ -301,6 +501,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                         visibleMonth: _visibleMonth,
                         today: today,
                         isDismissed: _dismissedMonths.contains(_monthKey),
+                        onAddNode: _addNodeForDay,
                         onDismiss: () {
                           setState(() => _dismissedMonths.add(_monthKey));
                         },
@@ -308,10 +509,20 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     ],
                   );
 
+                  final primaryContent = useSideControls
+                      ? Row(
+                          children: [
+                            SizedBox(width: 260, child: controlsPanel),
+                            const SizedBox(width: 12),
+                            Expanded(child: calendarContent),
+                          ],
+                        )
+                      : calendarContent;
+
                   if (previewDay == null ||
                       constraints.maxWidth <
                           LayoutConstants.desktopBreakpoint) {
-                    return calendarContent;
+                    return primaryContent;
                   }
 
                   final panelWidth = (constraints.maxWidth * 0.3).clamp(
@@ -320,20 +531,33 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   );
                   return Row(
                     children: [
-                      Expanded(child: calendarContent),
+                      Expanded(child: primaryContent),
                       const SizedBox(width: 12),
                       SizedBox(
-                        width: panelWidth,
-                        child: _DayPreviewPanel(
-                          day: previewDay,
-                          today: today,
-                          onClose: _closeDayPreview,
-                          onAddNode: () => _addNodeForDay(previewDay),
-                          onClearSearch: _clearCalendarSearch,
-                          onOpenDay: () => _openFullDay(previewDay),
-                          onOpenNode: (nodeId) =>
-                              _openFullDay(previewDay, highlightNodeId: nodeId),
-                        ),
+                        width: _isPreviewPanelCollapsed ? 48 : panelWidth,
+                        child: _isPreviewPanelCollapsed
+                            ? _CollapsedDayPreviewRail(
+                                day: previewDay,
+                                onExpand: () => setState(
+                                  () => _isPreviewPanelCollapsed = false,
+                                ),
+                              )
+                            : _DayPreviewPanel(
+                                day: previewDay,
+                                today: today,
+                                onClose: () => setState(
+                                  () => _isPreviewPanelCollapsed = true,
+                                ),
+                                onAddNode: () => _addNodeForDay(previewDay),
+                                onApplyTemplate: () =>
+                                    _showTemplatePicker(previewDay),
+                                onClearSearch: _clearCalendarSearch,
+                                onOpenDay: () => _openFullDay(previewDay),
+                                onOpenNode: (nodeId) => _openFullDay(
+                                  previewDay,
+                                  highlightNodeId: nodeId,
+                                ),
+                              ),
                       ),
                     ],
                   );
@@ -384,6 +608,18 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       _slideForward = normalized.isAfter(_focusedDay);
       _focusedDay = normalized;
       _visibleMonth = normalized.firstOfMonth;
+    });
+  }
+
+  void _jumpToToday(DateTime today) {
+    final normalized = today.dateOnly;
+    _searchController.clear();
+    ref.read(calendarSearchQueryProvider.notifier).state = '';
+    setState(() {
+      _slideForward = normalized.isAfter(_focusedDay);
+      _focusedDay = normalized;
+      _visibleMonth = normalized.firstOfMonth;
+      _previewDay = normalized;
     });
   }
 
@@ -457,6 +693,569 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     }
   }
 
+  Future<void> _showSelectedRangeTemplatePicker() async {
+    final selectedDays = ref.read(calendarRangeSelectionProvider).toList()
+      ..sort();
+    if (selectedDays.isEmpty) return;
+    await _showTemplatePickerForDays(selectedDays);
+  }
+
+  Future<void> _showTemplatePicker(DateTime day) async {
+    await _showTemplatePickerForDays([day.dateOnly]);
+  }
+
+  Future<void> _showTemplatePickerForDays(List<DateTime> days) async {
+    final normalizedDays = days.map((day) => day.dateOnly).toSet().toList()
+      ..sort();
+    if (normalizedDays.isEmpty) return;
+    final allNodes = await ref.read(allMindmapNodesProvider.future);
+    final normalizedDay = normalizedDays.first;
+    final existingNodes = allNodes
+        .where((node) => normalizedDays.any((day) => node.day.isSameDay(day)))
+        .toList(growable: false);
+    if (!mounted) return;
+    final suggestedTemplates = suggestedCalendarTemplatesForDay(normalizedDay);
+    final suggestedIds = suggestedTemplates
+        .map((template) => template.id)
+        .toSet();
+    final orderedTemplates = [
+      ...suggestedTemplates,
+      for (final template in dayTemplates)
+        if (!suggestedIds.contains(template.id)) template,
+    ];
+    final selectedTemplate = await showModalBottomSheet<DayTemplate>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              Text(
+                normalizedDays.length == 1
+                    ? 'Apply day template'
+                    : 'Apply template to ${normalizedDays.length} dates',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                normalizedDays.length == 1
+                    ? DateFormat('EEEE, MMM d').format(normalizedDay)
+                    : '${DateFormat('MMM d').format(normalizedDays.first)} - ${DateFormat('MMM d').format(normalizedDays.last)}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (final template in orderedTemplates)
+                ListTile(
+                  key: ValueKey('calendar-template-${template.id}'),
+                  enabled:
+                      _templateAppliedCount(
+                        nodes: existingNodes,
+                        templateId: template.id,
+                        days: normalizedDays,
+                      ) <
+                      normalizedDays.length,
+                  leading: Icon(
+                    suggestedIds.contains(template.id)
+                        ? Icons.auto_awesome_outlined
+                        : Icons.dashboard_customize_outlined,
+                  ),
+                  title: Text(template.label),
+                  subtitle: Text(
+                    _templateAppliedCount(
+                              nodes: existingNodes,
+                              templateId: template.id,
+                              days: normalizedDays,
+                            ) >
+                            0
+                        ? 'Already applied to ${_templateAppliedCount(nodes: existingNodes, templateId: template.id, days: normalizedDays)}/${normalizedDays.length} dates'
+                        : template.description,
+                  ),
+                  onTap: () => Navigator.of(context).pop(template),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selectedTemplate == null || !mounted) return;
+
+    final now = DateTime.now();
+    final createdNodes = <MindmapNode>[];
+    for (final day in normalizedDays) {
+      final dayNodes = allNodes
+          .where((node) => node.day.isSameDay(day))
+          .toList(growable: false);
+      createdNodes.addAll(
+        buildDayTemplateNodes(
+          template: selectedTemplate,
+          day: day,
+          now: now,
+          idFactory: () => const Uuid().v4(),
+          existingNodes: dayNodes,
+        ),
+      );
+    }
+    if (createdNodes.isEmpty) return;
+
+    final mutationController = ref.read(mindmapMutationControllerProvider);
+    for (final node in createdNodes) {
+      await mutationController.saveNode(node);
+    }
+    if (!mounted) return;
+    _pushCalendarUndo(
+      CalendarUndoAction(
+        label: 'template ${selectedTemplate.label}',
+        undo: (ref) async {
+          final controller = ref.read(mindmapMutationControllerProvider);
+          for (final node in createdNodes) {
+            await controller.deleteNode(node);
+          }
+        },
+      ),
+    );
+    _recordCalendarActivity('Applied ${selectedTemplate.label} template');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Applied ${selectedTemplate.label} template to ${normalizedDays.length} date(s) (${createdNodes.length} nodes)',
+        ),
+      ),
+    );
+  }
+
+  /// Quick-add a node of given [type] for [day] without showing dialog.
+  int _templateAppliedCount({
+    required List<MindmapNode> nodes,
+    required String templateId,
+    required List<DateTime> days,
+  }) {
+    return days
+        .where(
+          (day) => isCalendarTemplateApplied(
+            nodes: nodes,
+            templateId: templateId,
+            day: day,
+          ),
+        )
+        .length;
+  }
+
+  void _toggleFocusedRangeDay() {
+    final day = _focusedDay.dateOnly;
+    final notifier = ref.read(calendarRangeSelectionProvider.notifier);
+    final next = {...ref.read(calendarRangeSelectionProvider)};
+    if (next.contains(day)) {
+      next.remove(day);
+    } else {
+      next.add(day);
+    }
+    notifier.state = next;
+  }
+
+  void _selectFocusedWeek() {
+    ref.read(calendarRangeSelectionProvider.notifier).state = {
+      for (final day in calendarWeekDays(_focusedDay)) day.dateOnly,
+    };
+  }
+
+  void _clearRangeSelection() {
+    ref.read(calendarRangeSelectionProvider.notifier).state = {};
+  }
+
+  Future<void> _copyFocusedDayMarkdown() async {
+    final day = _focusedDay.dateOnly;
+    final nodes = await ref.read(nodesForDayProvider(day).future);
+    final week = buildCalendarWeekSummary(
+      selectedDay: day,
+      nodes: ref.read(allMindmapNodesProvider).valueOrNull ?? nodes,
+    );
+    final suggestions = buildCalendarPlanningSuggestions(
+      week: week,
+      today: ref.read(currentDateProvider),
+    );
+    await Clipboard.setData(
+      ClipboardData(
+        text: exportCalendarDayMarkdown(
+          summary: buildCalendarDaySummary(day, nodes),
+          nodes: nodes,
+          suggestions: suggestions,
+        ),
+      ),
+    );
+    _recordCalendarActivity('Exported day summary');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Day markdown copied')));
+  }
+
+  Future<void> _copyWeekMarkdown() async {
+    final nodes = await ref.read(allMindmapNodesProvider.future);
+    final week = buildCalendarWeekSummary(
+      selectedDay: _focusedDay,
+      nodes: nodes,
+    );
+    final suggestions = buildCalendarPlanningSuggestions(
+      week: week,
+      today: ref.read(currentDateProvider),
+    );
+    final range = buildCalendarRangeSummary(
+      start: week.startDay,
+      end: week.endDay,
+      nodes: nodes,
+    );
+    await Clipboard.setData(
+      ClipboardData(
+        text: exportCalendarRangeMarkdown(
+          summary: range,
+          suggestions: suggestions,
+        ),
+      ),
+    );
+    _recordCalendarActivity('Exported week summary');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Week markdown copied')));
+  }
+
+  Future<void> _copyVisibleMonthMarkdown() async {
+    final nodes = await ref.read(allMindmapNodesProvider.future);
+    final suggestions = buildCalendarPlanningSuggestions(
+      week: buildCalendarWeekSummary(selectedDay: _focusedDay, nodes: nodes),
+      today: ref.read(currentDateProvider),
+    );
+    await Clipboard.setData(
+      ClipboardData(
+        text: exportCalendarMonthMarkdown(
+          month: _visibleMonth,
+          nodes: nodes,
+          suggestions: suggestions,
+        ),
+      ),
+    );
+    _recordCalendarActivity('Exported month summary');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Month markdown copied')));
+  }
+
+  Future<void> _copySelectedRangeMarkdown() async {
+    final selectedDays = ref.read(calendarRangeSelectionProvider).toList()
+      ..sort();
+    if (selectedDays.isEmpty) return;
+    final nodes = await ref.read(allMindmapNodesProvider.future);
+    final range = buildCalendarRangeSummary(
+      start: selectedDays.first,
+      end: selectedDays.last,
+      nodes: nodes,
+    );
+    await Clipboard.setData(
+      ClipboardData(text: exportCalendarRangeMarkdown(summary: range)),
+    );
+    _recordCalendarActivity('Exported selected range');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Range markdown copied')));
+  }
+
+  Future<void> _balanceFocusedWeek() async {
+    await _balanceDays(calendarWeekDays(_focusedDay));
+  }
+
+  Future<void> _balanceSelectedRange() async {
+    final days = ref.read(calendarRangeSelectionProvider).toList()..sort();
+    if (days.isEmpty) return;
+    await _balanceDays(days);
+  }
+
+  Future<void> _balanceDays(List<DateTime> days) async {
+    final nodes = await ref.read(allMindmapNodesProvider.future);
+    final plan = buildWorkloadBalancePlan(candidateDays: days, nodes: nodes);
+    if (!mounted) return;
+    if (plan.moves.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            plan.overloadedDays.isEmpty
+                ? 'No overloaded days found'
+                : 'No safe workload moves found',
+          ),
+        ),
+      );
+      return;
+    }
+    final selectedMoves = await showDialog<List<WorkloadMoveSuggestion>>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Balance workload (${plan.moves.length} move preview)'),
+          content: SizedBox(
+            width: 420,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final move in plan.moves)
+                  ListTile(
+                    title: Text(move.node.title),
+                    subtitle: Text(
+                      '${DateFormat('MMM d').format(move.fromDay)} → ${DateFormat('MMM d').format(move.toDay)}',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop([plan.moves.first]),
+              child: const Text('Move one'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(plan.moves),
+              child: const Text('Spread all'),
+            ),
+          ],
+        );
+      },
+    );
+    if (selectedMoves == null || selectedMoves.isEmpty) return;
+    final mutationController = ref.read(mindmapMutationControllerProvider);
+    for (final move in selectedMoves) {
+      await mutationController.rescheduleNode(move.node, day: move.toDay);
+    }
+    _pushCalendarUndo(
+      CalendarUndoAction(
+        label: 'workload balance',
+        undo: (ref) async {
+          final controller = ref.read(mindmapMutationControllerProvider);
+          for (final move in selectedMoves) {
+            await controller.rescheduleNode(
+              move.node.copyWith(day: move.toDay),
+              day: move.fromDay,
+            );
+          }
+        },
+      ),
+    );
+    _recordCalendarActivity('Balanced ${selectedMoves.length} tasks');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Moved ${selectedMoves.length} tasks')),
+    );
+  }
+
+  void _recordCalendarActivity(String message) {
+    final notifier = ref.read(calendarActivityLogProvider.notifier);
+    notifier.state = [
+      message,
+      ...ref.read(calendarActivityLogProvider),
+    ].take(8).toList(growable: false);
+  }
+
+  void _pushCalendarUndo(CalendarUndoAction action) {
+    final notifier = ref.read(calendarUndoStackProvider.notifier);
+    notifier.state = [
+      action,
+      ...ref.read(calendarUndoStackProvider),
+    ].take(8).toList(growable: false);
+  }
+
+  Future<void> _undoLastCalendarAction() async {
+    final stack = ref.read(calendarUndoStackProvider);
+    if (stack.isEmpty) return;
+    final action = stack.first;
+    ref.read(calendarUndoStackProvider.notifier).state = stack.skip(1).toList();
+    await action.undo(ref);
+    _recordCalendarActivity('Undid ${action.label}');
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Undid ${action.label}')));
+  }
+
+  Future<void> _showQuickCaptureSheet(DateTime day) async {
+    final normalizedDay = day.dateOnly;
+    var draftText = '';
+    final query = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 8,
+            bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Quick capture',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Default day: ${DateFormat('EEE, MMM d').format(normalizedDay)}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const ValueKey('calendar-quick-capture-input'),
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'Command',
+                  hintText: 'task bayar listrik p:high #home',
+                  prefixIcon: Icon(Icons.flash_on_outlined),
+                ),
+                onChanged: (value) => draftText = value,
+                onSubmitted: (value) => Navigator.of(context).pop(value),
+              ),
+              const SizedBox(height: 10),
+              const Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _QuickCaptureExampleChip(text: 'task Pay bills p:high #home'),
+                  _QuickCaptureExampleChip(text: 'event Meeting at:14:00'),
+                  _QuickCaptureExampleChip(text: 'habit Workout daily'),
+                  _QuickCaptureExampleChip(text: 'note Product idea #var'),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  key: const ValueKey('calendar-quick-capture-submit'),
+                  onPressed: () => Navigator.of(context).pop(draftText),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Create'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (query == null || query.trim().isEmpty) return;
+    await _createNodeFromQuickCapture(query, normalizedDay);
+  }
+
+  Future<void> _createNodeFromQuickCapture(String query, DateTime day) async {
+    final normalizedQuery = query.trim();
+    final command = quickCreateCommandFromQuery(
+      normalizedQuery,
+      today: ref.read(currentDateProvider).dateOnly,
+      defaultDay: day.dateOnly,
+    );
+    final nodeDay = command?.day ?? day.dateOnly;
+    final node = MindmapNode.create(
+      id: const Uuid().v4(),
+      type: command?.type ?? NodeType.note,
+      title: command?.title ?? normalizedQuery,
+      body: command?.body ?? '',
+      day: nodeDay,
+      status: command?.status ?? NodeStatus.open,
+      priority: command?.priority ?? NodePriority.none,
+      project: command?.project ?? '',
+      area: command?.area ?? '',
+      tags: command?.tags ?? const [],
+      dueDate: command?.dueDate,
+      progress: command?.progress ?? 0,
+      isPinned: command?.isPinned ?? false,
+      isArchived: command?.isArchived ?? false,
+      checklist: [
+        for (final title in command?.checklistTitles ?? const <String>[])
+          TaskChecklistItem(id: const Uuid().v4(), title: title),
+      ],
+      relatedNodeIds: command?.relatedNodeIds ?? const [],
+      data: command?.data ?? const {},
+      now: DateTime.now(),
+    );
+    try {
+      await ref.read(mindmapMutationControllerProvider).saveNode(node);
+      _pushCalendarUndo(
+        CalendarUndoAction(
+          label: 'quick capture',
+          undo: (ref) async {
+            await ref.read(mindmapMutationControllerProvider).deleteNode(node);
+          },
+        ),
+      );
+      _recordCalendarActivity('Quick captured ${node.type.label}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Captured "${node.title}"'),
+          action: SnackBarAction(
+            label: 'Open',
+            onPressed: () => _openFullDay(node.day, highlightNodeId: node.id),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to capture: $error')));
+    }
+  }
+
+  Future<void> _addNodeQuick(DateTime day, NodeType type) async {
+    final normalizedDay = day.dateOnly;
+    final node = MindmapNode.create(
+      id: const Uuid().v4(),
+      type: type,
+      title: 'New ${type.label}',
+      body: '',
+      day: normalizedDay,
+      now: DateTime.now(),
+    );
+    try {
+      await ref.read(mindmapMutationControllerProvider).saveNode(node);
+      _recordCalendarActivity('Created ${type.label}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Created ${type.label} on ${DateFormat('MMM d').format(normalizedDay)}',
+          ),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _showDayPreviewSheet(DateTime day) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -473,6 +1272,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 today: ref.read(currentDateProvider),
                 onClose: () => Navigator.of(context).pop(),
                 onAddNode: () => _addNodeForDay(day),
+                onApplyTemplate: () => _showTemplatePicker(day),
                 onClearSearch: _clearCalendarSearch,
                 onOpenDay: () => goToDay(context, day),
                 onOpenNode: (nodeId) =>
@@ -492,6 +1292,30 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     KeyDownEvent event,
     CalendarViewMode viewMode,
   ) {
+    if (event.logicalKey == LogicalKeyboardKey.slash) {
+      _searchFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyT) {
+      _jumpToToday(ref.read(currentDateProvider));
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.pageUp) {
+      _showPreviousPeriod(viewMode);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.pageDown) {
+      _showNextPeriod(viewMode);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.home) {
+      _showFocusedDay(_focusedDay.startOfWeek);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.end) {
+      _showFocusedDay(_focusedDay.startOfWeek.add(const Duration(days: 6)));
+      return KeyEventResult.handled;
+    }
     if (event.logicalKey == LogicalKeyboardKey.keyN) {
       unawaited(_addNodeForDay(_previewDay ?? _focusedDay));
       return KeyEventResult.handled;
@@ -550,6 +1374,17 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     await ref
         .read(mindmapMutationControllerProvider)
         .rescheduleNode(node, day: targetDay);
+    _pushCalendarUndo(
+      CalendarUndoAction(
+        label: 'agenda move',
+        undo: (ref) async {
+          await ref
+              .read(mindmapMutationControllerProvider)
+              .rescheduleNode(node.copyWith(day: targetDay), day: node.day);
+        },
+      ),
+    );
+    _recordCalendarActivity('Moved ${node.title}');
     if (!mounted) return;
     _showRescheduleSnackBar(
       context: context,
@@ -581,78 +1416,148 @@ class _CalendarEmptyBanner extends ConsumerWidget {
     required this.visibleMonth,
     required this.today,
     required this.isDismissed,
+    required this.onAddNode,
     required this.onDismiss,
   });
 
   final DateTime visibleMonth;
   final DateTime today;
   final bool isDismissed;
+  final Future<void> Function(DateTime day) onAddNode;
   final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (isDismissed) return const SizedBox.shrink();
 
-    final firstDay = visibleDaysForMonth(visibleMonth).first;
-    final lastDay = visibleDaysForMonth(visibleMonth).last;
+    final firstDay = visibleMonth.dateOnly.firstOfMonth;
+    final lastDay = DateTime(visibleMonth.year, visibleMonth.month + 1, 0);
     final allNodesAsync = ref.watch(allMindmapNodesProvider);
-    final hasNodes =
-        allNodesAsync.valueOrNull?.any(
-          (n) =>
-              n.day.isAfter(firstDay.subtract(const Duration(days: 1))) &&
-              n.day.isBefore(lastDay.add(const Duration(days: 1))),
-        ) ??
-        false;
+    final allNodes = allNodesAsync.valueOrNull;
+    if (allNodes == null) return const SizedBox.shrink();
+    final hasNodes = allNodes.any(
+      (n) =>
+          n.day.isAfter(firstDay.subtract(const Duration(days: 1))) &&
+          n.day.isBefore(lastDay.add(const Duration(days: 1))),
+    );
     if (hasNodes) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(
-              alpha: 0.45,
-            ),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-            ),
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 8 * (1 - value)),
+            child: child,
           ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.info_outline,
-                size: 16,
-                color: theme.colorScheme.primary.withValues(alpha: 0.7),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: ShapeDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(
+                alpha: 0.45,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'No nodes yet in ${DateFormat('MMMM').format(visibleMonth)} — tap a day to add one',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant.withValues(
-                      alpha: 0.8,
+              shape: DoodleShapeBorder(
+                side: BorderSide(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.3,
+                  ),
+                ),
+                radius: 10,
+                wobble: 1.4,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'No nodes yet in ${DateFormat('MMMM').format(visibleMonth)} \u2014 tap a day to add one',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.8,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              SizedBox(
-                width: 28,
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  iconSize: 16,
-                  tooltip: 'Dismiss',
-                  icon: Icon(
-                    Icons.close,
-                    color: theme.colorScheme.onSurfaceVariant.withValues(
-                      alpha: 0.5,
+                TextButton.icon(
+                  key: const ValueKey('calendar-empty-add-node'),
+                  onPressed: () {
+                    unawaited(onAddNode(visibleMonth.dateOnly.firstOfMonth));
+                  },
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('Add node'),
+                ),
+                const SizedBox(width: 4),
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    tooltip: 'Dismiss',
+                    icon: Icon(
+                      Icons.close,
+                      color: theme.colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.5,
+                      ),
                     ),
+                    onPressed: onDismiss,
                   ),
-                  onPressed: onDismiss,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CollapsedDayPreviewRail extends StatelessWidget {
+  const _CollapsedDayPreviewRail({required this.day, required this.onExpand});
+
+  final DateTime day;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        customBorder: const DoodleShapeBorder(radius: 12, wobble: 1.4),
+        onTap: onExpand,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            children: [
+              Icon(
+                Icons.chevron_left_rounded,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(height: 8),
+              RotatedBox(
+                quarterTurns: 3,
+                child: Text(
+                  DateFormat('MMM d').format(day),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -663,12 +1568,645 @@ class _CalendarEmptyBanner extends ConsumerWidget {
   }
 }
 
+class _CalendarControlPanel extends StatelessWidget {
+  const _CalendarControlPanel({
+    required this.focusedDay,
+    required this.today,
+    required this.selectedTypes,
+    required this.doneOnly,
+    this.onClose,
+  });
+
+  final DateTime focusedDay;
+  final DateTime today;
+  final Set<NodeType> selectedTypes;
+  final bool doneOnly;
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: ShapeDecoration(
+                  shape: DoodleShapeBorder(
+                    side: BorderSide(color: theme.colorScheme.outlineVariant),
+                    radius: 10,
+                    wobble: 1.4,
+                  ),
+                ),
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 18,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Tools',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (onClose != null)
+                IconButton.outlined(
+                  tooltip: 'Hide tools',
+                  icon: const Icon(Icons.keyboard_double_arrow_left, size: 18),
+                  onPressed: onClose,
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Filters and planning actions stay here so the calendar stays clean.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('Filters', style: theme.textTheme.labelLarge),
+          const SizedBox(height: 8),
+          _CalendarFilterStrip(
+            selectedTypes: selectedTypes,
+            doneOnly: doneOnly,
+            wrap: true,
+          ),
+          const SizedBox(height: 18),
+          const _CalendarMissionLegend(),
+          const SizedBox(height: 8),
+          _SelectedDayMissionCard(day: focusedDay),
+          const SizedBox(height: 12),
+          _WeeklySummaryStrip(focusedDay: focusedDay, today: today),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarAdvancedTools extends StatelessWidget {
+  const _CalendarAdvancedTools({
+    required this.focusedDay,
+    required this.onApplyTemplate,
+    required this.onExportDay,
+    required this.onExportWeek,
+    required this.onExportMonth,
+    required this.onBalanceWeek,
+    required this.onUndoLast,
+    required this.onToggleFocusedDay,
+    required this.onSelectFocusedWeek,
+    required this.onBalanceRange,
+    required this.onClearRange,
+    required this.onExportRange,
+    required this.onApplyRangeTemplate,
+  });
+
+  final DateTime focusedDay;
+  final Future<void> Function(DateTime day) onApplyTemplate;
+  final Future<void> Function() onExportDay;
+  final Future<void> Function() onExportWeek;
+  final Future<void> Function() onExportMonth;
+  final Future<void> Function() onBalanceWeek;
+  final VoidCallback onUndoLast;
+  final VoidCallback onToggleFocusedDay;
+  final VoidCallback onSelectFocusedWeek;
+  final Future<void> Function() onBalanceRange;
+  final VoidCallback onClearRange;
+  final Future<void> Function() onExportRange;
+  final Future<void> Function() onApplyRangeTemplate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ExpansionTile(
+        initiallyExpanded: false,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        shape: const DoodleShapeBorder(radius: 12, wobble: 1.4),
+        collapsedShape: const DoodleShapeBorder(radius: 12, wobble: 1.4),
+        title: Text(
+          'Planning tools',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: Text(
+          'Templates, exports, workload, range actions',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        children: [
+          const _CalendarHeatmapModeStrip(),
+          const SizedBox(height: 6),
+          _CalendarPlanningPanel(
+            focusedDay: focusedDay,
+            onApplyTemplate: onApplyTemplate,
+            onExportDay: onExportDay,
+            onExportWeek: onExportWeek,
+            onExportMonth: onExportMonth,
+            onBalanceWeek: onBalanceWeek,
+            onUndoLast: () async => onUndoLast(),
+          ),
+          const SizedBox(height: 6),
+          _CalendarRangePanel(
+            focusedDay: focusedDay,
+            onToggleFocusedDay: onToggleFocusedDay,
+            onSelectFocusedWeek: onSelectFocusedWeek,
+            onBalanceRange: onBalanceRange,
+            onClear: onClearRange,
+            onExport: onExportRange,
+            onApplyTemplate: onApplyRangeTemplate,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarFilterStrip extends ConsumerWidget {
+  const _CalendarFilterStrip({
+    required this.selectedTypes,
+    required this.doneOnly,
+    this.wrap = false,
+    this.showAdvancedChip = true,
+  });
+
+  final Set<NodeType> selectedTypes;
+  final bool doneOnly;
+  final bool wrap;
+  final bool showAdvancedChip;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final density = ref.watch(calendarDensityModeProvider);
+    final filters = <NodeType>[
+      NodeType.task,
+      NodeType.event,
+      NodeType.habit,
+      NodeType.note,
+      NodeType.goal,
+      NodeType.routine,
+    ];
+
+    Widget buildChip(int index) {
+      if (index == 0) {
+        final isActive = selectedTypes.isEmpty && !doneOnly;
+        return _CalendarFilterChip(
+          chipKey: const ValueKey('calendar-filter-all'),
+          label: 'All',
+          icon: Icons.all_inclusive_rounded,
+          color: theme.colorScheme.primary,
+          isSelected: isActive,
+          onTap: () {
+            ref.read(calendarTypeFiltersProvider.notifier).state = {};
+            ref.read(calendarDoneFilterProvider.notifier).state = false;
+          },
+        );
+      }
+      if (index == filters.length + 1) {
+        return _CalendarFilterChip(
+          chipKey: const ValueKey('calendar-filter-done'),
+          label: 'Done',
+          icon: Icons.check_circle_outline_rounded,
+          color: theme.colorScheme.tertiary,
+          isSelected: doneOnly,
+          onTap: () {
+            ref.read(calendarDoneFilterProvider.notifier).state = !doneOnly;
+          },
+        );
+      }
+      if (showAdvancedChip && index == filters.length + 2) {
+        final advanced = ref.watch(calendarAdvancedFilterProvider);
+        final isAdvanced =
+            advanced.hasSchedule == true ||
+            advanced.hasJournal == true ||
+            advanced.hasOverdue == true ||
+            advanced.priority != null ||
+            advanced.status != null ||
+            advanced.type != null ||
+            advanced.project.trim().isNotEmpty ||
+            advanced.area.trim().isNotEmpty ||
+            advanced.tag.trim().isNotEmpty;
+        return _CalendarFilterChip(
+          chipKey: const ValueKey('calendar-filter-advanced'),
+          label: 'Advanced',
+          icon: Icons.filter_alt_outlined,
+          color: theme.colorScheme.primary,
+          isSelected: isAdvanced,
+          onTap: () => _showAdvancedCalendarFilters(context, ref),
+        );
+      }
+      final densityIndex = filters.length + (showAdvancedChip ? 3 : 2);
+      if (index == densityIndex) {
+        return _CalendarFilterChip(
+          chipKey: const ValueKey('calendar-filter-density'),
+          label: switch (density) {
+            CalendarDensityMode.compact => 'Compact',
+            CalendarDensityMode.comfortable => 'Comfort',
+            CalendarDensityMode.detailed => 'Detail',
+          },
+          icon: Icons.view_agenda_outlined,
+          color: theme.colorScheme.secondary,
+          isSelected: density != CalendarDensityMode.compact,
+          onTap: () {
+            final next = switch (density) {
+              CalendarDensityMode.compact => CalendarDensityMode.comfortable,
+              CalendarDensityMode.comfortable => CalendarDensityMode.detailed,
+              CalendarDensityMode.detailed => CalendarDensityMode.compact,
+            };
+            ref.read(calendarDensityModeProvider.notifier).state = next;
+          },
+        );
+      }
+      final type = filters[index - 1];
+      final isSelected = selectedTypes.contains(type);
+      return _CalendarFilterChip(
+        chipKey: ValueKey('calendar-filter-${type.name}'),
+        label: type.label,
+        icon: _nodeIcon(type),
+        color: _nodeColor(type),
+        isSelected: isSelected,
+        onTap: () {
+          final next = {...selectedTypes};
+          if (isSelected) {
+            next.remove(type);
+          } else {
+            next.add(type);
+          }
+          ref.read(calendarTypeFiltersProvider.notifier).state = next;
+        },
+      );
+    }
+
+    final itemCount = filters.length + (showAdvancedChip ? 4 : 3);
+    if (wrap) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (var index = 0; index < itemCount; index++) buildChip(index),
+        ],
+      );
+    }
+
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: itemCount,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, index) => buildChip(index),
+      ),
+    );
+  }
+}
+
+Future<void> _showAdvancedCalendarFilters(
+  BuildContext context,
+  WidgetRef ref,
+) async {
+  final current = ref.read(calendarAdvancedFilterProvider);
+  var project = current.project;
+  var area = current.area;
+  var tag = current.tag;
+  var type = current.type;
+  var priority = current.priority;
+  var status = current.status;
+  var hasSchedule = current.hasSchedule;
+  var hasJournal = current.hasJournal;
+  var hasOverdue = current.hasOverdue;
+  final result = await showDialog<CalendarNodeFilter>(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setState) {
+          const fieldGap = SizedBox(height: 14);
+          const sectionGap = SizedBox(height: 20);
+          final theme = Theme.of(context);
+          final inputDecoration = InputDecoration(
+            filled: true,
+            fillColor: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.34,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 14,
+            ),
+          );
+
+          Widget toggleRow({
+            required String label,
+            required bool value,
+            required ValueChanged<bool> onChanged,
+          }) {
+            return Container(
+              height: 46,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: ShapeDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.22,
+                ),
+                shape: DoodleShapeBorder(
+                  radius: 12,
+                  wobble: 0.8,
+                  side: BorderSide(
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.55,
+                    ),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(label, style: theme.textTheme.labelLarge),
+                  ),
+                  Switch(value: value, onChanged: onChanged),
+                ],
+              ),
+            );
+          }
+
+          return AlertDialog(
+            title: const Text('Advanced filters'),
+            contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+            content: SizedBox(
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Column(
+                      key: const ValueKey('calendar-advanced-filter-fields'),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextFormField(
+                          initialValue: project,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Project',
+                          ),
+                          onChanged: (value) => project = value,
+                        ),
+                        fieldGap,
+                        TextFormField(
+                          initialValue: area,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Area',
+                          ),
+                          onChanged: (value) => area = value,
+                        ),
+                        fieldGap,
+                        TextFormField(
+                          initialValue: tag,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Tag',
+                          ),
+                          onChanged: (value) => tag = value,
+                        ),
+                        fieldGap,
+                        DropdownButtonFormField<NodeType?>(
+                          initialValue: type,
+                          isExpanded: true,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Type',
+                          ),
+                          items: [
+                            const DropdownMenuItem<NodeType?>(
+                              value: null,
+                              child: Text('Any'),
+                            ),
+                            for (final value in NodeType.values)
+                              DropdownMenuItem<NodeType?>(
+                                value: value,
+                                child: Text(value.label),
+                              ),
+                          ],
+                          onChanged: (value) => setState(() => type = value),
+                        ),
+                        fieldGap,
+                        DropdownButtonFormField<NodePriority?>(
+                          initialValue: priority,
+                          isExpanded: true,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Priority',
+                          ),
+                          items: [
+                            const DropdownMenuItem<NodePriority?>(
+                              value: null,
+                              child: Text('Any'),
+                            ),
+                            for (final value in NodePriority.values)
+                              DropdownMenuItem<NodePriority?>(
+                                value: value,
+                                child: Text(value.label),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => priority = value),
+                        ),
+                        fieldGap,
+                        DropdownButtonFormField<NodeStatus?>(
+                          initialValue: status,
+                          isExpanded: true,
+                          decoration: inputDecoration.copyWith(
+                            labelText: 'Status',
+                          ),
+                          items: [
+                            const DropdownMenuItem<NodeStatus?>(
+                              value: null,
+                              child: Text('Any'),
+                            ),
+                            for (final value in NodeStatus.values)
+                              DropdownMenuItem<NodeStatus?>(
+                                value: value,
+                                child: Text(value.label),
+                              ),
+                          ],
+                          onChanged: (value) => setState(() => status = value),
+                        ),
+                      ],
+                    ),
+                    sectionGap,
+                    Column(
+                      key: const ValueKey('calendar-advanced-filter-toggles'),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Node state',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        toggleRow(
+                          label: 'Has schedule',
+                          value: hasSchedule == true,
+                          onChanged: (value) =>
+                              setState(() => hasSchedule = value ? true : null),
+                        ),
+                        const SizedBox(height: 8),
+                        toggleRow(
+                          label: 'Has journal',
+                          value: hasJournal == true,
+                          onChanged: (value) =>
+                              setState(() => hasJournal = value ? true : null),
+                        ),
+                        const SizedBox(height: 8),
+                        toggleRow(
+                          label: 'Has overdue',
+                          value: hasOverdue == true,
+                          onChanged: (value) =>
+                              setState(() => hasOverdue = value ? true : null),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              Row(
+                key: const ValueKey('calendar-advanced-filter-footer'),
+                children: [
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.of(context).pop(const CalendarNodeFilter()),
+                    child: const Text('Clear'),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(
+                      CalendarNodeFilter(
+                        project: project,
+                        area: area,
+                        tag: tag,
+                        type: type,
+                        priority: priority,
+                        status: status,
+                        hasSchedule: hasSchedule,
+                        hasJournal: hasJournal,
+                        hasOverdue: hasOverdue,
+                      ),
+                    ),
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+  if (result != null) {
+    ref.read(calendarAdvancedFilterProvider.notifier).state = result;
+  }
+}
+
+class _CalendarFilterChip extends StatelessWidget {
+  const _CalendarFilterChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+    this.chipKey,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final Key? chipKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      key: chipKey,
+      button: true,
+      selected: isSelected,
+      label: 'Calendar filter: $label',
+      onTap: onTap,
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.26,
+                      ),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: isSelected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outline,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    size: 14,
+                    color: isSelected ? theme.colorScheme.onPrimary : color,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: isSelected
+                          ? theme.colorScheme.onPrimary
+                          : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _DayPreviewAction { template, openDay }
+
 class _DayPreviewPanel extends ConsumerWidget {
   const _DayPreviewPanel({
     required this.day,
     required this.today,
     required this.onClose,
     required this.onAddNode,
+    required this.onApplyTemplate,
     required this.onClearSearch,
     required this.onOpenDay,
     required this.onOpenNode,
@@ -678,6 +2216,7 @@ class _DayPreviewPanel extends ConsumerWidget {
   final DateTime today;
   final VoidCallback onClose;
   final Future<void> Function() onAddNode;
+  final Future<void> Function() onApplyTemplate;
   final VoidCallback onClearSearch;
   final VoidCallback onOpenDay;
   final ValueChanged<String> onOpenNode;
@@ -689,6 +2228,10 @@ class _DayPreviewPanel extends ConsumerWidget {
     final nodesAsync = ref.watch(nodesForDayProvider(normalizedDay));
     final searchQuery = ref.watch(calendarSearchQueryProvider).trim();
     final normalizedQuery = searchQuery.toLowerCase();
+    final typeFilters = ref.watch(calendarTypeFiltersProvider);
+    final doneOnly = ref.watch(calendarDoneFilterProvider);
+    final advancedFilter = ref.watch(calendarAdvancedFilterProvider);
+    final selectedNodeId = ref.watch(selectedAgendaNodeIdProvider);
     final titleMap = ref.watch(workspaceTitleProvider);
     final titleKey =
         '${WorkspaceContextType.daily.name}_${dayKey(normalizedDay)}';
@@ -752,24 +2295,23 @@ class _DayPreviewPanel extends ConsumerWidget {
             const SizedBox(height: 12),
             nodesAsync.when(
               loading: () => const Expanded(
-                child: Center(child: CircularProgressIndicator()),
-              ),
-              error: (error, stackTrace) => Expanded(
-                child: Center(
-                  child: Text(
-                    'Unable to load day preview',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
+                child: Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: SkeletonAgendaList(itemCount: 3),
                 ),
               ),
+              error: (error, stackTrace) => const Expanded(
+                child: AnimatedErrorState(error: 'Unable to load day preview'),
+              ),
               data: (nodes) {
-                final visibleNodes = normalizedQuery.isEmpty
-                    ? nodes
-                    : nodes
-                          .where((node) => _nodeMatches(node, normalizedQuery))
-                          .toList();
+                final visibleNodes = _applyCalendarFilters(
+                  nodes,
+                  query: normalizedQuery,
+                  typeFilters: typeFilters,
+                  doneOnly: doneOnly,
+                  advancedFilter: advancedFilter,
+                  today: today,
+                );
                 final summary = DayNodeSummary.fromNodes(
                   normalizedDay,
                   visibleNodes,
@@ -813,6 +2355,14 @@ class _DayPreviewPanel extends ConsumerWidget {
                         ),
                       ],
                       const SizedBox(height: 12),
+                      _CollapsibleDayMindmapMiniMap(
+                        nodes: nodes,
+                        visibleNodeIds: visibleNodes
+                            .map((node) => node.id)
+                            .toSet(),
+                        onOpenDay: onOpenDay,
+                      ),
+                      const SizedBox(height: 12),
                       Expanded(
                         child: visibleNodes.isEmpty
                             ? _DayPreviewEmptyState(
@@ -827,7 +2377,17 @@ class _DayPreviewPanel extends ConsumerWidget {
                                   final node = visibleNodes[index];
                                   return _DayPreviewNodeTile(
                                     node: node,
-                                    onTap: () => onOpenNode(node.id),
+                                    isSelected: node.id == selectedNodeId,
+                                    onTap: () {
+                                      ref
+                                              .read(
+                                                selectedAgendaNodeIdProvider
+                                                    .notifier,
+                                              )
+                                              .state =
+                                          node.id;
+                                      onOpenNode(node.id);
+                                    },
                                   );
                                 },
                               ),
@@ -851,13 +2411,38 @@ class _DayPreviewPanel extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    key: const ValueKey('calendar-day-preview-open-day'),
-                    onPressed: onOpenDay,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open full day'),
-                  ),
+                PopupMenuButton<_DayPreviewAction>(
+                  key: const ValueKey('calendar-day-preview-more-actions'),
+                  tooltip: 'More day actions',
+                  icon: const Icon(Icons.more_horiz),
+                  onSelected: (action) {
+                    switch (action) {
+                      case _DayPreviewAction.template:
+                        unawaited(onApplyTemplate());
+                      case _DayPreviewAction.openDay:
+                        onOpenDay();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      key: ValueKey('calendar-day-preview-template'),
+                      value: _DayPreviewAction.template,
+                      child: ListTile(
+                        leading: Icon(Icons.dashboard_customize_outlined),
+                        title: Text('Apply template'),
+                        dense: true,
+                      ),
+                    ),
+                    PopupMenuItem(
+                      key: ValueKey('calendar-day-preview-open-day'),
+                      value: _DayPreviewAction.openDay,
+                      child: ListTile(
+                        leading: Icon(Icons.open_in_new),
+                        title: Text('Open full day'),
+                        dense: true,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -865,6 +2450,298 @@ class _DayPreviewPanel extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+class _CollapsibleDayMindmapMiniMap extends StatefulWidget {
+  const _CollapsibleDayMindmapMiniMap({
+    required this.nodes,
+    required this.visibleNodeIds,
+    required this.onOpenDay,
+  });
+
+  final List<MindmapNode> nodes;
+  final Set<String> visibleNodeIds;
+  final VoidCallback onOpenDay;
+
+  @override
+  State<_CollapsibleDayMindmapMiniMap> createState() =>
+      _CollapsibleDayMindmapMiniMapState();
+}
+
+class _CollapsibleDayMindmapMiniMapState
+    extends State<_CollapsibleDayMindmapMiniMap> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final activeNodes = widget.nodes.where((node) => !node.isArchived).length;
+    if (activeNodes == 0) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton.icon(
+          key: const ValueKey('calendar-day-preview-minimap-toggle'),
+          onPressed: () => setState(() => _expanded = !_expanded),
+          icon: Icon(
+            _expanded ? Icons.account_tree : Icons.account_tree_outlined,
+            size: 18,
+          ),
+          label: Text(_expanded ? 'Hide map' : 'Show map ($activeNodes)'),
+          style: OutlinedButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            foregroundColor: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _expanded
+              ? Padding(
+                  key: const ValueKey('calendar-day-preview-minimap-body'),
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _DayMindmapMiniMap(
+                    nodes: widget.nodes,
+                    visibleNodeIds: widget.visibleNodeIds,
+                    onOpenDay: widget.onOpenDay,
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+class _DayMindmapMiniMap extends StatelessWidget {
+  const _DayMindmapMiniMap({
+    required this.nodes,
+    required this.visibleNodeIds,
+    required this.onOpenDay,
+  });
+
+  final List<MindmapNode> nodes;
+  final Set<String> visibleNodeIds;
+  final VoidCallback onOpenDay;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final activeNodes = nodes.where((node) => !node.isArchived).toList();
+    final connectionCount = activeNodes.fold<int>(
+      0,
+      (count, node) => count + node.relatedNodeIds.length,
+    );
+
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.34),
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onOpenDay,
+        child: Container(
+          height: 150,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+            ),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _DayMindmapMiniMapPainter(
+                    nodes: activeNodes,
+                    visibleNodeIds: visibleNodeIds,
+                    colorScheme: theme.colorScheme,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 12,
+                top: 10,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.hub_rounded,
+                      size: 15,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Mindmap mini',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 10,
+                top: 8,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.45,
+                      ),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      '${activeNodes.length} nodes • $connectionCount links',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (activeNodes.isEmpty)
+                Center(
+                  child: Text(
+                    'No mindmap nodes yet',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              Positioned(
+                right: 10,
+                bottom: 8,
+                child: Icon(
+                  Icons.open_in_new_rounded,
+                  size: 15,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DayMindmapMiniMapPainter extends CustomPainter {
+  const _DayMindmapMiniMapPainter({
+    required this.nodes,
+    required this.visibleNodeIds,
+    required this.colorScheme,
+  });
+
+  final List<MindmapNode> nodes;
+  final Set<String> visibleNodeIds;
+  final ColorScheme colorScheme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final background = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          colorScheme.surface.withValues(alpha: 0.65),
+          const Color(0xFF070A12).withValues(alpha: 0.82),
+        ],
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, background);
+
+    final starPaint = Paint()
+      ..color = colorScheme.primary.withValues(alpha: 0.1)
+      ..strokeWidth = 1;
+    for (var i = 0; i < 34; i++) {
+      final x = (math.sin(i * 12.9898) * 43758.5453).abs() % size.width;
+      final y = (math.sin(i * 78.233) * 24634.6345).abs() % size.height;
+      canvas.drawCircle(Offset(x, y), i.isEven ? 0.8 : 0.45, starPaint);
+    }
+
+    if (nodes.isEmpty) return;
+
+    var minX = nodes.first.position.dx;
+    var maxX = nodes.first.position.dx;
+    var minY = nodes.first.position.dy;
+    var maxY = nodes.first.position.dy;
+    for (final node in nodes) {
+      minX = math.min(minX, node.position.dx);
+      maxX = math.max(maxX, node.position.dx);
+      minY = math.min(minY, node.position.dy);
+      maxY = math.max(maxY, node.position.dy);
+    }
+
+    final contentWidth = math.max(120.0, maxX - minX + 220);
+    final contentHeight = math.max(80.0, maxY - minY + 150);
+    final scale = math.min(
+      (size.width - 32) / contentWidth,
+      (size.height - 42) / contentHeight,
+    );
+    final origin = Offset(
+      (size.width - (maxX - minX) * scale) / 2 - minX * scale,
+      (size.height - (maxY - minY) * scale) / 2 - minY * scale + 8,
+    );
+
+    Offset mapNode(MindmapNode node) {
+      return Offset(
+        origin.dx + node.position.dx * scale,
+        origin.dy + node.position.dy * scale,
+      );
+    }
+
+    final nodeById = {for (final node in nodes) node.id: node};
+    final linePaint = Paint()
+      ..color = colorScheme.primary.withValues(alpha: 0.18)
+      ..strokeWidth = 1.1
+      ..strokeCap = StrokeCap.round;
+    for (final node in nodes) {
+      final from = mapNode(node);
+      for (final relatedId in node.relatedNodeIds) {
+        final related = nodeById[relatedId];
+        if (related == null) continue;
+        canvas.drawLine(from, mapNode(related), linePaint);
+      }
+    }
+
+    for (final node in nodes) {
+      final point = mapNode(node);
+      final isMatch = visibleNodeIds.contains(node.id);
+      final color = _nodeColor(node.type);
+      final glowPaint = Paint()
+        ..shader = ui.Gradient.radial(point, isMatch ? 18 : 12, [
+          color.withValues(alpha: isMatch ? 0.28 : 0.12),
+          Colors.transparent,
+        ]);
+      canvas.drawCircle(point, isMatch ? 18 : 12, glowPaint);
+
+      final nodePaint = Paint()
+        ..color = color.withValues(alpha: isMatch ? 0.95 : 0.42);
+      final radius = node.isDone ? 3.4 : 4.8;
+      canvas.drawCircle(point, radius, nodePaint);
+
+      final ringPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isMatch ? 1.5 : 0.8
+        ..color = colorScheme.onSurface.withValues(
+          alpha: isMatch ? 0.42 : 0.16,
+        );
+      canvas.drawCircle(point, radius + 2.4, ringPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DayMindmapMiniMapPainter oldDelegate) {
+    return oldDelegate.nodes != nodes ||
+        oldDelegate.visibleNodeIds != visibleNodeIds ||
+        oldDelegate.colorScheme != colorScheme;
   }
 }
 
@@ -879,50 +2756,36 @@ class _DayPreviewEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.event_note_outlined,
-            size: 42,
-            color: theme.colorScheme.outline,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            hasQuery ? 'No matching nodes' : 'No nodes yet for this day',
-            style: theme.textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            hasQuery
-                ? 'Clear search to see all nodes for this day.'
-                : 'Add a node or open the full day to start planning.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          if (hasQuery) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              key: const ValueKey('calendar-day-preview-clear-search'),
-              onPressed: onClearSearch,
-              icon: const Icon(Icons.search_off),
-              label: const Text('Clear search'),
-            ),
-          ],
-        ],
-      ),
+    if (hasQuery) {
+      return AnimatedEmptyState(
+        icon: Icons.event_note_outlined,
+        label: 'No matching nodes',
+        subtitle: 'Clear search to see all nodes for this day.',
+        actionLabel: 'Clear search',
+        onAction: onClearSearch,
+        actionKey: const ValueKey('calendar-day-preview-clear-search'),
+        pulseIcon: true,
+      );
+    }
+
+    return const AnimatedEmptyState(
+      icon: Icons.event_note_outlined,
+      label: 'No nodes yet for this day',
+      subtitle: 'Use the actions below to add a node or open the full day.',
+      pulseIcon: false,
     );
   }
 }
 
 class _DayPreviewNodeTile extends StatelessWidget {
-  const _DayPreviewNodeTile({required this.node, required this.onTap});
+  const _DayPreviewNodeTile({
+    required this.node,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   final MindmapNode node;
+  final bool isSelected;
   final VoidCallback onTap;
 
   @override
@@ -971,6 +2834,20 @@ class _DayPreviewNodeTile extends StatelessWidget {
                         ),
                       ),
                     ],
+                    if (_bodyPreview != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        _bodyPreview!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -989,9 +2866,24 @@ class _DayPreviewNodeTile extends StatelessWidget {
 
   String _previewNodeMetadata(MindmapNode node) {
     final parts = <String>[node.type.label];
+    final timeBlock = timeBlockForNode(node);
+    if (timeBlock.isValid) parts.insert(0, timeBlock.block!.rangeLabel);
     if (node.priority != NodePriority.none) parts.add(node.priority.label);
     if (node.status != NodeStatus.open) parts.add(node.status.label);
     return parts.join(' · ');
+  }
+
+  String? get _bodyPreview {
+    final body = node.body.trim();
+    if (body.isEmpty) return null;
+    final lines = body.split('\n');
+    for (final l in lines) {
+      final t = l.trim();
+      if (t.isNotEmpty) {
+        return t.length > 80 ? '\u2026' : t;
+      }
+    }
+    return null;
   }
 }
 
@@ -1007,35 +2899,52 @@ class _RoutineApplyBanner extends ConsumerWidget {
       data: (plan) {
         if (plan.readyCount == 0) return const SizedBox.shrink();
         final theme = Theme.of(context);
-        return Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Material(
-            key: const ValueKey('calendar-routine-apply-banner'),
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.auto_awesome_motion_outlined,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '${plan.readyCount} routines ready for today',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+        return TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            return Opacity(
+              opacity: value,
+              child: Transform.translate(
+                offset: Offset(0, 12 * (1 - value)),
+                child: child,
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Material(
+              key: const ValueKey('calendar-routine-apply-banner'),
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome_motion_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${plan.readyCount} routines ready for today',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  FilledButton.tonal(
-                    key: const ValueKey('calendar-apply-routines'),
-                    onPressed: () => _showRoutineActions(context, ref, plan),
-                    child: const Text('Apply'),
-                  ),
-                ],
+                    FilledButton.tonal(
+                      key: const ValueKey('calendar-apply-routines'),
+                      onPressed: () => _showRoutineActions(context, ref, plan),
+                      child: const Text('Apply'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1093,11 +3002,14 @@ class _RoutineApplyBanner extends ConsumerWidget {
             }
 
             final selectedCount = selectedRoutineIds.length;
+            final size = MediaQuery.sizeOf(context);
+            final dialogWidth = math.min(360.0, size.width - 48.0);
+            final listMaxHeight = math.min(320.0, size.height * 0.45);
             return AlertDialog(
               key: const ValueKey('calendar-routine-apply-dialog'),
               title: const Text('Apply routines?'),
               content: SizedBox(
-                width: 360,
+                width: dialogWidth,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1124,19 +3036,31 @@ class _RoutineApplyBanner extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    for (final item in readyItems)
-                      CheckboxListTile(
-                        key: ValueKey(
-                          'calendar-routine-select-${item.routine.id}',
-                        ),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        value: selectedRoutineIds.contains(item.routine.id),
-                        onChanged: (value) {
-                          toggleRoutine(item.routine.id, value ?? false);
-                        },
-                        title: Text(item.node?.title ?? item.routine.label),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: listMaxHeight),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final item in readyItems)
+                            CheckboxListTile(
+                              key: ValueKey(
+                                'calendar-routine-select-${item.routine.id}',
+                              ),
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: selectedRoutineIds.contains(
+                                item.routine.id,
+                              ),
+                              onChanged: (value) {
+                                toggleRoutine(item.routine.id, value ?? false);
+                              },
+                              title: Text(
+                                item.node?.title ?? item.routine.label,
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -1188,7 +3112,7 @@ class _RoutineApplyBanner extends ConsumerWidget {
         ? await showDatePicker(
             context: context,
             initialDate: day.add(const Duration(days: 1)),
-            firstDate: day,
+            firstDate: day.add(const Duration(days: 1)),
             lastDate: day.add(const Duration(days: 365)),
           )
         : null;
@@ -1215,8 +3139,8 @@ class _RoutineApplyBanner extends ConsumerWidget {
       ),
       _RoutineAction.cancel => <MindmapNode>[],
     };
-    invalidateMindmapState(ref, day: day);
-    ref.invalidate(calendarRoutinePlanProvider(day.dateOnly));
+    invalidateMindmapState(ref, day: day, extraDay: snoozeTargetDay?.dateOnly);
+    _invalidateRoutinePlanDays(ref, [day, snoozeTargetDay?.dateOnly]);
     if (!context.mounted) return;
     final message = switch (result.action) {
       _RoutineAction.apply => 'Applied ${saved.length} routines',
@@ -1250,7 +3174,10 @@ class _RoutineApplyBanner extends ConsumerWidget {
       await repository.deleteNode(marker.id);
     }
     invalidateMindmapState(ref, day: day);
-    ref.invalidate(calendarRoutinePlanProvider(day.dateOnly));
+    _invalidateRoutinePlanDays(ref, [
+      day,
+      for (final marker in markers) _routineMarkerSnoozedToDate(marker),
+    ]);
   }
 }
 
@@ -1264,6 +3191,258 @@ final class _RoutineDialogResult {
 
   final _RoutineAction action;
   final Set<String> selectedRoutineIds;
+}
+
+class _CalendarHeatmapModeStrip extends ConsumerWidget {
+  const _CalendarHeatmapModeStrip();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selected = ref.watch(calendarHeatmapModeProvider);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final mode in CalendarHeatmapMode.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ChoiceChip(
+                key: ValueKey('calendar-heatmap-${mode.name}'),
+                label: Text(calendarHeatmapModeLabel(mode)),
+                selected: selected == mode,
+                onSelected: (_) =>
+                    ref.read(calendarHeatmapModeProvider.notifier).state = mode,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarPlanningPanel extends ConsumerWidget {
+  const _CalendarPlanningPanel({
+    required this.focusedDay,
+    required this.onApplyTemplate,
+    required this.onExportDay,
+    required this.onExportWeek,
+    required this.onExportMonth,
+    required this.onBalanceWeek,
+    required this.onUndoLast,
+  });
+
+  final DateTime focusedDay;
+  final Future<void> Function(DateTime day) onApplyTemplate;
+  final Future<void> Function() onExportDay;
+  final Future<void> Function() onExportWeek;
+  final Future<void> Function() onExportMonth;
+  final Future<void> Function() onBalanceWeek;
+  final Future<void> Function() onUndoLast;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final nodesAsync = ref.watch(allMindmapNodesProvider);
+    final activities = ref.watch(calendarActivityLogProvider);
+    final undoStack = ref.watch(calendarUndoStackProvider);
+    return nodesAsync.maybeWhen(
+      data: (nodes) {
+        final week = buildCalendarWeekSummary(
+          selectedDay: focusedDay,
+          nodes: nodes,
+        );
+        final suggestions = buildCalendarPlanningSuggestions(
+          week: week,
+          today: ref.watch(currentDateProvider),
+        );
+        if (suggestions.isEmpty && activities.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final theme = Theme.of(context);
+        return Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Tooltip(
+                      message:
+                          'Shortcuts: arrows move, PgUp/PgDn period, Home/End week, Enter open, Space preview, T today, N add, / search',
+                      child: Text(
+                        'Planning HUD · ? shortcuts',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    ActionChip(
+                      label: const Text('Template'),
+                      avatar: const Icon(Icons.dashboard_customize_outlined),
+                      onPressed: () => unawaited(onApplyTemplate(focusedDay)),
+                    ),
+                    ActionChip(
+                      label: const Text('Balance'),
+                      avatar: const Icon(Icons.tune_outlined),
+                      onPressed: () => unawaited(onBalanceWeek()),
+                    ),
+                    ActionChip(
+                      label: const Text('Export day'),
+                      avatar: const Icon(Icons.today_outlined),
+                      onPressed: () => unawaited(onExportDay()),
+                    ),
+                    ActionChip(
+                      label: const Text('Export week'),
+                      avatar: const Icon(Icons.copy_outlined),
+                      onPressed: () => unawaited(onExportWeek()),
+                    ),
+                    ActionChip(
+                      label: const Text('Export month'),
+                      avatar: const Icon(Icons.calendar_month_outlined),
+                      onPressed: () => unawaited(onExportMonth()),
+                    ),
+                    ActionChip(
+                      label: const Text('Undo'),
+                      avatar: const Icon(Icons.undo_outlined),
+                      onPressed: undoStack.isEmpty
+                          ? null
+                          : () => unawaited(onUndoLast()),
+                    ),
+                  ],
+                ),
+                if (suggestions.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  for (final suggestion in suggestions.take(2))
+                    Text(
+                      '• ${suggestion.title}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                ],
+                if (activities.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Last: ${activities.first}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _CalendarRangePanel extends ConsumerWidget {
+  const _CalendarRangePanel({
+    required this.focusedDay,
+    required this.onToggleFocusedDay,
+    required this.onSelectFocusedWeek,
+    required this.onBalanceRange,
+    required this.onClear,
+    required this.onExport,
+    required this.onApplyTemplate,
+  });
+
+  final DateTime focusedDay;
+  final VoidCallback onToggleFocusedDay;
+  final VoidCallback onSelectFocusedWeek;
+  final Future<void> Function() onBalanceRange;
+  final VoidCallback onClear;
+  final Future<void> Function() onExport;
+  final Future<void> Function() onApplyTemplate;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedDays = ref.watch(calendarRangeSelectionProvider).toList()
+      ..sort();
+    if (selectedDays.isEmpty) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              key: const ValueKey('calendar-range-toggle'),
+              onPressed: onToggleFocusedDay,
+              icon: const Icon(Icons.checklist_outlined),
+              label: const Text('Select date'),
+            ),
+            OutlinedButton.icon(
+              key: const ValueKey('calendar-range-select-week'),
+              onPressed: onSelectFocusedWeek,
+              icon: const Icon(Icons.view_week_outlined),
+              label: const Text('Select week'),
+            ),
+          ],
+        ),
+      );
+    }
+    final nodesAsync = ref.watch(allMindmapNodesProvider);
+    return nodesAsync.maybeWhen(
+      data: (nodes) {
+        final summary = buildCalendarRangeSummary(
+          start: selectedDays.first,
+          end: selectedDays.last,
+          nodes: nodes,
+        );
+        return Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('${selectedDays.length} dates'),
+                Text('${summary.totalTasks} tasks'),
+                Text('${summary.completedTasks} done'),
+                Text('${summary.overdueTasks} overdue'),
+                Text('${summary.focusMinutes} focus min'),
+                Text('${summary.journals} journals'),
+                Text('${summary.habitCompletions} habits'),
+                ActionChip(
+                  label: const Text('Add focused'),
+                  onPressed: onToggleFocusedDay,
+                ),
+                ActionChip(
+                  label: const Text('Select week'),
+                  onPressed: onSelectFocusedWeek,
+                ),
+                ActionChip(
+                  label: const Text('Template'),
+                  onPressed: () => unawaited(onApplyTemplate()),
+                ),
+                ActionChip(
+                  label: const Text('Balance'),
+                  onPressed: () => unawaited(onBalanceRange()),
+                ),
+                ActionChip(
+                  label: const Text('Export'),
+                  onPressed: () => unawaited(onExport()),
+                ),
+                ActionChip(label: const Text('Clear'), onPressed: onClear),
+              ],
+            ),
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
 }
 
 class _CalendarViewModeSwitch extends ConsumerWidget {
@@ -1445,7 +3624,7 @@ class _WeekCalendarView extends StatelessWidget {
           );
         }
         const crossAxisCount = 7;
-        const spacing = 5.0;
+        const spacing = 0.0;
         final cellWidth =
             (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
             crossAxisCount;
@@ -1486,24 +3665,47 @@ class _AgendaCalendarView extends ConsumerWidget {
     required this.today,
     required this.onAddNode,
     required this.onClearSearch,
-    required this.onShowAllFilter,
+    required this.onResetFilters,
   });
 
   final DateTime focusedDay;
   final DateTime today;
   final Future<void> Function(DateTime day) onAddNode;
   final VoidCallback onClearSearch;
-  final VoidCallback onShowAllFilter;
+  final VoidCallback onResetFilters;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final nodesAsync = ref.watch(allMindmapNodesProvider);
     final filter = ref.watch(agendaFilterProvider);
-    final searchQuery = ref.watch(calendarSearchQueryProvider).trim().toLowerCase();
+    final searchQuery = ref
+        .watch(calendarSearchQueryProvider)
+        .trim()
+        .toLowerCase();
+    final typeFilters = ref.watch(calendarTypeFiltersProvider);
+    final doneOnly = ref.watch(calendarDoneFilterProvider);
+    final advancedFilter = ref.watch(calendarAdvancedFilterProvider);
     final theme = Theme.of(context);
     return Column(
       children: [
-        const _AgendaFilterBar(),
+        _AgendaFilterBar(
+          counts: _buildFilterCounts(
+            nodesAsync.valueOrNull,
+            start: focusedDay.dateOnly,
+            query: searchQuery,
+            typeFilters: typeFilters,
+            doneOnly: doneOnly,
+            advancedFilter: advancedFilter,
+            today: today,
+          ),
+        ),
+        const SizedBox(height: 8),
+        _CalendarFilterStrip(
+          selectedTypes: typeFilters,
+          doneOnly: doneOnly,
+          wrap: true,
+        ),
+
         const SizedBox(height: 10),
         Expanded(
           child: nodesAsync.when(
@@ -1519,8 +3721,14 @@ class _AgendaCalendarView extends ConsumerWidget {
                             (!node.isArchived || _isRoutineMarker(node)) &&
                             !node.day.isBefore(start) &&
                             node.day.isBefore(end) &&
-                            (searchQuery.isEmpty ||
-                                _nodeMatches(node, searchQuery)) &&
+                            _applyCalendarFilters(
+                              [node],
+                              query: searchQuery,
+                              typeFilters: typeFilters,
+                              doneOnly: doneOnly,
+                              advancedFilter: advancedFilter,
+                              today: today,
+                            ).isNotEmpty &&
                             _matchesFilter(node, filter),
                       )
                       .toList()
@@ -1550,7 +3758,11 @@ class _AgendaCalendarView extends ConsumerWidget {
                       searchQuery: searchQuery,
                       onAddNode: () => onAddNode(focusedDay),
                       onClearSearch: onClearSearch,
-                      onShowAllFilter: onShowAllFilter,
+                      hasCalendarFilters:
+                          searchQuery.isNotEmpty ||
+                          typeFilters.isNotEmpty ||
+                          doneOnly,
+                      onResetFilters: onResetFilters,
                     )
                   : ListView.separated(
                       key: const ValueKey('calendar-agenda-list'),
@@ -1616,172 +3828,239 @@ class _AgendaCalendarView extends ConsumerWidget {
                                   ),
                                 ),
                                 const SizedBox(height: 10),
-                                ...dayNodes.take(5).map((node) {
-                                  final selectedId = ref.watch(
-                                    selectedAgendaNodeIdProvider,
-                                  );
-                                  final isSelected = selectedId == node.id;
-                                  return Padding(
+                                for (final section
+                                    in buildCalendarAgendaSections(
+                                      today: today,
+                                      nodes: dayNodes,
+                                    )) ...[
+                                  Padding(
                                     padding: const EdgeInsets.only(bottom: 6),
-                                    child: InkWell(
-                                      key: ValueKey(
-                                        'calendar-agenda-node-${node.id}',
-                                      ),
-                                      borderRadius: BorderRadius.circular(8),
-                                      onTap: () {
-                                        ref
-                                                .read(
-                                                  selectedAgendaNodeIdProvider
-                                                      .notifier,
-                                                )
-                                                .state =
-                                            node.id;
-                                        goToDay(
-                                          context,
-                                          day,
-                                          highlightNodeId: node.id,
-                                        );
-                                      },
-                                      child: AnimatedContainer(
-                                        key: ValueKey(
-                                          'calendar-agenda-selection-${node.id}',
-                                        ),
-                                        duration: const Duration(
-                                          milliseconds: 120,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: isSelected
-                                              ? theme.colorScheme.primary
-                                                    .withValues(alpha: 0.1)
-                                              : null,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
+                                    child: Text(
+                                      section.label,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                            fontWeight: FontWeight.w900,
                                           ),
-                                          border: isSelected
-                                              ? Border.all(
-                                                  color:
-                                                      theme.colorScheme.primary,
-                                                )
-                                              : null,
+                                    ),
+                                  ),
+                                  ...section.nodes.take(5).map((node) {
+                                    final selectedId = ref.watch(
+                                      selectedAgendaNodeIdProvider,
+                                    );
+                                    final isSelected = selectedId == node.id;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 6),
+                                      child: InkWell(
+                                        key: ValueKey(
+                                          'calendar-agenda-node-${node.id}',
                                         ),
-                                        child: Row(
-                                          children: [
-                                            IconButton(
-                                              key: ValueKey(
-                                                'calendar-agenda-select-${node.id}',
-                                              ),
-                                              tooltip: isSelected
-                                                  ? 'Selected for shortcuts'
-                                                  : 'Select for shortcuts',
-                                              visualDensity:
-                                                  VisualDensity.compact,
-                                              icon: Icon(
-                                                isSelected
-                                                    ? Icons.check_circle
-                                                    : Icons
-                                                          .radio_button_unchecked,
-                                                size: 18,
-                                              ),
-                                              onPressed: () {
-                                                ref
-                                                    .read(
-                                                      selectedAgendaNodeIdProvider
-                                                          .notifier,
-                                                    )
-                                                    .state = node
-                                                    .id;
-                                              },
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () {
+                                          ref
+                                                  .read(
+                                                    selectedAgendaNodeIdProvider
+                                                        .notifier,
+                                                  )
+                                                  .state =
+                                              node.id;
+                                          goToDay(
+                                            context,
+                                            day,
+                                            highlightNodeId: node.id,
+                                          );
+                                        },
+                                        child: AnimatedContainer(
+                                          key: ValueKey(
+                                            'calendar-agenda-selection-${node.id}',
+                                          ),
+                                          duration: const Duration(
+                                            milliseconds: 120,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? theme.colorScheme.primary
+                                                      .withValues(alpha: 0.1)
+                                                : null,
+                                            borderRadius: BorderRadius.circular(
+                                              8,
                                             ),
-                                            Icon(
-                                              _nodeIcon(node.type),
-                                              size: 16,
-                                              color: theme.colorScheme.primary,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    node.title,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                  if (_routineMarkerLabel(
-                                                        node,
-                                                      ) !=
-                                                      null) ...[
-                                                    const SizedBox(height: 4),
-                                                    _RoutineMarkerBadge(
-                                                      label:
-                                                          _routineMarkerLabel(
-                                                            node,
-                                                          )!,
-                                                    ),
-                                                  ],
-                                                  if (_agendaNodeMetadata(
-                                                    node,
-                                                  ).isNotEmpty)
+                                            border: isSelected
+                                                ? Border.all(
+                                                    color: theme
+                                                        .colorScheme
+                                                        .primary,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'calendar-agenda-select-${node.id}',
+                                                ),
+                                                tooltip: isSelected
+                                                    ? 'Selected for shortcuts'
+                                                    : 'Select for shortcuts',
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                icon: Icon(
+                                                  isSelected
+                                                      ? Icons.check_circle
+                                                      : Icons
+                                                            .radio_button_unchecked,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () {
+                                                  ref
+                                                      .read(
+                                                        selectedAgendaNodeIdProvider
+                                                            .notifier,
+                                                      )
+                                                      .state = node
+                                                      .id;
+                                                },
+                                              ),
+                                              Icon(
+                                                _nodeIcon(node.type),
+                                                size: 16,
+                                                color:
+                                                    theme.colorScheme.primary,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
                                                     Text(
-                                                      _agendaNodeMetadata(node),
+                                                      node.title,
                                                       maxLines: 1,
                                                       overflow:
                                                           TextOverflow.ellipsis,
-                                                      style: theme
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: theme
-                                                                .colorScheme
-                                                                .onSurfaceVariant,
-                                                          ),
                                                     ),
-                                                ],
+                                                    if (_routineMarkerLabel(
+                                                          node,
+                                                        ) !=
+                                                        null) ...[
+                                                      const SizedBox(height: 4),
+                                                      _RoutineMarkerBadge(
+                                                        label:
+                                                            _routineMarkerLabel(
+                                                              node,
+                                                            )!,
+                                                      ),
+                                                    ],
+                                                    if (_agendaNodeMetadata(
+                                                      node,
+                                                    ).isNotEmpty)
+                                                      Text(
+                                                        _agendaNodeMetadata(
+                                                          node,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: theme
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: theme
+                                                                  .colorScheme
+                                                                  .onSurfaceVariant,
+                                                            ),
+                                                      ),
+                                                  ],
+                                                ),
                                               ),
-                                            ),
-                                            IconButton(
-                                              key: ValueKey(
-                                                'calendar-agenda-move-${node.id}',
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'calendar-agenda-done-${node.id}',
+                                                ),
+                                                tooltip: 'Mark done',
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                icon: const Icon(
+                                                  Icons.check_circle_outline,
+                                                  size: 18,
+                                                ),
+                                                onPressed: node.isDone
+                                                    ? null
+                                                    : () {
+                                                        unawaited(
+                                                          _markNodeDone(
+                                                            ref,
+                                                            node,
+                                                          ),
+                                                        );
+                                                      },
                                               ),
-                                              tooltip: 'Move to date',
-                                              visualDensity:
-                                                  VisualDensity.compact,
-                                              icon: const Icon(
-                                                Icons.drive_file_move_outline,
-                                                size: 18,
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'calendar-agenda-tomorrow-${node.id}',
+                                                ),
+                                                tooltip: 'Move tomorrow',
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                icon: const Icon(
+                                                  Icons.redo_rounded,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () {
+                                                  unawaited(
+                                                    _moveNodeToTomorrow(
+                                                      context,
+                                                      ref,
+                                                      node,
+                                                      today,
+                                                    ),
+                                                  );
+                                                },
                                               ),
-                                              onPressed: () {
-                                                ref
-                                                    .read(
-                                                      selectedAgendaNodeIdProvider
-                                                          .notifier,
-                                                    )
-                                                    .state = node
-                                                    .id;
-                                                _moveNodeToDate(
-                                                  context,
-                                                  ref,
-                                                  node,
-                                                );
-                                              },
-                                            ),
-                                            if (_isRoutineMarker(node))
-                                              _RoutineMarkerActionsMenu(
-                                                node: node,
-                                                today: today,
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'calendar-agenda-move-${node.id}',
+                                                ),
+                                                tooltip: 'Move to date',
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                icon: const Icon(
+                                                  Icons.drive_file_move_outline,
+                                                  size: 18,
+                                                ),
+                                                onPressed: () {
+                                                  ref
+                                                      .read(
+                                                        selectedAgendaNodeIdProvider
+                                                            .notifier,
+                                                      )
+                                                      .state = node
+                                                      .id;
+                                                  _moveNodeToDate(
+                                                    context,
+                                                    ref,
+                                                    node,
+                                                  );
+                                                },
                                               ),
-                                          ],
+                                              if (_isRoutineMarker(node))
+                                                _RoutineMarkerActionsMenu(
+                                                  node: node,
+                                                  today: today,
+                                                ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  );
-                                }),
+                                    );
+                                  }),
+                                ],
                                 if (dayNodes.length > 5)
                                   Text(
                                     '+${dayNodes.length - 5} more',
@@ -1808,7 +4087,7 @@ class _AgendaCalendarView extends ConsumerWidget {
       AgendaFilter.tasks => node.type == NodeType.task,
       AgendaFilter.events => calendarNodePayloadFromData(node.data) != null,
       AgendaFilter.habits => node.type == NodeType.habit,
-      AgendaFilter.routines => _isRoutineMarker(node),
+      AgendaFilter.routines => _isRoutineNode(node),
       AgendaFilter.done => node.isDone || node.status == NodeStatus.done,
     };
   }
@@ -1825,15 +4104,15 @@ class _AgendaCalendarView extends ConsumerWidget {
     if (timeBlock.isValid) parts.add(timeBlock.block!.rangeLabel);
     final payload = calendarNodePayloadFromData(node.data);
     if (payload != null) parts.add(payload.subtitle);
+    final snoozedTargetLabel = _routineSnoozedTargetLabel(node);
+    if (snoozedTargetLabel != null) parts.add(snoozedTargetLabel);
     if (node.priority != NodePriority.none) parts.add(node.priority.label);
     if (node.status != NodeStatus.open) parts.add(node.status.label);
     return parts.join(' · ');
   }
 
   String? _routineMarkerLabel(MindmapNode node) {
-    final automation = node.data['automation'];
-    if (automation is! Map) return null;
-    final state = automation['state'];
+    final state = _routineAutomationData(node)['state'];
     return switch (state) {
       'skipped' => 'Skipped routine',
       'snoozed' => 'Snoozed routine',
@@ -1843,6 +4122,12 @@ class _AgendaCalendarView extends ConsumerWidget {
 
   bool _isRoutineMarker(MindmapNode node) {
     return _routineMarkerLabel(node) != null;
+  }
+
+  bool _isRoutineNode(MindmapNode node) {
+    if (_isRoutineMarker(node) || node.type == NodeType.routine) return true;
+    final automation = _routineAutomationData(node);
+    return automation['routineId'] is String || node.tags.contains('routine');
   }
 
   String _agendaDayLabel(DateTime day) {
@@ -1865,6 +4150,36 @@ class _AgendaCalendarView extends ConsumerWidget {
         ? '1 scheduled'
         : '$scheduled scheduled';
     return '$itemLabel · $scheduledLabel';
+  }
+
+  Future<void> _markNodeDone(WidgetRef ref, MindmapNode node) async {
+    final updated = node.copyWith(
+      isDone: true,
+      status: NodeStatus.done,
+      progress: 1,
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(mindmapMutationControllerProvider).saveNode(updated);
+  }
+
+  Future<void> _moveNodeToTomorrow(
+    BuildContext context,
+    WidgetRef ref,
+    MindmapNode node,
+    DateTime today,
+  ) async {
+    final targetDay = today.dateOnly.add(const Duration(days: 1));
+    await ref
+        .read(mindmapMutationControllerProvider)
+        .rescheduleNode(node, day: targetDay);
+    if (!context.mounted) return;
+    _showRescheduleSnackBar(
+      context: context,
+      ref: ref,
+      node: node,
+      previousDay: node.day,
+      targetDay: targetDay,
+    );
   }
 
   Future<void> _moveNodeToDate(
@@ -1891,34 +4206,206 @@ class _AgendaCalendarView extends ConsumerWidget {
       targetDay: targetDay,
     );
   }
+
+  Map<AgendaFilter, int> _buildFilterCounts(
+    List<MindmapNode>? allNodes, {
+    required DateTime start,
+    required String query,
+    required Set<NodeType> typeFilters,
+    required bool doneOnly,
+    required CalendarNodeFilter advancedFilter,
+    required DateTime today,
+  }) {
+    if (allNodes == null || allNodes.isEmpty) return {};
+    final normalizedStart = start.dateOnly;
+    final end = normalizedStart.add(const Duration(days: 30));
+    final inRange = allNodes.where(
+      (node) =>
+          (!node.isArchived || _isRoutineMarker(node)) &&
+          !node.day.isBefore(normalizedStart) &&
+          node.day.isBefore(end) &&
+          _applyCalendarFilters(
+            [node],
+            query: query,
+            typeFilters: typeFilters,
+            doneOnly: doneOnly,
+            advancedFilter: advancedFilter,
+            today: today,
+          ).isNotEmpty,
+    );
+    return {
+      for (final filter in AgendaFilter.values)
+        filter: inRange.where((node) => _matchesFilter(node, filter)).length,
+    };
+  }
+}
+
+Map<String, Object?> _routineAutomationData(MindmapNode node) {
+  final automation = node.data['automation'];
+  if (automation is! Map) return const {};
+  final result = <String, Object?>{};
+  for (final entry in automation.entries) {
+    final key = entry.key;
+    if (key is String) result[key] = entry.value;
+  }
+  return result;
+}
+
+DateTime? _routineMarkerSnoozedToDate(MindmapNode node) {
+  final value = _routineAutomationData(node)['snoozedTo'];
+  if (value is! String || value.trim().isEmpty) return null;
+  return DateTime.tryParse(value.trim())?.dateOnly;
+}
+
+String? _routineSnoozedTargetLabel(MindmapNode node) {
+  final target = _routineMarkerSnoozedToDate(node);
+  if (target == null) return null;
+  return 'Snoozed to ${DateFormat('MMM d, y').format(target)}';
+}
+
+DateTime _clampDate(DateTime date, DateTime firstDate, DateTime lastDate) {
+  final normalized = date.dateOnly;
+  if (normalized.isBefore(firstDate)) return firstDate;
+  if (normalized.isAfter(lastDate)) return lastDate;
+  return normalized;
+}
+
+void _invalidateRoutinePlanDays(WidgetRef ref, Iterable<DateTime?> days) {
+  final seen = <String>{};
+  for (final day in days) {
+    if (day == null) continue;
+    final normalized = day.dateOnly;
+    if (seen.add(dayKey(normalized))) {
+      ref.invalidate(calendarRoutinePlanProvider(normalized));
+    }
+  }
+}
+
+void _invalidateRoutineMarkerPlanDays(
+  WidgetRef ref,
+  MindmapNode marker, {
+  DateTime? extraDay,
+  DateTime? previousSnoozedTo,
+}) {
+  _invalidateRoutinePlanDays(ref, [
+    marker.day,
+    _routineMarkerSnoozedToDate(marker),
+    previousSnoozedTo,
+    extraDay,
+  ]);
 }
 
 class _AgendaFilterBar extends ConsumerWidget {
-  const _AgendaFilterBar();
+  const _AgendaFilterBar({this.counts});
+
+  final Map<AgendaFilter, int>? counts;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(agendaFilterProvider);
+    final theme = Theme.of(context);
     return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: AgendaFilter.values.length,
-        separatorBuilder: (_, separatorIndex) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final filter = AgendaFilter.values[index];
-          return FilterChip(
-            key: ValueKey('agenda-filter-${filter.name}'),
-            tooltip: '${filter.label} (${index + 1})',
-            label: Text(filter.label),
-            selected: selected == filter,
-            onSelected: (_) {
-              ref.read(agendaFilterProvider.notifier).setFilter(filter);
-            },
-          );
-        },
+      height: 38,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: AgendaFilter.values.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                final filter = AgendaFilter.values[index];
+                final count = counts?[filter] ?? 0;
+                final isSelected = selected == filter;
+                final countLabel = count == 1 ? '1 item' : '$count items';
+                return Semantics(
+                  key: ValueKey('agenda-filter-${filter.name}'),
+                  button: true,
+                  selected: isSelected,
+                  label: 'Agenda filter: ${filter.label}, $countLabel',
+                  onTap: () {
+                    ref.read(agendaFilterProvider.notifier).setFilter(filter);
+                  },
+                  child: ExcludeSemantics(
+                    child: Material(
+                      color: isSelected
+                          ? theme.colorScheme.primary.withValues(alpha: 0.12)
+                          : theme.colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(20),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () {
+                          ref
+                              .read(agendaFilterProvider.notifier)
+                              .setFilter(filter);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 7,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                filter.label,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: isSelected
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              if (count > 0) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? theme.colorScheme.primary.withValues(
+                                            alpha: 0.2,
+                                          )
+                                        : theme
+                                              .colorScheme
+                                              .surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    _compactCount(count),
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 10,
+                                      color: isSelected
+                                          ? theme.colorScheme.primary
+                                          : theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String _compactCount(int count) {
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}k';
+    return '$count';
   }
 }
 
@@ -1927,16 +4414,10 @@ class _AgendaLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return const SingleChildScrollView(
       key: ValueKey('calendar-agenda-loading'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 12),
-          Text('Loading agenda...'),
-        ],
-      ),
+      padding: EdgeInsets.only(top: 8),
+      child: SkeletonAgendaList(),
     );
   }
 }
@@ -1948,30 +4429,7 @@ class _AgendaErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      key: const ValueKey('calendar-agenda-error'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.cloud_off_outlined,
-            size: 44,
-            color: theme.colorScheme.error,
-          ),
-          const SizedBox(height: 12),
-          Text('Unable to load agenda', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            '$error',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
+    return AnimatedErrorState(error: error);
   }
 }
 
@@ -2018,10 +4476,8 @@ class _RoutineMarkerActionsMenuState
     extends ConsumerState<_RoutineMarkerActionsMenu> {
   @override
   Widget build(BuildContext context) {
-    final automation = widget.node.data['automation'];
-    if (automation is! Map) return const SizedBox.shrink();
-    final state = automation['state'] as String?;
-    final isSnoozed = state == 'snoozed';
+    final automation = _routineAutomationData(widget.node);
+    final isSnoozed = automation['state'] == 'snoozed';
 
     return PopupMenuButton<_MarkerAction>(
       key: ValueKey('calendar-routine-marker-actions-${widget.node.id}'),
@@ -2062,7 +4518,7 @@ class _RoutineMarkerActionsMenuState
     final savedJson = widget.node.toJson();
     await repository.deleteNode(widget.node.id);
     invalidateMindmapState(ref, day: widget.node.day);
-    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
+    _invalidateRoutineMarkerPlanDays(ref, widget.node);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2083,41 +4539,50 @@ class _RoutineMarkerActionsMenuState
     final marker = MindmapNode.fromJson(savedJson);
     await repository.saveNode(marker);
     invalidateMindmapState(ref, day: marker.day);
-    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
+    _invalidateRoutineMarkerPlanDays(ref, marker);
   }
 
   Future<void> _resnoozeMarker() async {
     final originalJson = widget.node.toJson();
-    final automation = widget.node.data['automation'];
-    if (automation is! Map) return;
-    final currentSnoozedTo = automation['snoozedTo'] as String?;
-    final initialDate = currentSnoozedTo != null
-        ? DateTime.parse(currentSnoozedTo)
-        : widget.today.add(const Duration(days: 1));
+    final oldSnoozedTo = _routineMarkerSnoozedToDate(widget.node);
+    final firstDate = widget.today.dateOnly;
+    final lastDate = firstDate.add(const Duration(days: 365));
+    final initialDate = _clampDate(
+      oldSnoozedTo ?? firstDate.add(const Duration(days: 1)),
+      firstDate,
+      lastDate,
+    );
 
     final newDate = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: widget.today,
-      lastDate: widget.today.add(const Duration(days: 365)),
+      firstDate: firstDate,
+      lastDate: lastDate,
     );
     if (newDate == null || !mounted) return;
 
-    final newDayKey = dayKey(newDate.dateOnly);
+    final newDay = newDate.dateOnly;
+    final newDayKey = dayKey(newDay);
     final updatedData = <String, Object?>{
       ...widget.node.data,
       'automation': <String, Object?>{
-        ...Map<String, Object?>.from(widget.node.data['automation'] as Map),
+        ..._routineAutomationData(widget.node),
         'snoozedTo': newDayKey,
       },
     };
 
     final repository = ref.read(mindmapRepositoryProvider);
-    await repository.saveNode(
-      widget.node.copyWith(data: updatedData, updatedAt: DateTime.now()),
+    final updatedMarker = widget.node.copyWith(
+      data: updatedData,
+      updatedAt: DateTime.now(),
     );
+    await repository.saveNode(updatedMarker);
     invalidateMindmapState(ref, day: widget.node.day);
-    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
+    _invalidateRoutineMarkerPlanDays(
+      ref,
+      updatedMarker,
+      previousSnoozedTo: oldSnoozedTo,
+    );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2128,28 +4593,34 @@ class _RoutineMarkerActionsMenuState
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
-            unawaited(_undoResnooze(originalJson));
+            unawaited(_undoResnooze(originalJson, newDay));
           },
         ),
       ),
     );
   }
 
-  Future<void> _undoResnooze(Map<String, Object?> originalJson) async {
+  Future<void> _undoResnooze(
+    Map<String, Object?> originalJson,
+    DateTime currentSnoozedTo,
+  ) async {
     final repository = ref.read(mindmapRepositoryProvider);
     final marker = MindmapNode.fromJson(originalJson);
     await repository.saveNode(marker);
     invalidateMindmapState(ref, day: marker.day);
-    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
+    _invalidateRoutineMarkerPlanDays(
+      ref,
+      marker,
+      previousSnoozedTo: currentSnoozedTo,
+    );
   }
 
   Future<void> _applyFromMarker() async {
     final savedJson = widget.node.toJson();
     final repository = ref.read(mindmapRepositoryProvider);
-    final automation = widget.node.data['automation'];
-    if (automation is! Map) return;
-    final routineId = automation['routineId'] as String?;
-    if (routineId == null) return;
+    final automation = _routineAutomationData(widget.node);
+    final routineId = automation['routineId'];
+    if (routineId is! String) return;
 
     // Find the routine definition
     final allRoutines = await loadRecurringRoutines(repository: repository);
@@ -2179,8 +4650,7 @@ class _RoutineMarkerActionsMenuState
     );
 
     invalidateMindmapState(ref, day: widget.node.day, extraDay: widget.today);
-    ref.invalidate(calendarRoutinePlanProvider(widget.node.day.dateOnly));
-    ref.invalidate(calendarRoutinePlanProvider(widget.today.dateOnly));
+    _invalidateRoutineMarkerPlanDays(ref, widget.node, extraDay: widget.today);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2212,8 +4682,7 @@ class _RoutineMarkerActionsMenuState
     await repository.saveNode(marker);
 
     invalidateMindmapState(ref, day: marker.day, extraDay: widget.today);
-    ref.invalidate(calendarRoutinePlanProvider(marker.day.dateOnly));
-    ref.invalidate(calendarRoutinePlanProvider(widget.today.dateOnly));
+    _invalidateRoutineMarkerPlanDays(ref, marker, extraDay: widget.today);
   }
 }
 
@@ -2224,17 +4693,19 @@ class _AgendaEmptyState extends StatelessWidget {
     required this.filter,
     required this.day,
     required this.searchQuery,
+    required this.hasCalendarFilters,
     required this.onAddNode,
     required this.onClearSearch,
-    required this.onShowAllFilter,
+    required this.onResetFilters,
   });
 
   final AgendaFilter filter;
   final DateTime day;
   final String searchQuery;
+  final bool hasCalendarFilters;
   final Future<void> Function() onAddNode;
   final VoidCallback onClearSearch;
-  final VoidCallback onShowAllFilter;
+  final VoidCallback onResetFilters;
 
   @override
   Widget build(BuildContext context) {
@@ -2248,32 +4719,72 @@ class _AgendaEmptyState extends StatelessWidget {
             AgendaFilter.events => 'No event items',
             AgendaFilter.habits => 'No habit items',
             AgendaFilter.routines => 'No routine items',
-            AgendaFilter.done => 'No done items',
+            AgendaFilter.done => 'No completed items',
+          };
+    final (icon, subtitle) = hasSearch
+        ? (Icons.search_off, 'Try another search or clear filters.')
+        : switch (filter) {
+            AgendaFilter.all => (
+              Icons.event_note_outlined,
+              'Create your first node to start building your day.',
+            ),
+            AgendaFilter.tasks => (
+              Icons.check_circle_outline,
+              'No tasks yet. Add one from any day.',
+            ),
+            AgendaFilter.events => (
+              Icons.event_outlined,
+              'No events scheduled.',
+            ),
+            AgendaFilter.habits => (
+              Icons.repeat_outlined,
+              'No habits tracked yet.',
+            ),
+            AgendaFilter.routines => (
+              Icons.auto_awesome_outlined,
+              'No routines configured.',
+            ),
+            AgendaFilter.done => (Icons.task_alt, 'Nothing completed yet.'),
           };
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tight = constraints.maxHeight < 140;
-        return Center(
+        final tight = constraints.maxHeight < 300;
+        return Align(
           key: const ValueKey('calendar-agenda-empty'),
+          alignment: Alignment.topCenter,
           child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 12, bottom: 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (!tight) ...[
-                  Icon(
-                    Icons.event_note_outlined,
-                    size: 40,
-                    color: theme.colorScheme.outline,
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer.withValues(
+                        alpha: 0.3,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: 26,
+                      color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
                 ],
-                Text(label, style: theme.textTheme.titleMedium),
+                Text(
+                  label,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 if (!tight) ...[
                   const SizedBox(height: 4),
                   Text(
-                    hasSearch
-                        ? 'Try another search or clear the search field.'
-                        : 'Create nodes on a day to build your agenda.',
+                    subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -2294,14 +4805,12 @@ class _AgendaEmptyState extends StatelessWidget {
                         icon: const Icon(Icons.search_off),
                         label: const Text('Clear search'),
                       ),
-                    if (filter != AgendaFilter.all)
+                    if (filter != AgendaFilter.all || hasCalendarFilters)
                       FilledButton.tonalIcon(
-                        key: const ValueKey(
-                          'calendar-agenda-empty-show-all',
-                        ),
-                        onPressed: onShowAllFilter,
+                        key: const ValueKey('calendar-agenda-empty-show-all'),
+                        onPressed: onResetFilters,
                         icon: const Icon(Icons.filter_alt_off),
-                        label: const Text('Show all'),
+                        label: const Text('Reset filters'),
                       ),
                     FilledButton.tonalIcon(
                       key: const ValueKey('calendar-agenda-empty-add-node'),
@@ -2349,58 +4858,81 @@ class _MonthHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final title = _titleForMode();
-    return Row(
-      children: [
-        IconButton(
-          tooltip: 'Previous ${viewMode.label.toLowerCase()}',
-          icon: const Icon(Icons.chevron_left),
-          onPressed: onPrevious,
-        ),
-        Expanded(
-          child: Tooltip(
-            message: 'Pick visible date',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: onJumpToDate,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Previous ${viewMode.label.toLowerCase()}',
+              icon: const Icon(Icons.chevron_left),
+              onPressed: onPrevious,
+            ),
+            Expanded(
+              child: Tooltip(
+                message: 'Pick visible date',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: onJumpToDate,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          viewMode.label.toUpperCase(),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            letterSpacing: 1.8,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 2),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.headlineMedium?.copyWith(
+                                  color: theme.colorScheme.onSurface,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.expand_more,
+                              size: 18,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      Icons.expand_more,
-                      size: 18,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
+            IconButton(
+              tooltip: 'Next ${viewMode.label.toLowerCase()}',
+              icon: const Icon(Icons.chevron_right),
+              onPressed: onNext,
+            ),
+            IconButton(
+              tooltip: 'Jump to date',
+              icon: const Icon(Icons.calendar_today_outlined, size: 20),
+              onPressed: onJumpToDate,
+            ),
+          ],
         ),
-        IconButton(
-          tooltip: 'Next ${viewMode.label.toLowerCase()}',
-          icon: const Icon(Icons.chevron_right),
-          onPressed: onNext,
-        ),
-        IconButton(
-          tooltip: 'Jump to date',
-          icon: const Icon(Icons.calendar_today_outlined, size: 20),
-          onPressed: onJumpToDate,
-        ),
-      ],
+      ),
     );
   }
 
@@ -2447,7 +4979,7 @@ class _WeekdayHeader extends StatelessWidget {
   }
 }
 
-class _MonthGrid extends StatelessWidget {
+class _MonthGrid extends ConsumerWidget {
   const _MonthGrid({
     required this.visibleMonth,
     required this.today,
@@ -2461,7 +4993,8 @@ class _MonthGrid extends StatelessWidget {
   final ValueChanged<DateTime> onDayPreview;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    _calendarDropRects.clear();
     final days = visibleDaysForMonth(visibleMonth);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2475,31 +5008,77 @@ class _MonthGrid extends StatelessWidget {
             (constraints.maxHeight - (rowCount - 1) * spacing) / rowCount;
         final aspectRatio = cellHeight <= 0 ? 1.2 : cellWidth / cellHeight;
 
-        return GridView.builder(
-          key: const ValueKey('calendar-month-grid'),
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: spacing,
-            mainAxisSpacing: spacing,
-            childAspectRatio: aspectRatio,
-          ),
-          itemCount: days.length,
-          itemBuilder: (context, index) {
-            final day = days[index];
-            final rowIndex = index ~/ crossAxisCount;
-            final colIndex = index % crossAxisCount;
-            return _DayCell(
-              day: day,
-              isInVisibleMonth: day.month == visibleMonth.month,
-              isToday: day.isSameDay(today),
-              focusedDay: focusedDay,
-              rowIndex: rowIndex,
-              colIndex: colIndex,
-              totalRows: rowCount,
-              onPreview: onDayPreview,
+        return Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (event) {
+            for (final entry in _calendarDragSourceRects.entries) {
+              if (entry.value.contains(event.position)) {
+                _activeCalendarDragNode = entry.key;
+                break;
+              }
+            }
+          },
+
+          onPointerUp: (event) async {
+            final node = _activeCalendarDragNode;
+            _activeCalendarDragNode = null;
+            if (node == null) return;
+            MapEntry<String, Rect>? bestEntry;
+            var bestDistance = double.infinity;
+            for (final entry in _calendarDropRects.entries) {
+              if (!entry.value.contains(event.position)) continue;
+              final distance = (entry.value.center - event.position).distance;
+              if (distance < bestDistance) {
+                bestEntry = entry;
+                bestDistance = distance;
+              }
+            }
+            final targetDay = bestEntry == null
+                ? null
+                : DateTime.tryParse(bestEntry.key);
+            if (targetDay == null || node.day.dateOnly.isSameDay(targetDay)) {
+              return;
+            }
+            await ref
+                .read(mindmapMutationControllerProvider)
+                .rescheduleNode(node, day: targetDay);
+            if (!context.mounted) return;
+            _showRescheduleSnackBar(
+              context: context,
+              ref: ref,
+              node: node,
+              previousDay: node.day,
+              targetDay: targetDay,
             );
           },
+          child: GridView.builder(
+            key: const ValueKey('calendar-month-grid'),
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              crossAxisSpacing: spacing,
+              mainAxisSpacing: spacing,
+              childAspectRatio: aspectRatio,
+            ),
+            itemCount: days.length,
+            itemBuilder: (context, index) {
+              final day = days[index];
+              final rowIndex = index ~/ crossAxisCount;
+              final colIndex = index % crossAxisCount;
+              return _DayCell(
+                day: day,
+                isInVisibleMonth:
+                    day.year == visibleMonth.year &&
+                    day.month == visibleMonth.month,
+                isToday: day.isSameDay(today),
+                focusedDay: focusedDay,
+                rowIndex: rowIndex,
+                colIndex: colIndex,
+                totalRows: rowCount,
+                onPreview: onDayPreview,
+              );
+            },
+          ),
         );
       },
     );
@@ -2790,16 +5369,25 @@ class _DayCellState extends ConsumerState<_DayCell> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isFocused = widget.day.isSameDay(widget.focusedDay);
+    final restingBorderColor = widget.isInVisibleMonth
+        ? theme.colorScheme.outline.withValues(alpha: 0.86)
+        : theme.colorScheme.outlineVariant.withValues(alpha: 0.26);
     final borderColor = widget.isToday
         ? theme.colorScheme.primary
         : (isFocused
               ? theme.colorScheme.primary.withValues(alpha: 0.6)
-              : Theme.of(context).dividerColor);
+              : restingBorderColor);
 
     final searchQuery = ref
         .watch(calendarSearchQueryProvider)
         .trim()
         .toLowerCase();
+    final typeFilters = ref.watch(calendarTypeFiltersProvider);
+    final doneOnly = ref.watch(calendarDoneFilterProvider);
+    final advancedFilter = ref.watch(calendarAdvancedFilterProvider);
+    final densityMode = ref.watch(calendarDensityModeProvider);
+    final selectedNodeId = ref.watch(selectedAgendaNodeIdProvider);
+    final heatmapMode = ref.watch(calendarHeatmapModeProvider);
     final nodesAsync = ref.watch(nodesForDayProvider(widget.day));
 
     final titleMap = ref.watch(workspaceTitleProvider);
@@ -2809,147 +5397,242 @@ class _DayCellState extends ConsumerState<_DayCell> {
 
     // Filter nodes based on query
     final allNodes = nodesAsync.valueOrNull ?? [];
-    final filteredNodes = searchQuery.isEmpty
-        ? allNodes
-        : allNodes.where((n) => _nodeMatches(n, searchQuery)).toList();
+    final filteredNodes = _applyCalendarFilters(
+      allNodes,
+      query: searchQuery,
+      typeFilters: typeFilters,
+      doneOnly: doneOnly,
+      advancedFilter: advancedFilter,
+      today: DateTime.now(),
+    );
     final hasNodes = filteredNodes.isNotEmpty;
 
     final matchesCustomTitle =
         hasCustomTitle && customTitle.toLowerCase().contains(searchQuery);
     final matchesQuery = searchQuery.isEmpty || matchesCustomTitle || hasNodes;
+    final calendarSummary = buildCalendarDaySummary(widget.day, allNodes);
+    final heatmapScore = scoreCalendarDay(calendarSummary, heatmapMode);
+    final densityAlpha = (allNodes.length / 10).clamp(0.0, 1.0) * 0.12;
+    final heatmapAlpha = heatmapScore.value * 0.16;
+    final baseCellColor = widget.isInVisibleMonth
+        ? Color.alphaBlend(
+            theme.colorScheme.primary.withValues(
+              alpha: math.max(densityAlpha, heatmapAlpha) * 0.7,
+            ),
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.18),
+          )
+        : Color.alphaBlend(
+            theme.colorScheme.surface.withValues(alpha: 0.42),
+            theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.38),
+          );
+    final hoveredCellColor = widget.isInVisibleMonth
+        ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.82)
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.32);
+    final todayCellColor = Color.alphaBlend(
+      theme.colorScheme.primary.withValues(alpha: _isHovered ? 0.20 : 0.13),
+      theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.40),
+    );
+    const todayBadgeForeground = Color(0xFF071006);
 
     final container = AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutBack, // liquidy transition
+      curve: Curves.easeOutCubic,
       transformAlignment: Alignment.center,
-      transform: Matrix4.translationValues(0.0, _isHovered ? -4.0 : 0.0, 0.0)
-        ..multiply(
-          Matrix4.diagonal3Values(
-            1.0 + (_isHovered ? 0.03 : 0.0),
-            1.0 + (_isHovered ? 0.03 : 0.0),
-            1.0,
+      transform: Matrix4.identity(),
+      decoration: ShapeDecoration(
+        color: widget.isToday
+            ? todayCellColor
+            : (_isHovered ? hoveredCellColor : baseCellColor),
+        shape: DoodleShapeBorder(
+          radius: 12,
+          wobble: widget.isToday || isFocused ? 1.8 : 1.2,
+          side: BorderSide(
+            color: _isHovered
+                ? theme.colorScheme.primary.withValues(
+                    alpha: widget.isInVisibleMonth ? 0.82 : 0.38,
+                  )
+                : (isFocused ? theme.colorScheme.primary : borderColor),
+            width: widget.isToday || _isHovered || isFocused ? 2.4 : 1.4,
           ),
         ),
-      decoration: BoxDecoration(
-        color: widget.isToday
-            ? theme.colorScheme.primary.withValues(
-                alpha: _isHovered ? 0.15 : 0.08,
-              )
-            : (_isHovered
-                  ? theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.8,
-                    )
-                  : theme.cardTheme.color),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _isHovered
-              ? theme.colorScheme.primary.withValues(alpha: 0.8)
-              : (isFocused ? theme.colorScheme.primary : borderColor),
-          width: widget.isToday || _isHovered || isFocused ? 2.0 : 1.0,
-        ),
-        boxShadow: _isHovered
+        shadows: widget.isToday
             ? [
                 BoxShadow(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 8),
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  blurRadius: 12,
+                  spreadRadius: 1,
                 ),
               ]
-            : [
-                BoxShadow(
-                  color: theme.colorScheme.shadow.withValues(alpha: 0.0),
-                  blurRadius: 15,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+            : null,
       ),
       child: Padding(
         padding: const EdgeInsets.all(7),
-        child: SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${widget.day.day}',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: widget.isInVisibleMonth
-                          ? (_isHovered ? theme.colorScheme.primary : null)
-                          : theme.textTheme.bodySmall?.color,
-                      fontWeight: widget.isToday || isFocused
-                          ? FontWeight.w800
-                          : FontWeight.w600,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final summaryHeight = math.max(20.0, constraints.maxHeight - 34.0);
+            final isTinyCell = constraints.maxWidth < 62;
+            final visibleNodes = _applyCalendarFilters(
+              allNodes,
+              query: searchQuery,
+              typeFilters: typeFilters,
+              doneOnly: doneOnly,
+              advancedFilter: advancedFilter,
+              today: DateTime.now(),
+            );
+
+            return ClipRect(
+              child: SingleChildScrollView(
+                physics: const NeverScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            '${widget.day.day}',
+                            key: ValueKey(
+                              'calendar-day-number-${dayKey(widget.day)}',
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: widget.isToday
+                                  ? theme.colorScheme.primary
+                                  : widget.isInVisibleMonth
+                                  ? (_isHovered
+                                        ? theme.colorScheme.primary
+                                        : null)
+                                  : theme.textTheme.bodySmall?.color,
+                              fontWeight: widget.isToday || isFocused
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (!isTinyCell && _isHovered)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () async {
+                              final draft = await showAddNodeDialog(context);
+                              if (draft == null || !context.mounted) return;
+                              final node = MindmapNode.create(
+                                id: const Uuid().v4(),
+                                type: draft.type,
+                                title: draft.title,
+                                body: draft.body,
+                                day: widget.day.dateOnly,
+                                status: draft.status,
+                                priority: draft.priority,
+                                project: draft.project,
+                                area: draft.area,
+                                tags: draft.tags,
+                                dueDate: draft.dueDate,
+                                progress: draft.progress,
+                                isPinned: draft.isPinned,
+                                isArchived: draft.isArchived,
+                                checklist: draft.checklist,
+                                relatedNodeIds: draft.relatedNodeIds,
+                                data: draft.data,
+                                now: DateTime.now(),
+                              );
+                              await ref
+                                  .read(mindmapMutationControllerProvider)
+                                  .saveNode(node);
+                            },
+                            child: Icon(
+                              Icons.add_circle_outline_rounded,
+                              size: 15,
+                              color: theme.colorScheme.primary,
+                            ),
+                          )
+                        else if (!isTinyCell && widget.isToday)
+                          Container(
+                            key: ValueKey(
+                              'calendar-today-badge-${dayKey(widget.day)}',
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: ShapeDecoration(
+                              color: theme.colorScheme.primary,
+                              shape: DoodleShapeBorder(
+                                radius: 999,
+                                wobble: 0.9,
+                                side: BorderSide(
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              'Today',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: todayBadgeForeground,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          )
+                        else if (!isTinyCell && hasCustomTitle)
+                          Icon(
+                            Icons.turned_in,
+                            size: 12,
+                            color: theme.colorScheme.secondary,
+                          ),
+                      ],
                     ),
-                  ),
-                  if (hasCustomTitle)
-                    Icon(
-                      Icons.turned_in,
-                      size: 12,
-                      color: theme.colorScheme.secondary,
-                    ),
-                ],
-              ),
-              if (isFocused) ...[
-                const SizedBox(height: 2),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    key: ValueKey('calendar-focused-${dayKey(widget.day)}'),
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: theme.colorScheme.primary,
-                        width: 2,
+                    if (isFocused) ...[
+                      const SizedBox(height: 2),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          key: ValueKey(
+                            'calendar-focused-${dayKey(widget.day)}',
+                          ),
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.12,
+                            ),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: theme.colorScheme.primary,
+                              width: 2,
+                            ),
+                          ),
+                        ),
                       ),
+                    ],
+                    if (hasCustomTitle) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        customTitle,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.secondary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    _CellSummary(
+                      maxHeight: summaryHeight,
+                      summary: DayNodeSummary.fromNodes(
+                        widget.day,
+                        visibleNodes,
+                      ),
+                      nodes: visibleNodes,
+                      densityMode: densityMode,
+                      selectedNodeId: selectedNodeId,
                     ),
-                  ),
-                ),
-              ],
-              if (hasCustomTitle) ...[
-                const SizedBox(height: 2),
-                Text(
-                  customTitle,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.secondary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              const SizedBox(height: 4),
-              nodesAsync.when(
-                data: (nodes) => _CellSummary(
-                  summary: DayNodeSummary.fromNodes(
-                    widget.day,
-                    searchQuery.isEmpty
-                        ? nodes
-                        : nodes
-                              .where((n) => _nodeMatches(n, searchQuery))
-                              .toList(),
-                  ),
-                  nodes: searchQuery.isEmpty
-                      ? nodes
-                      : nodes
-                            .where((n) => _nodeMatches(n, searchQuery))
-                            .toList(),
-                ),
-                loading: () => const SizedBox.shrink(),
-                error: (error, _) => Icon(
-                  Icons.error_outline,
-                  size: 14,
-                  color: theme.colorScheme.error,
+                  ],
                 ),
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -2966,6 +5649,7 @@ class _DayCellState extends ConsumerState<_DayCell> {
       customTitle: customTitle,
       nodeCount: filteredNodes.length,
     );
+    final heatmapSemantics = '${heatmapMode.name}: ${heatmapScore.label}';
 
     Widget cellWidget = container;
     if (searchQuery.isNotEmpty && !matchesQuery) {
@@ -2976,11 +5660,12 @@ class _DayCellState extends ConsumerState<_DayCell> {
     }
 
     final draggableCell = DragTarget<MindmapNode>(
-      key: ValueKey('calendar-drop-${dayKey(widget.day)}'),
+      hitTestBehavior: HitTestBehavior.opaque,
       onWillAcceptWithDetails: (details) =>
           !details.data.day.dateOnly.isSameDay(widget.day),
       onAcceptWithDetails: (details) async {
         _hideOverlay();
+        _activeCalendarDragNode = null;
         final node = details.data;
         await ref
             .read(mindmapMutationControllerProvider)
@@ -2995,6 +5680,14 @@ class _DayCellState extends ConsumerState<_DayCell> {
         );
       },
       builder: (context, candidateData, rejectedData) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!context.mounted) return;
+          final renderObject = context.findRenderObject();
+          final renderBox = renderObject is RenderBox ? renderObject : null;
+          if (renderBox == null || !renderBox.attached) return;
+          final offset = renderBox.localToGlobal(Offset.zero);
+          _calendarDropRects[dayKey(widget.day)] = offset & renderBox.size;
+        });
         final hasCandidate = candidateData.isNotEmpty;
         final hasRejected = rejectedData.isNotEmpty;
         return AnimatedContainer(
@@ -3015,17 +5708,20 @@ class _DayCellState extends ConsumerState<_DayCell> {
                         ),
                 )
               : null,
-          child: MouseRegion(
-            onEnter: (_) => _onHoverChange(true, isUpperHalf, hasContent),
-            onExit: (_) => _onHoverChange(false, isUpperHalf, hasContent),
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              key: ValueKey('calendar-cell-${dayKey(widget.day)}'),
-              onTap: () {
-                _hideOverlay();
-                widget.onPreview(widget.day);
-              },
-              child: cellWidget,
+          child: SizedBox.expand(
+            key: ValueKey('calendar-drop-${dayKey(widget.day)}'),
+            child: MouseRegion(
+              onEnter: (_) => _onHoverChange(true, isUpperHalf, hasContent),
+              onExit: (_) => _onHoverChange(false, isUpperHalf, hasContent),
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                key: ValueKey('calendar-cell-${dayKey(widget.day)}'),
+                onTap: () {
+                  _hideOverlay();
+                  widget.onPreview(widget.day);
+                },
+                child: cellWidget,
+              ),
             ),
           ),
         );
@@ -3033,7 +5729,7 @@ class _DayCellState extends ConsumerState<_DayCell> {
     );
 
     return Semantics(
-      label: semanticsLabel,
+      label: '$semanticsLabel, $heatmapSemantics',
       button: true,
       selected: isFocused,
       onTap: () {
@@ -3046,137 +5742,205 @@ class _DayCellState extends ConsumerState<_DayCell> {
 }
 
 class _CellSummary extends StatelessWidget {
-  const _CellSummary({required this.summary, required this.nodes});
+  const _CellSummary({
+    required this.maxHeight,
+    required this.summary,
+    required this.nodes,
+    required this.densityMode,
+    required this.selectedNodeId,
+  });
 
+  final double maxHeight;
   final DayNodeSummary summary;
   final List<MindmapNode> nodes;
+  final CalendarDensityMode densityMode;
+  final String? selectedNodeId;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (!summary.hasNodes) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _countLabel(summary.totalCount),
-          style: theme.textTheme.labelSmall,
-        ),
-        const SizedBox(height: 4),
-        ...nodes.take(3).map((node) => _DraggableCalendarNode(node: node)),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 3,
-          runSpacing: 3,
-          children: [
-            for (final type in NodeType.values)
-              if (summary.countFor(type) > 0)
-                _DensityDot(color: _nodeColor(type)),
+    final taskCount = summary.countFor(NodeType.task);
+    final doneRatio = taskCount > 0 ? summary.doneCount / taskCount : 0.0;
+    final isCompact = maxHeight < 50;
+    final visibleCount = switch (densityMode) {
+      CalendarDensityMode.compact => isCompact ? 3 : 8,
+      CalendarDensityMode.comfortable => isCompact ? 2 : 4,
+      CalendarDensityMode.detailed => isCompact ? 1 : 3,
+    };
+    final hiddenCount = math.max(0, nodes.length - visibleCount);
+    final showNodes = nodes.take(visibleCount).toList();
+
+    return ClipRect(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isCompact && taskCount > 0) ...[
+            const SizedBox(height: 3),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: doneRatio.clamp(0.0, 1.0),
+                minHeight: 3,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  doneRatio >= 1.0
+                      ? theme.colorScheme.primary
+                      : _nodeColor(NodeType.task),
+                ),
+              ),
+            ),
           ],
-        ),
-        if (summary.overdueCount > 0 ||
-            summary.highPriorityCount > 0 ||
-            summary.doneCount > 0) ...[
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: [
-              if (summary.overdueCount > 0)
-                _SummaryChip(
-                  label: '${summary.overdueCount} overdue',
-                  color: theme.colorScheme.error,
-                ),
-              if (summary.highPriorityCount > 0)
-                _SummaryChip(
-                  label: '${summary.highPriorityCount} high',
-                  color: theme.colorScheme.tertiary,
-                ),
-              if (summary.doneCount > 0)
-                _SummaryChip(
-                  label: '${summary.doneCount}/${summary.totalCount} done',
-                  color: theme.colorScheme.primary,
-                ),
-            ],
-          ),
+          if (showNodes.isEmpty)
+            Text(
+              _countLabel(summary.totalCount),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            )
+          else
+            Wrap(
+              spacing: 3,
+              runSpacing: 2,
+              children: [
+                for (final node in showNodes)
+                  _DraggableCalendarNode(
+                    node: node,
+                    showTitle: densityMode == CalendarDensityMode.detailed,
+                    isSelected: node.id == selectedNodeId,
+                  ),
+                if (hiddenCount > 0)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 3,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '+$hiddenCount',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
         ],
-      ],
+      ),
     );
   }
 }
 
-class _DraggableCalendarNode extends StatelessWidget {
-  const _DraggableCalendarNode({required this.node});
+MindmapNode? _activeCalendarDragNode;
+
+final Map<String, Rect> _calendarDropRects = <String, Rect>{};
+final Map<MindmapNode, Rect> _calendarDragSourceRects = <MindmapNode, Rect>{};
+
+class _DraggableCalendarNode extends ConsumerWidget {
+  const _DraggableCalendarNode({
+    required this.node,
+    this.showTitle = false,
+    this.isSelected = false,
+  });
 
   final MindmapNode node;
+  final bool showTitle;
+  final bool isSelected;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  Widget build(BuildContext context, WidgetRef ref) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+      final renderObject = context.findRenderObject();
+      final renderBox = renderObject is RenderBox ? renderObject : null;
+      if (renderBox == null || !renderBox.attached) return;
+      _calendarDragSourceRects[node] =
+          renderBox.localToGlobal(Offset.zero) & renderBox.size;
+    });
+    final accent = _nodeColor(node.type);
+    final muted = node.isDone;
     final title = node.title.trim().isEmpty
         ? 'Untitled ${node.type.name}'
         : node.title.trim();
-    final chip = Container(
-      key: ValueKey('calendar-draggable-node-${node.id}'),
+    Widget buildChip({Key? key}) => Container(
+      key: key,
       margin: const EdgeInsets.only(bottom: 3),
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: _nodeColor(node.type).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_nodeIcon(node.type), size: 11, color: _nodeColor(node.type)),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall,
-            ),
-          ),
-        ],
-      ),
-    );
-
-    return Tooltip(
-      message: 'Drag to move date',
-      child: Semantics(
-        label: 'Drag ${node.title} to another date',
-        button: true,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.grab,
-          child: LongPressDraggable<MindmapNode>(
-            data: node,
-            feedback: Material(
-              color: Colors.transparent,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: chip,
-              ),
-            ),
-            childWhenDragging: Opacity(opacity: 0.35, child: chip),
-            child: chip,
+        color: isSelected
+            ? accent.withValues(alpha: 0.26)
+            : muted
+            ? accent.withValues(alpha: 0.06)
+            : accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: accent.withValues(
+            alpha: isSelected
+                ? 0.78
+                : muted
+                ? 0.08
+                : 0.28,
           ),
         ),
       ),
+      child: showTitle
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _nodeIcon(node.type),
+                  size: 11,
+                  color: muted ? accent.withValues(alpha: 0.45) : accent,
+                ),
+                const SizedBox(width: 4),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 72),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Icon(
+              _nodeIcon(node.type),
+              size: 11,
+              color: muted ? accent.withValues(alpha: 0.45) : accent,
+            ),
     );
-  }
-}
 
-class _DensityDot extends StatelessWidget {
-  const _DensityDot({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: const SizedBox.square(dimension: 6),
+    return MouseRegion(
+      key: ValueKey('calendar-draggable-node-${node.id}'),
+      cursor: SystemMouseCursors.grab,
+      child: LongPressDraggable<MindmapNode>(
+        data: node,
+        dragAnchorStrategy: pointerDragAnchorStrategy,
+        feedback: Material(
+          color: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: buildChip(),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.35, child: buildChip()),
+        child: buildChip(),
+      ),
     );
   }
 }
@@ -3222,6 +5986,16 @@ Color _nodeColor(NodeType type) => switch (type) {
   NodeType.habit => NodeColors.habit,
   NodeType.goal => NodeColors.goal,
   NodeType.link => NodeColors.link,
+  NodeType.event => NodeColors.event,
+  NodeType.decision => NodeColors.decision,
+  NodeType.resource => NodeColors.resource,
+  NodeType.idea => NodeColors.idea,
+  NodeType.question => NodeColors.question,
+  NodeType.contact => NodeColors.contact,
+  NodeType.metric => NodeColors.metric,
+  NodeType.expense => NodeColors.expense,
+  NodeType.bookmark => NodeColors.bookmark,
+  NodeType.routine => NodeColors.routine,
   NodeType.empty => Colors.grey,
 };
 
@@ -3234,8 +6008,165 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.habit => Icons.loop_outlined,
   NodeType.goal => Icons.flag_outlined,
   NodeType.link => Icons.link_outlined,
+  NodeType.event => Icons.event_outlined,
+  NodeType.decision => Icons.rule_outlined,
+  NodeType.resource => Icons.inventory_2_outlined,
+  NodeType.idea => Icons.lightbulb_outline,
+  NodeType.question => Icons.help_outline,
+  NodeType.contact => Icons.person_outline,
+  NodeType.metric => Icons.query_stats_outlined,
+  NodeType.expense => Icons.payments_outlined,
+  NodeType.bookmark => Icons.bookmark_border,
+  NodeType.routine => Icons.repeat_on_outlined,
   NodeType.empty => Icons.circle_outlined,
 };
+
+class _QuickCaptureExampleChip extends StatelessWidget {
+  const _QuickCaptureExampleChip({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      label: Text(text),
+      avatar: const Icon(Icons.bolt_outlined, size: 16),
+    );
+  }
+}
+
+/// Desktop quick-add toolbar showing common node types.
+class _QuickAddToolbar extends StatelessWidget {
+  const _QuickAddToolbar({
+    required this.selectedDay,
+    required this.onAddNode,
+    required this.onQuickCapture,
+  });
+
+  final DateTime selectedDay;
+  final Future<void> Function(DateTime day, NodeType type) onAddNode;
+  final Future<void> Function(DateTime day) onQuickCapture;
+
+  @override
+  Widget build(BuildContext context) {
+    final nodeTypes = [
+      NodeType.task,
+      NodeType.note,
+      NodeType.habit,
+      NodeType.journal,
+      NodeType.goal,
+      NodeType.event,
+      NodeType.idea,
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: 'Quick add (Ctrl+N)',
+            child: IconButton(
+              icon: const Icon(Icons.add_circle_outline, size: 18),
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                fixedSize: const Size(32, 32),
+              ),
+              onPressed: () => onQuickCapture(selectedDay),
+            ),
+          ),
+          const SizedBox(width: 4),
+          ...nodeTypes.map(
+            (type) => _QuickAddTypeButton(
+              type: type,
+              onTap: () => onAddNode(selectedDay, type),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickAddTypeButton extends StatefulWidget {
+  const _QuickAddTypeButton({required this.type, required this.onTap});
+
+  final NodeType type;
+  final VoidCallback onTap;
+
+  @override
+  State<_QuickAddTypeButton> createState() => _QuickAddTypeButtonState();
+}
+
+class _QuickAddTypeButtonState extends State<_QuickAddTypeButton>
+    with SingleTickerProviderStateMixin {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: 'Add ${widget.type.label}',
+      child: AnimatedScale(
+        scale: _isPressed ? 0.92 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () {
+              setState(() => _isPressed = true);
+              Future.delayed(const Duration(milliseconds: 100), () {
+                if (mounted) setState(() => _isPressed = false);
+              });
+              widget.onTap();
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _nodeColor(
+                  widget.type,
+                ).withValues(alpha: _isPressed ? 0.2 : 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _nodeColor(
+                    widget.type,
+                  ).withValues(alpha: _isPressed ? 0.6 : 0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _nodeIcon(widget.type),
+                    size: 14,
+                    color: _nodeColor(widget.type),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    widget.type.label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: _nodeColor(widget.type),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _PulsingDot extends StatefulWidget {
   const _PulsingDot();
@@ -3299,22 +6230,320 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
-class _WeeklySummaryStrip extends ConsumerWidget {
-  const _WeeklySummaryStrip({required this.today});
+class _CalendarMissionLegend extends StatelessWidget {
+  const _CalendarMissionLegend();
 
-  final DateTime today;
-
-  List<DateTime> _getCurrentWeekDays() {
-    final weekday = today.weekday; // 1 = Monday, 7 = Sunday
-    final monday = today.subtract(Duration(days: weekday - 1));
-    return List.generate(7, (index) => monday.add(Duration(days: index)));
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = <(CalendarDayStatus, String)>[
+      (CalendarDayStatus.clear, 'Clear'),
+      (CalendarDayStatus.busy, 'Busy'),
+      (CalendarDayStatus.critical, 'Critical'),
+      (CalendarDayStatus.complete, 'Complete'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Board status',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final item in items)
+              _StatusLegendPill(status: item.$1, label: item.$2),
+          ],
+        ),
+      ],
+    );
   }
+}
+
+class _StatusLegendPill extends StatelessWidget {
+  const _StatusLegendPill({required this.status, required this.label});
+
+  final CalendarDayStatus status;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = _calendarDayStatusColor(theme, status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: ShapeDecoration(
+        color: color.withValues(alpha: 0.1),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: color.withValues(alpha: 0.35)),
+          radius: 999,
+          wobble: 1.2,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedDayMissionCard extends ConsumerWidget {
+  const _SelectedDayMissionCard({required this.day});
+
+  final DateTime day;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final weekDays = _getCurrentWeekDays();
+    final nodesAsync = ref.watch(allMindmapNodesProvider);
+    return nodesAsync.when(
+      data: (nodes) {
+        final summary = buildCalendarDaySummary(day, nodes);
+        final statusColor = _calendarDayStatusColor(theme, summary.status);
+        return Container(
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.all(12),
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.24,
+            ),
+            shape: DoodleShapeBorder(
+              side: BorderSide(color: statusColor.withValues(alpha: 0.28)),
+              radius: 14,
+              wobble: 1.5,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: ShapeDecoration(
+                      shape: DoodleShapeBorder(
+                        side: BorderSide(
+                          color: statusColor.withValues(alpha: 0.38),
+                        ),
+                        radius: 10,
+                        wobble: 1.3,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.radar_outlined,
+                      color: statusColor,
+                      size: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          DateFormat('EEE, MMM d').format(summary.day),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Text(
+                          _calendarDayStatusLabel(summary.status),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                children: [
+                  _MissionMiniMetric(label: 'Nodes', value: summary.totalNodes),
+                  _MissionMiniMetric(label: 'Open', value: summary.openTasks),
+                  _MissionMiniMetric(
+                    label: 'Done',
+                    value: summary.completedTasks,
+                  ),
+                  _MissionMiniMetric(
+                    label: 'Late',
+                    value: summary.overdueTasks,
+                  ),
+                  _MissionMiniMetric(
+                    label: 'High',
+                    value: summary.highPriorityCount,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox(height: 44),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _MissionMiniMetric extends StatelessWidget {
+  const _MissionMiniMetric({required this.label, required this.value});
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: 34,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$value',
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 9,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Color _calendarDayStatusColor(ThemeData theme, CalendarDayStatus status) {
+  return switch (status) {
+    CalendarDayStatus.clear => theme.colorScheme.primary,
+    CalendarDayStatus.busy => Colors.amber,
+    CalendarDayStatus.critical => theme.colorScheme.error,
+    CalendarDayStatus.complete => theme.colorScheme.tertiary,
+  };
+}
+
+String _calendarDayStatusLabel(CalendarDayStatus status) {
+  return switch (status) {
+    CalendarDayStatus.clear => 'Clear board',
+    CalendarDayStatus.busy => 'Busy board',
+    CalendarDayStatus.critical => 'Needs care',
+    CalendarDayStatus.complete => 'Complete',
+  };
+}
+
+class _WeeklySummaryStrip extends ConsumerWidget {
+  const _WeeklySummaryStrip({required this.focusedDay, required this.today});
+
+  final DateTime focusedDay;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final weekDays = calendarWeekDays(focusedDay);
     final allNodesAsync = ref.watch(allMindmapNodesProvider);
+    final loadedNodes = allNodesAsync.valueOrNull;
+    if (loadedNodes != null) {
+      final startOfWeek = weekDays.first;
+      final endOfWeek = weekDays.last;
+      final weekNodeCount = loadedNodes
+          .where(
+            (node) =>
+                node.day.isAfter(
+                  startOfWeek.subtract(const Duration(days: 1)),
+                ) &&
+                node.day.isBefore(endOfWeek.add(const Duration(days: 1))),
+          )
+          .length;
+      if (weekNodeCount == 0) {
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.22,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.28),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.insights_outlined,
+                size: 15,
+                color: theme.colorScheme.primary.withValues(alpha: 0.72),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Selected week • 0 planned',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  'Tap day',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.72,
+                    ),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    }
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -3337,7 +6566,7 @@ class _WeeklySummaryStrip extends ConsumerWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Weekly Summary',
+                  'Weekly workload',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelMedium?.copyWith(
@@ -3362,11 +6591,16 @@ class _WeeklySummaryStrip extends ConsumerWidget {
                   final total = thisWeekNodes.length;
                   final completed = thisWeekNodes.where((n) => n.isDone).length;
 
-                  return Text(
-                    '$completed / $total completed',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w600,
+                  return Flexible(
+                    child: Text(
+                      '$completed/$total done',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   );
                 },
@@ -3377,108 +6611,114 @@ class _WeeklySummaryStrip extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: weekDays.map((day) {
               final isToday = day.isSameDay(today);
+              final isFocused = day.isSameDay(focusedDay);
 
-              return allNodesAsync.when(
-                data: (nodes) {
-                  final dayNodes = nodes
-                      .where((n) => n.day.isSameDay(day))
-                      .toList();
-                  final total = dayNodes.length;
-                  final completed = dayNodes.where((n) => n.isDone).length;
+              return Expanded(
+                child: allNodesAsync.when(
+                  data: (nodes) {
+                    final dayNodes = nodes
+                        .where((n) => n.day.isSameDay(day))
+                        .toList();
+                    final total = dayNodes.length;
+                    final completed = dayNodes.where((n) => n.isDone).length;
 
-                  Color? dotColor;
-                  if (total > 0) {
-                    if (completed == total) {
-                      dotColor = theme.colorScheme.primary; // fully completed
-                    } else if (completed > 0) {
-                      dotColor = Colors.amber; // partially completed
-                    } else {
-                      dotColor = theme.colorScheme.secondary; // planned/pending
+                    Color? dotColor;
+                    if (total > 0) {
+                      if (completed == total) {
+                        dotColor = theme.colorScheme.primary; // fully completed
+                      } else if (completed > 0) {
+                        dotColor = Colors.amber; // partially completed
+                      } else {
+                        dotColor =
+                            theme.colorScheme.secondary; // planned/pending
+                      }
                     }
-                  }
 
-                  final semanticsParts = <String>[
-                    DateFormat('EEEE, MMMM d, yyyy').format(day),
-                    _countLabel(total),
-                    '$completed completed',
-                  ];
-                  if (isToday) semanticsParts.add('today');
+                    final semanticsParts = <String>[
+                      DateFormat('EEEE, MMMM d, yyyy').format(day),
+                      _countLabel(total),
+                      '$completed completed',
+                    ];
+                    if (isToday) semanticsParts.add('today');
+                    if (isFocused) semanticsParts.add('selected');
 
-                  return Semantics(
-                    label: semanticsParts.join(', '),
-                    button: true,
-                    selected: isToday,
-                    onTap: () => goToDay(context, day),
-                    child: InkWell(
+                    return Semantics(
+                      label: semanticsParts.join(', '),
+                      button: true,
+                      selected: isFocused,
                       onTap: () => goToDay(context, day),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 4,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              DateFormat('E').format(day).substring(0, 1),
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: isToday
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.onSurfaceVariant
-                                          .withValues(alpha: 0.6),
-                                fontWeight: isToday ? FontWeight.bold : null,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isToday
-                                    ? theme.colorScheme.primary.withValues(
-                                        alpha: 0.15,
-                                      )
-                                    : Colors.transparent,
-                                border: Border.all(
+                      child: InkWell(
+                        onTap: () => goToDay(context, day),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 4,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                DateFormat('E').format(day).substring(0, 1),
+                                style: theme.textTheme.labelSmall?.copyWith(
                                   color: isToday
                                       ? theme.colorScheme.primary
-                                      : Colors.transparent,
-                                  width: 1.5,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                '${day.day}',
-                                style: theme.textTheme.bodySmall?.copyWith(
+                                      : theme.colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.6),
                                   fontWeight: isToday ? FontWeight.bold : null,
-                                  color: isToday
-                                      ? theme.colorScheme.primary
-                                      : null,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Container(
-                              width: 5,
-                              height: 5,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: dotColor ?? Colors.transparent,
+                              const SizedBox(height: 4),
+                              Container(
+                                width: 24,
+                                height: 24,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isFocused
+                                      ? theme.colorScheme.primary.withValues(
+                                          alpha: 0.15,
+                                        )
+                                      : Colors.transparent,
+                                  border: Border.all(
+                                    color: isFocused
+                                        ? theme.colorScheme.primary
+                                        : Colors.transparent,
+                                    width: isFocused ? 1.5 : 1.0,
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  '${day.day}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontWeight: isFocused
+                                        ? FontWeight.bold
+                                        : null,
+                                    color: isFocused
+                                        ? theme.colorScheme.primary
+                                        : null,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 4),
+                              Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: dotColor ?? Colors.transparent,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
-                loading: () => const SizedBox(width: 40, height: 40),
-                error: (err, stack) => const SizedBox.shrink(),
+                    );
+                  },
+                  loading: () => const SizedBox(height: 40),
+                  error: (err, stack) => const SizedBox.shrink(),
+                ),
               );
             }).toList(),
           ),
@@ -3486,6 +6726,37 @@ class _WeeklySummaryStrip extends ConsumerWidget {
       ),
     );
   }
+}
+
+List<MindmapNode> _applyCalendarFilters(
+  List<MindmapNode> nodes, {
+  required String query,
+  required Set<NodeType> typeFilters,
+  required bool doneOnly,
+  CalendarNodeFilter advancedFilter = const CalendarNodeFilter(),
+  DateTime? today,
+}) {
+  return nodes.where((node) {
+    if (query.isNotEmpty && !_nodeMatches(node, query)) return false;
+    if (typeFilters.isNotEmpty &&
+        !_matchesCalendarTypeFilter(node, typeFilters)) {
+      return false;
+    }
+    if (doneOnly && !node.isDone && node.status != NodeStatus.done) {
+      return false;
+    }
+    return matchesCalendarNodeFilter(
+      node,
+      advancedFilter,
+      today: today ?? DateTime.now(),
+    );
+  }).toList();
+}
+
+bool _matchesCalendarTypeFilter(MindmapNode node, Set<NodeType> typeFilters) {
+  if (typeFilters.contains(node.type)) return true;
+  return typeFilters.contains(NodeType.event) &&
+      calendarNodePayloadFromData(node.data) != null;
 }
 
 bool _nodeMatches(MindmapNode node, String query) {
