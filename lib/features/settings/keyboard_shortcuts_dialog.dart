@@ -102,8 +102,16 @@ Future<void> showKeyboardShortcutsDialog(BuildContext context) async {
   );
 }
 
-class _KeyboardShortcutsDialog extends StatelessWidget {
+class _KeyboardShortcutsDialog extends StatefulWidget {
   const _KeyboardShortcutsDialog();
+
+  @override
+  State<_KeyboardShortcutsDialog> createState() =>
+      _KeyboardShortcutsDialogState();
+}
+
+class _KeyboardShortcutsDialogState extends State<_KeyboardShortcutsDialog> {
+  final Set<String> _expandedGroups = {'Global'};
 
   @override
   Widget build(BuildContext context) {
@@ -133,44 +141,102 @@ class _KeyboardShortcutsDialog extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        group.label,
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final item in group.items) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            if (_expandedGroups.contains(group.label)) {
+                              _expandedGroups.remove(group.label);
+                            } else {
+                              _expandedGroups.add(group.label);
+                            }
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  item.description,
-                                  style: theme.textTheme.bodyMedium,
+                              Text(
+                                group.label,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const SizedBox(width: 16),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  for (
-                                    var i = 0;
-                                    i < item.keys.length;
-                                    i++
-                                  ) ...[
-                                    if (i > 0) ...[
-                                      Padding(
+                              Icon(
+                                _expandedGroups.contains(group.label)
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                size: 18,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_expandedGroups.contains(group.label)) ...[
+                        const SizedBox(height: 4),
+                        for (final item in group.items) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item.description,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    for (
+                                      var i = 0;
+                                      i < item.keys.length;
+                                      i++
+                                    ) ...[
+                                      if (i > 0) ...[
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                          child: Text(
+                                            '+',
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
+                                      Container(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: theme
+                                              .colorScheme
+                                              .surfaceContainerHighest,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          border: Border.all(
+                                            color: theme
+                                                .colorScheme
+                                                .outlineVariant,
+                                          ),
                                         ),
                                         child: Text(
-                                          '+',
+                                          item.keys[i],
                                           style: theme.textTheme.labelSmall
                                               ?.copyWith(
+                                                fontFamily: 'monospace',
+                                                fontWeight: FontWeight.bold,
                                                 color: theme
                                                     .colorScheme
                                                     .onSurfaceVariant,
@@ -178,44 +244,17 @@ class _KeyboardShortcutsDialog extends StatelessWidget {
                                         ),
                                       ),
                                     ],
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: theme
-                                            .colorScheme
-                                            .surfaceContainerHighest,
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(
-                                          color:
-                                              theme.colorScheme.outlineVariant,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        item.keys[i],
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              fontFamily: 'monospace',
-                                              fontWeight: FontWeight.bold,
-                                              color: theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                      ),
-                                    ),
                                   ],
-                                ],
-                              ),
-                            ],
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                        if (item != group.items.last)
-                          Divider(
-                            height: 1,
-                            color: theme.dividerColor.withValues(alpha: 0.4),
-                          ),
+                          if (item != group.items.last)
+                            Divider(
+                              height: 1,
+                              color: theme.dividerColor.withValues(alpha: 0.4),
+                            ),
+                        ],
                       ],
                     ],
                   ),
