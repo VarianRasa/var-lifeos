@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "var-app-prod"
+  },
+  "targets": {
+    "var-app-prod": {
+      "hosting": {
+        "var-lifeos": [
+          "var-lifeos"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

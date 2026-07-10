@@ -33,7 +33,8 @@ Calendar (when)  →  Day cell (summary)  →  Mindmap (anything)
 
 ## Use Var
 
-- **Web:** [var-lifeos.web.app](https://var-lifeos.web.app)
+- **Landing page:** [var-lifeos.web.app](https://var-lifeos.web.app)
+- **Web app:** [var-lifeos.web.app/app/](https://var-lifeos.web.app/app/)
 - **Windows and Android:** download latest files from [GitHub Releases](https://github.com/VarianRasa/var-lifeos/releases/latest).
 - **iOS:** no public build yet. Apple builds require macOS, Xcode, signing, and App Store/TestFlight distribution.
 
