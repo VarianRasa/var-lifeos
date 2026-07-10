@@ -1,7 +1,7 @@
 name: var_app
 description: "Var — a calendar-centric productivity app. Every day is a canvas for tasks, kanban, plans, notes, habits, and goals."
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.11.4
