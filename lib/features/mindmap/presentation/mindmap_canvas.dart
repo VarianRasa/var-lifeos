@@ -4,16 +4,21 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../shared/widgets/doodle_border.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
+import '../application/collaboration_controller.dart';
 import '../domain/canvas_position.dart';
 import '../domain/goal_progress.dart';
 import '../domain/habit_completion.dart';
@@ -22,6 +27,7 @@ import '../domain/life_os_summary.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/plan_progress.dart';
 import '../domain/task_checklist_progress.dart';
+import 'collaborator_cursor_widget.dart';
 
 typedef NodeMoveCallback =
     FutureOr<void> Function(MindmapNode node, CanvasPosition position);
@@ -57,6 +63,7 @@ enum _CanvasLayoutMode { tidy, radial, byType }
 class MindmapCanvas extends StatefulWidget {
   const MindmapCanvas({
     required this.nodes,
+    this.variant = AppThemeVariant.blackboard,
     this.highlightedNodeId,
     this.onNodeMoved,
     this.onNodeSelected,
@@ -74,6 +81,12 @@ class MindmapCanvas extends StatefulWidget {
     this.onClearNodes,
     this.onCanvasContextMenu,
     this.onConnectedNodeCreate,
+    this.onNodeQuickCreate,
+    this.collaborationState,
+    this.onLocalCursorChanged,
+    this.onLocalSelectionChanged,
+    this.onLocalPingRequested,
+    this.pingStream,
     super.key,
   });
 
@@ -82,6 +95,7 @@ class MindmapCanvas extends StatefulWidget {
   static const Size kanbanNodeSize = Size(500, 320);
 
   final List<MindmapNode> nodes;
+  final AppThemeVariant variant;
   final String? highlightedNodeId;
   final NodeMoveCallback? onNodeMoved;
   final NodeSelectionCallback? onNodeSelected;
@@ -99,6 +113,19 @@ class MindmapCanvas extends StatefulWidget {
   final FutureOr<void> Function()? onClearNodes;
   final CanvasContextMenuCallback? onCanvasContextMenu;
   final ConnectedNodeCreateCallback? onConnectedNodeCreate;
+  final void Function(
+    NodeType type,
+    String title, {
+    NodePriority? priority,
+    List<String>? tags,
+  })?
+  onNodeQuickCreate;
+
+  final CollaborationState? collaborationState;
+  final void Function(Offset position)? onLocalCursorChanged;
+  final void Function(String? nodeId)? onLocalSelectionChanged;
+  final void Function(Offset scenePosition)? onLocalPingRequested;
+  final Stream<PingEvent>? pingStream;
 
   @override
   State<MindmapCanvas> createState() => MindmapCanvasState();
@@ -110,6 +137,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   final TransformationController _transformationController =
       TransformationController();
   bool _didSetInitialTransform = false;
+  String? _followingCollaboratorId;
 
   Offset? _mousePos;
   final List<Offset> _cursorTrail = [];
@@ -122,6 +150,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
   final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
   NodeType? _searchTypeFilter;
+  NodeReviewState? _reviewStateFilter;
+  bool _nextActionOnly = false;
   bool _isSearchOverlayCollapsed = true;
   String? _lastSelectedNodeId;
   final Set<String> _selectedNodeIds = <String>{};
@@ -139,6 +169,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
   Offset? _lassoCurrentLocal;
   Offset? _middlePanLastLocal;
   _ConnectionDrag? _connectionDrag;
+
+  StreamSubscription<PingEvent>? _pingSub;
+  final List<_ActivePing> _activePings = <_ActivePing>[];
   Rect? _visibleSceneRect;
   Timer? _viewportUpdateTimer;
   bool _viewportUpdateQueued = false;
@@ -163,6 +196,35 @@ class MindmapCanvasState extends State<MindmapCanvas>
         () => _searchQuery = _searchController.text.trim().toLowerCase(),
       );
     });
+    _listenForPings(widget.pingStream);
+  }
+
+  void _listenForPings(Stream<PingEvent>? stream) {
+    _pingSub?.cancel();
+    _pingSub = stream?.listen(_showPing);
+  }
+
+  void _showPing(PingEvent event) {
+    if (!mounted) return;
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    final ping = _ActivePing(event: event, controller: controller);
+    controller.addStatusListener((status) {
+      if (status != AnimationStatus.completed) return;
+      if (mounted) {
+        setState(() => _activePings.remove(ping));
+      } else {
+        _activePings.remove(ping);
+      }
+      controller.dispose();
+    });
+    controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+    setState(() => _activePings.add(ping));
+    controller.forward();
   }
 
   void _scheduleViewportUpdate() {
@@ -220,6 +282,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
     _viewportUpdateTimer?.cancel();
     _zoomAnimController.dispose();
     _cursorAnimController.dispose();
+    _pingSub?.cancel();
+    for (final ping in _activePings) {
+      ping.controller.dispose();
+    }
+    _activePings.clear();
     _transformationController.removeListener(_scheduleViewportUpdate);
     _transformationController.dispose();
     _dragPositions.clear();
@@ -332,24 +399,145 @@ class MindmapCanvasState extends State<MindmapCanvas>
         keys.contains(LogicalKeyboardKey.metaRight);
   }
 
-  bool get _isLassoModifierPressed => HardwareKeyboard.instance.isShiftPressed;
-
   void _handleCanvasPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent || !_isCtrlPressed) return;
     _zoomAt(event.localPosition, event.scrollDelta.dy < 0 ? 1.12 : 1 / 1.12);
   }
 
+  void _navigateSelection(LogicalKeyboardKey key) {
+    if (widget.nodes.isEmpty) return;
+
+    final sourceId =
+        _lastSelectedNodeId ??
+        (_selectedNodeIds.isNotEmpty ? _selectedNodeIds.first : null);
+    if (sourceId == null) {
+      final target = widget.nodes.first;
+      _selectNode(target);
+      focusOnPosition(target.position);
+      return;
+    }
+
+    final sourceNode = widget.nodes.firstWhere((n) => n.id == sourceId);
+    final sourcePos = sourceNode.position;
+
+    MindmapNode? bestTarget;
+    double bestScore = double.infinity;
+
+    for (final node in widget.nodes) {
+      if (node.id == sourceId) continue;
+
+      final dx = node.position.dx - sourcePos.dx;
+      final dy = node.position.dy - sourcePos.dy;
+
+      bool inDirection = false;
+      switch (key) {
+        case LogicalKeyboardKey.arrowUp:
+          inDirection = dy < -10 && dx.abs() < dy.abs() * 1.8;
+          break;
+        case LogicalKeyboardKey.arrowDown:
+          inDirection = dy > 10 && dx.abs() < dy.abs() * 1.8;
+          break;
+        case LogicalKeyboardKey.arrowLeft:
+          inDirection = dx < -10 && dy.abs() < dx.abs() * 1.8;
+          break;
+        case LogicalKeyboardKey.arrowRight:
+          inDirection = dx > 10 && dy.abs() < dx.abs() * 1.8;
+          break;
+      }
+
+      if (inDirection) {
+        final dist = dx * dx + dy * dy;
+        if (dist < bestScore) {
+          bestScore = dist;
+          bestTarget = node;
+        }
+      }
+    }
+
+    if (bestTarget != null) {
+      _selectNode(bestTarget);
+      focusOnPosition(bestTarget.position);
+    }
+  }
+
   KeyEventResult _handleCanvasKeyEvent(FocusNode node, KeyEvent event) {
-    if (event.logicalKey != LogicalKeyboardKey.controlLeft &&
-        event.logicalKey != LogicalKeyboardKey.controlRight &&
-        event.logicalKey != LogicalKeyboardKey.metaLeft &&
-        event.logicalKey != LogicalKeyboardKey.metaRight) {
+    // Control / Meta Key zoom state tracking
+    if (event.logicalKey == LogicalKeyboardKey.controlLeft ||
+        event.logicalKey == LogicalKeyboardKey.controlRight ||
+        event.logicalKey == LogicalKeyboardKey.metaLeft ||
+        event.logicalKey == LogicalKeyboardKey.metaRight) {
+      final isDown = event is KeyDownEvent || event is KeyRepeatEvent;
+      if (_isCtrlZoomActive != isDown) {
+        setState(() => _isCtrlZoomActive = isDown);
+      }
       return KeyEventResult.ignored;
     }
-    final isDown = event is KeyDownEvent || event is KeyRepeatEvent;
-    if (_isCtrlZoomActive != isDown) {
-      setState(() => _isCtrlZoomActive = isDown);
+
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
     }
+
+    final key = event.logicalKey;
+    final isShift = HardwareKeyboard.instance.isShiftPressed;
+
+    // Delete or Backspace to delete selected nodes
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
+      if (_selectedNodeIds.isNotEmpty) {
+        unawaited(_archiveSelectedNodes());
+        return KeyEventResult.handled;
+      }
+    }
+
+    // Zoom shortcuts (+, -, 0)
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.numpadAdd ||
+        key == LogicalKeyboardKey.add) {
+      _zoomIn();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomOut();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      _zoomReset();
+      return KeyEventResult.handled;
+    }
+
+    // Navigation and Panning via Arrows
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight) {
+      if (isShift || _selectedNodeIds.isEmpty) {
+        // Pan canvas
+        final val = _transformationController.value.clone();
+        final translation = val.getTranslation();
+        double dx = 0;
+        double dy = 0;
+        const panSpeed = 35.0;
+
+        if (key == LogicalKeyboardKey.arrowUp) dy = panSpeed;
+        if (key == LogicalKeyboardKey.arrowDown) dy = -panSpeed;
+        if (key == LogicalKeyboardKey.arrowLeft) dx = panSpeed;
+        if (key == LogicalKeyboardKey.arrowRight) dx = -panSpeed;
+
+        val.setTranslationRaw(
+          translation.x + dx,
+          translation.y + dy,
+          translation.z,
+        );
+        _transformationController.value = val;
+        return KeyEventResult.handled;
+      } else {
+        // Navigate nodes selection
+        _navigateSelection(key);
+        return KeyEventResult.handled;
+      }
+    }
+
     return KeyEventResult.ignored;
   }
 
@@ -361,11 +549,21 @@ class MindmapCanvasState extends State<MindmapCanvas>
     setState(() {
       _searchQuery = '';
       _searchTypeFilter = null;
+      _reviewStateFilter = null;
+      _nextActionOnly = false;
     });
   }
 
   void _setSearchTypeFilter(NodeType? type) {
     setState(() => _searchTypeFilter = type);
+  }
+
+  void _setReviewStateFilter(NodeReviewState? state) {
+    setState(() => _reviewStateFilter = state);
+  }
+
+  void _setNextActionOnly(bool value) {
+    setState(() => _nextActionOnly = value);
   }
 
   void _setSearchOverlayCollapsed(bool value) {
@@ -376,6 +574,23 @@ class MindmapCanvasState extends State<MindmapCanvas>
     showDialog<void>(
       context: context,
       builder: (context) => const _MindmapShortcutHelpDialog(),
+    );
+  }
+
+  void _openCommandPalette() {
+    if (widget.onNodeQuickCreate == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => _CommandPaletteDialog(
+        onSubmitted: (type, title, {priority, tags}) {
+          widget.onNodeQuickCreate?.call(
+            type,
+            title,
+            priority: priority,
+            tags: tags,
+          );
+        },
+      ),
     );
   }
 
@@ -437,7 +652,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _middlePanLastLocal = event.localPosition;
       return;
     }
-    if (event.buttons == kPrimaryMouseButton && _isLassoModifierPressed) {
+    if (event.buttons == kPrimaryMouseButton) {
       final scenePosition = _transformationController.toScene(
         event.localPosition,
       );
@@ -455,6 +670,30 @@ class MindmapCanvasState extends State<MindmapCanvas>
     widget.onCanvasContextMenu!(
       event.position,
       _alignedCanvasPositionFromLocal(event.localPosition),
+    );
+  }
+
+  void _broadcastCanvasPing() {
+    final callback = widget.onLocalPingRequested;
+    if (callback == null) return;
+    final position =
+        _mousePos ??
+        _transformationController.toScene(
+          Offset(
+            (context.size?.width ?? 0) / 2,
+            (context.size?.height ?? 0) / 2,
+          ),
+        );
+    callback(position);
+    _showPing(
+      PingEvent(
+        id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+        fromId: widget.collaborationState?.localUserId ?? 'local',
+        fromName: widget.collaborationState?.localName ?? 'You',
+        color: widget.collaborationState?.localColor ?? Colors.cyanAccent,
+        scenePosition: position,
+        createdAt: DateTime.now(),
+      ),
     );
   }
 
@@ -521,9 +760,40 @@ class MindmapCanvasState extends State<MindmapCanvas>
     focusOnPosition(pos, scale: currentScale);
   }
 
+  void _followPeerPosition(Offset peerPos) {
+    final size = context.size;
+    if (size == null) return;
+
+    final currentMatrix = _transformationController.value;
+    final currentScale = currentMatrix.getMaxScaleOnAxis();
+
+    final origin = Offset(
+      MindmapCanvas.canvasSize.width / 2,
+      MindmapCanvas.canvasSize.height / 2,
+    );
+
+    final sceneX = origin.dx + peerPos.dx;
+    final sceneY = origin.dy + peerPos.dy;
+
+    final targetX = -sceneX * currentScale + size.width / 2;
+    final targetY = -sceneY * currentScale + size.height / 2;
+
+    final targetMatrix = Matrix4.identity()
+      ..translateByDouble(targetX, targetY, 0, 1)
+      ..scaleByDouble(currentScale, currentScale, 1, 1);
+
+    _zoomAnimController.stop();
+    _startZoomMatrix = _transformationController.value.clone();
+    _targetZoomMatrix = targetMatrix;
+    _zoomAnimController.forward(from: 0.0);
+  }
+
   @override
   void didUpdateWidget(covariant MindmapCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.pingStream != widget.pingStream) {
+      _listenForPings(widget.pingStream);
+    }
     final nodeIds = widget.nodes.map((node) => node.id).toSet();
     _dragPositions.removeWhere((id, position) => !nodeIds.contains(id));
 
@@ -539,10 +809,95 @@ class MindmapCanvasState extends State<MindmapCanvas>
         _dragPositions.remove(node.id);
       }
     }
+
+    if (_followingCollaboratorId != null) {
+      final oldPeer =
+          oldWidget.collaborationState?.collaborators[_followingCollaboratorId];
+      final newPeer =
+          widget.collaborationState?.collaborators[_followingCollaboratorId];
+      if (newPeer != null && newPeer.cursorPosition != null) {
+        if (oldPeer == null ||
+            oldPeer.cursorPosition != newPeer.cursorPosition) {
+          _followPeerPosition(newPeer.cursorPosition!);
+        }
+      }
+    }
+  }
+
+  Widget _buildPingRipple(_ActivePing ping) {
+    final t = Curves.easeOutCubic.transform(ping.controller.value);
+    final radius = 24.0 + (96.0 * t);
+    final color = ping.event.color.withValues(alpha: (1 - t).clamp(0.0, 1.0));
+    final position = ping.event.scenePosition;
+    return Positioned(
+      left: position.dx - radius,
+      top: position.dy - radius,
+      width: radius * 2,
+      height: radius * 2,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.18),
+                blurRadius: 22,
+                spreadRadius: 4,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _collabSelectionsForNode(
+    MindmapNode node,
+    CollaborationState collabState,
+    Offset origin,
+  ) {
+    final widgets = <Widget>[];
+    for (final collaborator in collabState.collaborators.values) {
+      if (collaborator.selectedNodeId != node.id) continue;
+      final pos = _positionFor(node);
+      final size = _nodeSizeFor(node);
+      // Badge lives above the node so it never gets clipped by node content.
+      const badgeHeight = 18.0;
+      const borderInset = 4.0;
+      widgets.add(
+        Positioned(
+          left: pos.dx + origin.dx - borderInset,
+          top: pos.dy + origin.dy - borderInset,
+          width: size.width + (borderInset * 2),
+          height: size.height + (borderInset * 2) + badgeHeight + 4,
+          child: IgnorePointer(
+            child: _CollaboratorSelectionOverlay(
+              color: collaborator.color,
+              name: collaborator.name,
+              isEditing: collaborator.isEditing,
+            ),
+          ),
+        ),
+      );
+    }
+    return widgets;
   }
 
   @override
   Widget build(BuildContext context) {
+    final collabState =
+        widget.collaborationState ??
+        CollaborationState(
+          collaborators: {},
+          isDemoMode: false,
+          isConnected: false,
+          localUserId: '',
+          localName: '',
+          localColor: Colors.transparent,
+        );
+    final variant = widget.variant;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
         _setInitialTransform(constraints.biggest);
@@ -580,12 +935,32 @@ class MindmapCanvasState extends State<MindmapCanvas>
                     _nodeMatchesSearch(node, _searchQuery);
                 final matchesType =
                     _searchTypeFilter == null || node.type == _searchTypeFilter;
+                final matchesReview =
+                    _reviewStateFilter == null ||
+                    node.reviewState == _reviewStateFilter;
+                final matchesNextAction =
+                    !_nextActionOnly ||
+                    node.isNextActionCandidate(DateTime.now());
                 final matchesFocus =
                     focusNode == null || focusIds.contains(node.id);
-                return matchesText && matchesType && matchesFocus;
+                return matchesText &&
+                    matchesType &&
+                    matchesReview &&
+                    matchesNextAction &&
+                    matchesFocus;
               }).toList();
+              if (_nextActionOnly) {
+                filteredNodes.sort(
+                  (a, b) => b
+                      .nextActionScore(DateTime.now())
+                      .compareTo(a.nextActionScore(DateTime.now())),
+                );
+              }
               final isSearchActive =
-                  _searchQuery.isNotEmpty || _searchTypeFilter != null;
+                  _searchQuery.isNotEmpty ||
+                  _searchTypeFilter != null ||
+                  _reviewStateFilter != null ||
+                  _nextActionOnly;
               final isFocusActive = focusNode != null;
               final visibleNodes = filteredNodes
                   .where((node) => _isNodeVisible(node, origin))
@@ -609,6 +984,12 @@ class MindmapCanvasState extends State<MindmapCanvas>
 
               return CallbackShortcuts(
                 bindings: {
+                  const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+                      _openCommandPalette,
+                  const SingleActivator(LogicalKeyboardKey.slash):
+                      _openCommandPalette,
+                  const SingleActivator(LogicalKeyboardKey.space, shift: true):
+                      _broadcastCanvasPing,
                   const SingleActivator(
                     LogicalKeyboardKey.keyF,
                     control: true,
@@ -742,6 +1123,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
                               height: MindmapCanvas.canvasSize.height,
                               child: MouseRegion(
                                 onHover: (event) {
+                                  widget.onLocalCursorChanged?.call(
+                                    event.localPosition,
+                                  );
                                   if (_isHeavyCanvas) return;
                                   final now = DateTime.now();
                                   if (_lastHoverPaintAt != null &&
@@ -779,6 +1163,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                               : _cursorAnimController.value,
                                           showGrid:
                                               _showGrid && !_isHeavyCanvas,
+                                          variant: variant,
+                                          isDark: isDark,
                                         ),
                                       ),
                                     ),
@@ -807,7 +1193,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                           ),
                                         ),
                                       ),
-                                    for (final node in visibleNodes)
+                                    for (final node in visibleNodes) ...[
                                       _PositionedNode(
                                         node: node,
                                         position: _positionFor(node),
@@ -884,6 +1270,22 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                             : () => widget.onPlanStepAdvanced
                                                   ?.call(node),
                                       ),
+                                      ..._collabSelectionsForNode(
+                                        node,
+                                        collabState,
+                                        origin,
+                                      ),
+                                    ],
+                                    for (final entry
+                                        in collabState.collaborators.entries)
+                                      if (entry.value.cursorPosition != null)
+                                        CollaboratorCursorWidget(
+                                          name: entry.value.name,
+                                          color: entry.value.color,
+                                          position: entry.value.cursorPosition!,
+                                        ),
+                                    for (final ping in _activePings)
+                                      _buildPingRipple(ping),
                                   ],
                                 ),
                               ),
@@ -898,9 +1300,13 @@ class MindmapCanvasState extends State<MindmapCanvas>
                           isSearchActive: isSearchActive,
                           filteredCount: filteredNodes.length,
                           selectedType: _searchTypeFilter,
+                          selectedReviewState: _reviewStateFilter,
+                          nextActionOnly: _nextActionOnly,
                           isCollapsed: _isSearchOverlayCollapsed,
                           onClearSearch: _clearSearch,
                           onTypeSelected: _setSearchTypeFilter,
+                          onReviewStateSelected: _setReviewStateFilter,
+                          onNextActionOnlyChanged: _setNextActionOnly,
                           onCollapsedChanged: _setSearchOverlayCollapsed,
                           onSubmitted: () =>
                               _focusFirstSearchResult(filteredNodes),
@@ -984,6 +1390,31 @@ class MindmapCanvasState extends State<MindmapCanvas>
                           ),
                         ),
 
+                      // Collaboration Room Bar
+                      if (widget.collaborationState != null)
+                        Positioned(
+                          top: 86,
+                          left: 16,
+                          child: _CollaborationRoomBar(
+                            nodes: widget.nodes,
+                            followingId: _followingCollaboratorId,
+                            onFollowChanged: (id) {
+                              setState(() {
+                                _followingCollaboratorId = id;
+                                if (id != null) {
+                                  final peer = widget
+                                      .collaborationState
+                                      ?.collaborators[id];
+                                  if (peer != null &&
+                                      peer.cursorPosition != null) {
+                                    _followPeerPosition(peer.cursorPosition!);
+                                  }
+                                }
+                              });
+                            },
+                          ),
+                        ),
+
                       // Zoom & Grid Toolbar Overlay
                       ValueListenableBuilder<Matrix4>(
                         valueListenable: _transformationController,
@@ -1050,6 +1481,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   void _selectNode(MindmapNode node) {
+    widget.onLocalSelectionChanged?.call(node.id);
     final isMultiSelect =
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
@@ -1067,6 +1499,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   void _clearMultiSelection() {
+    widget.onLocalSelectionChanged?.call(null);
     setState(_selectedNodeIds.clear);
   }
 
@@ -1441,8 +1874,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
         node.project.toLowerCase().contains(query) ||
         node.area.toLowerCase().contains(query) ||
         node.tags.any((t) => t.toLowerCase().contains(query)) ||
+        node.contextTags.any((t) => t.toLowerCase().contains(query)) ||
         node.status.name.toLowerCase().contains(query) ||
-        node.priority.name.toLowerCase().contains(query);
+        node.priority.name.toLowerCase().contains(query) ||
+        node.effort.name.toLowerCase().contains(query) ||
+        node.reviewState.name.toLowerCase().contains(query);
   }
 
   Widget _buildCanvasToolbar(BuildContext context) {
@@ -2706,23 +3142,13 @@ class _ToolbarPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primary.withValues(alpha: 0.18),
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          ],
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+          radius: 999,
+          wobble: 0.8,
         ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.36),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: theme.colorScheme.primary.withValues(alpha: 0.12),
-            blurRadius: 10,
-          ),
-        ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2806,9 +3232,13 @@ class _CanvasSearchOverlay extends StatelessWidget {
     required this.isSearchActive,
     required this.filteredCount,
     required this.selectedType,
+    required this.selectedReviewState,
+    required this.nextActionOnly,
     required this.isCollapsed,
     required this.onClearSearch,
     required this.onTypeSelected,
+    required this.onReviewStateSelected,
+    required this.onNextActionOnlyChanged,
     required this.onCollapsedChanged,
     required this.onSubmitted,
   });
@@ -2818,9 +3248,13 @@ class _CanvasSearchOverlay extends StatelessWidget {
   final bool isSearchActive;
   final int filteredCount;
   final NodeType? selectedType;
+  final NodeReviewState? selectedReviewState;
+  final bool nextActionOnly;
   final bool isCollapsed;
   final VoidCallback onClearSearch;
   final ValueChanged<NodeType?> onTypeSelected;
+  final ValueChanged<NodeReviewState?> onReviewStateSelected;
+  final ValueChanged<bool> onNextActionOnlyChanged;
   final ValueChanged<bool> onCollapsedChanged;
   final VoidCallback onSubmitted;
 
@@ -2954,9 +3388,25 @@ class _CanvasSearchOverlay extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilterChip(
+                            key: const ValueKey('mindmap-next-action-filter'),
+                            avatar: const Icon(Icons.bolt_outlined, size: 16),
+                            label: const Text('Next actions'),
+                            selected: nextActionOnly,
+                            onSelected: onNextActionOnlyChanged,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         _CanvasSearchFilters(
                           selectedType: selectedType,
                           onSelected: onTypeSelected,
+                        ),
+                        const SizedBox(height: 8),
+                        _CanvasReviewFilters(
+                          selectedState: selectedReviewState,
+                          onSelected: onReviewStateSelected,
                         ),
                       ],
                     ),
@@ -3090,6 +3540,68 @@ class _CanvasSearchFilters extends StatelessWidget {
       NodeType.expense => 'Expenses',
       NodeType.bookmark => 'Bookmarks',
       _ => type.label,
+    };
+  }
+}
+
+class _CanvasReviewFilters extends StatelessWidget {
+  const _CanvasReviewFilters({
+    required this.selectedState,
+    required this.onSelected,
+  });
+
+  final NodeReviewState? selectedState;
+  final ValueChanged<NodeReviewState?> onSelected;
+
+  static const _filters = <NodeReviewState>[
+    NodeReviewState.needsReview,
+    NodeReviewState.stale,
+    NodeReviewState.someday,
+    NodeReviewState.parked,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _filters.length + 1,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return _CanvasFilterPill(
+              key: const ValueKey('mindmap-review-filter-all'),
+              icon: Icons.fact_check_outlined,
+              label: 'Review all',
+              color: theme.colorScheme.secondary,
+              isSelected: selectedState == null,
+              onTap: () => onSelected(null),
+            );
+          }
+
+          final state = _filters[index - 1];
+          return _CanvasFilterPill(
+            key: ValueKey('mindmap-review-filter-${state.name}'),
+            icon: _reviewIcon(state),
+            label: state.label,
+            color: theme.colorScheme.tertiary,
+            isSelected: selectedState == state,
+            onTap: () => onSelected(state),
+          );
+        },
+      ),
+    );
+  }
+
+  IconData _reviewIcon(NodeReviewState state) {
+    return switch (state) {
+      NodeReviewState.needsReview => Icons.rate_review_outlined,
+      NodeReviewState.stale => Icons.history_toggle_off_outlined,
+      NodeReviewState.someday => Icons.inbox_outlined,
+      NodeReviewState.parked => Icons.local_parking_outlined,
+      NodeReviewState.none => Icons.fact_check_outlined,
     };
   }
 }
@@ -3438,6 +3950,7 @@ class _NodePointerSurfaceState extends State<_NodePointerSurface> {
   bool _isHovered = false;
   bool _isDragging = false;
   bool _isConnecting = false;
+  DateTime? _lastTapTime;
 
   @override
   Widget build(BuildContext context) {
@@ -3504,7 +4017,17 @@ class _NodePointerSurfaceState extends State<_NodePointerSurface> {
           if (_isToggleHit(_lastLocalPosition)) {
             widget.onTaskDoneChanged(!widget.isDone);
           } else {
-            widget.onSelect();
+            final now = DateTime.now();
+            if (_lastTapTime != null &&
+                now.difference(_lastTapTime!) <
+                    const Duration(milliseconds: 300)) {
+              if (widget.canToggleDone) {
+                widget.onTaskDoneChanged(!widget.isDone);
+              }
+            } else {
+              widget.onSelect();
+            }
+            _lastTapTime = now;
           }
         },
         child: MouseRegion(
@@ -3641,6 +4164,14 @@ _DoodleCardStyle _doodleCardFor(NodeType type) => switch (type) {
   NodeType.expense => const _DoodleCardStyle(_DoodleCardKind.torn),
   NodeType.bookmark => const _DoodleCardStyle(_DoodleCardKind.note),
   NodeType.routine => const _DoodleCardStyle(_DoodleCardKind.rounded),
+  NodeType.mood => const _DoodleCardStyle(_DoodleCardKind.note),
+  NodeType.timer => const _DoodleCardStyle(_DoodleCardKind.ticket),
+  NodeType.quote => const _DoodleCardStyle(_DoodleCardKind.torn),
+  NodeType.audio => const _DoodleCardStyle(_DoodleCardKind.label),
+  NodeType.checklist => const _DoodleCardStyle(_DoodleCardKind.rounded),
+  NodeType.canvas => const _DoodleCardStyle(_DoodleCardKind.note),
+  NodeType.weather => const _DoodleCardStyle(_DoodleCardKind.label),
+  NodeType.fit => const _DoodleCardStyle(_DoodleCardKind.pill),
   NodeType.empty => const _DoodleCardStyle(_DoodleCardKind.note),
 };
 
@@ -4182,7 +4713,12 @@ class _MindmapNodeCardState extends State<_MindmapNodeCard> {
                 ],
                 if (!node.data.containsKey('kanban')) ...[
                   const SizedBox(height: 8),
-                  Flexible(child: _NodeTypeSpecificContent(node: node)),
+                  Flexible(
+                    child: _NodeTypeSpecificContent(
+                      node: node,
+                      onNodeUpdated: widget.onNodeUpdated,
+                    ),
+                  ),
                 ],
                 if (_hasTypeQuickAction(node) &&
                     !_hasProgressAction(node) &&
@@ -5091,12 +5627,16 @@ class _InteractiveBackgroundPainter extends CustomPainter {
     required this.cursorTrail,
     required this.animationValue,
     required this.showGrid,
+    required this.variant,
+    required this.isDark,
   });
 
   final Offset? mousePos;
   final List<Offset> cursorTrail;
   final double animationValue;
   final bool showGrid;
+  final AppThemeVariant variant;
+  final bool isDark;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -5106,18 +5646,102 @@ class _InteractiveBackgroundPainter extends CustomPainter {
         : Offset.zero;
     final rect = Offset.zero & size;
 
+    final List<Color> bgColors;
+    if (isDark) {
+      switch (variant) {
+        case AppThemeVariant.blueprint:
+          bgColors = [
+            const Color(0xFF070C16),
+            const Color(0xFF111B2B),
+            const Color(0xFF090F19),
+          ];
+          break;
+        case AppThemeVariant.schoolboard:
+          bgColors = [
+            const Color(0xFF061410),
+            const Color(0xFF0C241D),
+            const Color(0xFF05110E),
+          ];
+          break;
+        case AppThemeVariant.midnight:
+          bgColors = [
+            const Color(0xFF040208),
+            const Color(0xFF110A21),
+            const Color(0xFF05030A),
+          ];
+          break;
+        case AppThemeVariant.cardboard:
+          bgColors = [
+            const Color(0xFF241910),
+            const Color(0xFF302216),
+            const Color(0xFF20160F),
+          ];
+          break;
+        case AppThemeVariant.blackboard:
+          bgColors = [
+            const Color(0xFF090B09),
+            const Color(0xFF10120E),
+            const Color(0xFF070807),
+          ];
+          break;
+      }
+    } else {
+      switch (variant) {
+        case AppThemeVariant.blueprint:
+          bgColors = [
+            const Color(0xFFECF3FA),
+            const Color(0xFFF2F7FD),
+            const Color(0xFFE5EEF8),
+          ];
+          break;
+        case AppThemeVariant.schoolboard:
+          bgColors = [
+            const Color(0xFFF3FBF8),
+            const Color(0xFFF8FCFA),
+            const Color(0xFFECF7F3),
+          ];
+          break;
+        case AppThemeVariant.midnight:
+          bgColors = [
+            const Color(0xFFFAF8FF),
+            const Color(0xFFFCFAFF),
+            const Color(0xFFF5F2FD),
+          ];
+          break;
+        case AppThemeVariant.cardboard:
+          bgColors = [
+            const Color(0xFFE8DBCA),
+            const Color(0xFFECDDCB),
+            const Color(0xFFE2D3BF),
+          ];
+          break;
+        case AppThemeVariant.blackboard:
+          bgColors = [
+            const Color(0xFFFFF7E2),
+            const Color(0xFFFCF4DC),
+            const Color(0xFFFAF1D7),
+          ];
+          break;
+      }
+    }
+
     canvas.drawRect(
       rect,
       Paint()
-        ..shader = const LinearGradient(
+        ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF090B09), Color(0xFF10120E), Color(0xFF070807)],
+          colors: bgColors,
         ).createShader(rect),
     );
 
-    _drawPaperFibers(canvas, size, chalkOffset);
-    _drawChalkDust(canvas, size, chalkOffset);
+    if (variant == AppThemeVariant.blackboard ||
+        variant == AppThemeVariant.schoolboard ||
+        variant == AppThemeVariant.cardboard) {
+      _drawPaperFibers(canvas, size, chalkOffset);
+      _drawChalkDust(canvas, size, chalkOffset);
+    }
+
     if (showGrid) {
       _drawPaperGuides(canvas, size, chalkOffset);
     }
@@ -5129,6 +5753,9 @@ class _InteractiveBackgroundPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
     const count = 96;
+    final borderColor = isDark
+        ? AppThemeVariantColors.of(variant).darkBorder
+        : AppThemeVariantColors.of(variant).lightBorder;
 
     for (var i = 0; i < count; i += 1) {
       final start =
@@ -5141,7 +5768,7 @@ class _InteractiveBackgroundPainter extends CustomPainter {
       final angle = (_unitNoise(i * 47 + 13) - 0.5) * 0.35;
       final alpha = 0.012 + _unitNoise(i * 53 + 17) * 0.026;
       fiberPaint
-        ..color = NeutralColors.darkBorder.withValues(alpha: alpha)
+        ..color = borderColor.withValues(alpha: alpha)
         ..strokeWidth = 0.5 + _unitNoise(i * 59 + 19) * 0.9;
       canvas.drawLine(
         start,
@@ -5152,20 +5779,56 @@ class _InteractiveBackgroundPainter extends CustomPainter {
   }
 
   void _drawPaperGuides(Canvas canvas, Size size, Offset chalkOffset) {
+    final borderColor = isDark
+        ? AppThemeVariantColors.of(variant).darkBorder
+        : AppThemeVariantColors.of(variant).lightBorder;
+    final guideColor = borderColor.withValues(alpha: isDark ? 0.035 : 0.08);
+
     final guidePaint = Paint()
-      ..color = NeutralColors.darkBorder.withValues(alpha: 0.018)
+      ..color = guideColor
       ..strokeWidth = 1
       ..strokeCap = StrokeCap.round;
-    const step = 96.0;
 
-    final startY = (chalkOffset.dy % step) - step;
-    for (var y = startY; y <= size.height + step; y += step) {
-      final wobble = math.sin(y * 0.013) * 2.2;
-      canvas.drawLine(
-        Offset(0, y + wobble),
-        Offset(size.width, y + wobble + math.sin(y * 0.021) * 1.5),
-        guidePaint,
-      );
+    if (variant == AppThemeVariant.blueprint) {
+      const step = 48.0;
+      final startX = (chalkOffset.dx % step) - step;
+      for (var x = startX; x <= size.width + step; x += step) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), guidePaint);
+      }
+      final startY = (chalkOffset.dy % step) - step;
+      for (var y = startY; y <= size.height + step; y += step) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), guidePaint);
+      }
+    } else if (variant == AppThemeVariant.midnight) {
+      final dotPaint = Paint()
+        ..color = guideColor.withValues(alpha: 0.15)
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round;
+      const step = 48.0;
+      final startX = (chalkOffset.dx % step) - step;
+      final startY = (chalkOffset.dy % step) - step;
+      for (var x = startX; x <= size.width + step; x += step) {
+        for (var y = startY; y <= size.height + step; y += step) {
+          canvas.drawPoints(ui.PointMode.points, [Offset(x, y)], dotPaint);
+        }
+      }
+    } else {
+      const step = 96.0;
+      final startY = (chalkOffset.dy % step) - step;
+      final isWobbly =
+          variant == AppThemeVariant.blackboard ||
+          variant == AppThemeVariant.cardboard;
+      final amp = variant == AppThemeVariant.cardboard ? 3.5 : 2.2;
+
+      for (var y = startY; y <= size.height + step; y += step) {
+        final wobble = isWobbly ? math.sin(y * 0.013) * amp : 0.0;
+        final endWobble = isWobbly ? math.sin(y * 0.021) * (amp * 0.7) : 0.0;
+        canvas.drawLine(
+          Offset(0, y + wobble),
+          Offset(size.width, y + wobble + endWobble),
+          guidePaint,
+        );
+      }
     }
   }
 
@@ -5181,6 +5844,9 @@ class _InteractiveBackgroundPainter extends CustomPainter {
   void _drawChalkDust(Canvas canvas, Size size, Offset chalkOffset) {
     final dustPaint = Paint();
     const dustCount = 180;
+    final borderColor = isDark
+        ? AppThemeVariantColors.of(variant).darkBorder
+        : AppThemeVariantColors.of(variant).lightBorder;
 
     for (var i = 0; i < dustCount; i++) {
       final seedA = _unitNoise(i * 17 + 3);
@@ -5190,7 +5856,7 @@ class _InteractiveBackgroundPainter extends CustomPainter {
       final width = 2 + _unitNoise(i * 43 + 7) * 12;
       final alpha = 0.018 + _unitNoise(i * 53 + 19) * 0.04;
       dustPaint
-        ..color = NeutralColors.darkBorder.withValues(alpha: alpha)
+        ..color = borderColor.withValues(alpha: alpha)
         ..strokeWidth = 1
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(
@@ -5211,6 +5877,8 @@ class _InteractiveBackgroundPainter extends CustomPainter {
     return oldDelegate.mousePos != mousePos ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.animationValue != animationValue ||
+        oldDelegate.variant != variant ||
+        oldDelegate.isDark != isDark ||
         oldDelegate.cursorTrail.length != cursorTrail.length ||
         (oldDelegate.cursorTrail.isNotEmpty &&
             cursorTrail.isNotEmpty &&
@@ -5239,6 +5907,205 @@ class _ConnectionDrag {
       target: target,
     );
   }
+}
+
+/// Painted overlay shown on a node that a collaborator currently has selected
+/// or is editing. Pulses softly while editing, static while merely selected.
+class _CollaboratorSelectionOverlay extends StatefulWidget {
+  const _CollaboratorSelectionOverlay({
+    required this.color,
+    required this.name,
+    required this.isEditing,
+  });
+
+  final Color color;
+  final String name;
+  final bool isEditing;
+
+  @override
+  State<_CollaboratorSelectionOverlay> createState() =>
+      _CollaboratorSelectionOverlayState();
+}
+
+class _CollaboratorSelectionOverlayState
+    extends State<_CollaboratorSelectionOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+    _syncAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CollaboratorSelectionOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isEditing != widget.isEditing) {
+      _syncAnimation();
+    }
+  }
+
+  void _syncAnimation() {
+    if (widget.isEditing) {
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    } else {
+      _pulse.stop();
+      _pulse.value = 0.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, _) {
+              final t = _pulse.value;
+              // Border breathes between 2.0 and 3.5 px while editing; steady 2.5 otherwise.
+              final width = widget.isEditing ? 2.0 + (1.5 * t) : 2.5;
+              return Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: widget.color, width: width),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: widget.isEditing
+                      ? [
+                          BoxShadow(
+                            color: widget.color.withValues(
+                              alpha: 0.18 + (0.18 * t),
+                            ),
+                            blurRadius: 14,
+                            spreadRadius: 1.5,
+                          ),
+                        ]
+                      : null,
+                ),
+              );
+            },
+          ),
+        ),
+        Positioned(
+          top: -18,
+          left: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: widget.color,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.isEditing) ...[
+                  const _EditingDots(color: Colors.black, size: 6),
+                  const SizedBox(width: 4),
+                ] else
+                  Container(
+                    width: 6,
+                    height: 6,
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: const BoxDecoration(
+                      color: Colors.black,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                Text(
+                  widget.isEditing ? '${widget.name} editing' : widget.name,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Three-dot pulsing loader rendered while a collaborator is editing.
+class _EditingDots extends StatefulWidget {
+  const _EditingDots({required this.color, required this.size});
+
+  final Color color;
+  final double size;
+
+  @override
+  State<_EditingDots> createState() => _EditingDotsState();
+}
+
+class _EditingDotsState extends State<_EditingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _dot;
+
+  @override
+  void initState() {
+    super.initState();
+    _dot = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _dot.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _dot,
+      builder: (context, _) {
+        // Stagger opacity across three dots using a phase offset.
+        Widget dot(int index) {
+          final phase = (_dot.value - (index * 0.25)) % 1.0;
+          final alpha = (phase < 0 ? phase + 1 : phase).clamp(0.0, 1.0);
+          final intensity = alpha < 0.5 ? alpha * 2 : (1 - alpha) * 2;
+          return Container(
+            width: widget.size,
+            height: widget.size,
+            margin: EdgeInsets.only(right: index < 2 ? 2 : 0),
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 0.3 + (0.7 * intensity)),
+              shape: BoxShape.circle,
+            ),
+          );
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [dot(0), dot(1), dot(2)],
+        );
+      },
+    );
+  }
+}
+
+/// Transient ping ripple data driven by an [AnimationController].
+class _ActivePing {
+  _ActivePing({required this.event, required this.controller});
+
+  final PingEvent event;
+  final AnimationController controller;
 }
 
 class _ConnectionDragPainter extends CustomPainter {
@@ -5620,35 +6487,28 @@ IconData nodeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.circle_outlined,
 };
 
-Color nodeColor(NodeType type) => switch (type) {
-  NodeType.task => NodeColors.task,
-  NodeType.kanban => NodeColors.kanban,
-  NodeType.plan => NodeColors.plan,
-  NodeType.note => NodeColors.note,
-  NodeType.journal => NodeColors.journal,
-  NodeType.habit => NodeColors.habit,
-  NodeType.goal => NodeColors.goal,
-  NodeType.link => NodeColors.link,
-  NodeType.event => NodeColors.event,
-  NodeType.decision => NodeColors.decision,
-  NodeType.resource => NodeColors.resource,
-  NodeType.idea => NodeColors.idea,
-  NodeType.question => NodeColors.question,
-  NodeType.contact => NodeColors.contact,
-  NodeType.metric => NodeColors.metric,
-  NodeType.expense => NodeColors.expense,
-  NodeType.bookmark => NodeColors.bookmark,
-  NodeType.routine => NodeColors.routine,
-  NodeType.empty => Colors.grey,
-};
+Color nodeColor(NodeType type) {
+  final palette = AppThemeVariantColors.of(ThemeVariantConfig.active);
+  return palette.nodeColors[type] ?? Colors.grey;
+}
 
 List<String> _metadataLabelsFor(MindmapNode node) {
   return [
     if (node.priority != NodePriority.none) node.priority.label,
     if (node.status != NodeStatus.open) node.status.label,
+    if (node.effort != NodeEffort.unspecified) node.effort.label,
+    if (node.reviewState != NodeReviewState.none) node.reviewState.label,
     if (node.project.isNotEmpty) 'Project: ${node.project}',
     if (node.area.isNotEmpty) 'Area: ${node.area}',
     for (final tag in node.tags.take(2)) '#$tag',
@@ -5822,9 +6682,10 @@ String _dueDateLabel(DateTime dueDate) {
 }
 
 class _NodeTypeSpecificContent extends StatelessWidget {
-  const _NodeTypeSpecificContent({required this.node});
+  const _NodeTypeSpecificContent({required this.node, this.onNodeUpdated});
 
   final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
 
   @override
   Widget build(BuildContext context) {
@@ -5847,8 +6708,928 @@ class _NodeTypeSpecificContent extends StatelessWidget {
         NodeType.expense => _ExpenseNodeDetails(node: node),
         NodeType.bookmark => _BookmarkNodeDetails(node: node),
         NodeType.routine => _RoutineNodeDetails(node: node),
+        NodeType.mood => _MoodNodeInfo(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
+        NodeType.timer => _TimerNodeDetails(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
+        NodeType.quote => _QuoteNodeDetails(node: node),
+        NodeType.audio => _AudioNodeDetails(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
+        NodeType.checklist => _ChecklistNodeDetails(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
+        NodeType.canvas => _CanvasNodeDetails(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
+        NodeType.weather => _WeatherNodeDetails(node: node),
+        NodeType.fit => _FitNodeDetails(
+          node: node,
+          onNodeUpdated: onNodeUpdated,
+        ),
         _ => const SizedBox.shrink(),
       },
+    );
+  }
+}
+
+class _MoodNodeInfo extends StatelessWidget {
+  const _MoodNodeInfo({required this.node, required this.onNodeUpdated});
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  Widget build(BuildContext context) {
+    final mood = node.data['mood'] as String? ?? '😊';
+    final energy = (node.data['energy'] as num?)?.toDouble() ?? 3.0;
+    final moodList = ['😢', '😔', '😐', '😊', '😁', '🔥'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Text('Mood: ', style: Theme.of(context).textTheme.bodySmall),
+            for (final m in moodList)
+              GestureDetector(
+                onTap: onNodeUpdated == null
+                    ? null
+                    : () {
+                        final newData = Map<String, Object?>.from(node.data)
+                          ..['mood'] = m;
+                        onNodeUpdated!(
+                          node.copyWith(
+                            data: newData,
+                            updatedAt: DateTime.now(),
+                          ),
+                        );
+                      },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                  child: Opacity(
+                    opacity: m == mood ? 1.0 : 0.4,
+                    child: Text(m, style: const TextStyle(fontSize: 18)),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Text('Energy: ', style: Theme.of(context).textTheme.bodySmall),
+            Expanded(
+              child: Slider(
+                min: 1,
+                max: 5,
+                divisions: 4,
+                value: energy.clamp(1.0, 5.0),
+                activeColor: nodeColor(node.type),
+                onChanged: onNodeUpdated == null
+                    ? null
+                    : (val) {
+                        final newData = Map<String, Object?>.from(node.data)
+                          ..['energy'] = val.round();
+                        onNodeUpdated!(
+                          node.copyWith(
+                            data: newData,
+                            updatedAt: DateTime.now(),
+                          ),
+                        );
+                      },
+              ),
+            ),
+            Text(
+              '${energy.round()}/5',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TimerNodeDetails extends StatefulWidget {
+  const _TimerNodeDetails({required this.node, required this.onNodeUpdated});
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  State<_TimerNodeDetails> createState() => _TimerNodeDetailsState();
+}
+
+class _TimerNodeDetailsState extends State<_TimerNodeDetails> {
+  Timer? _timer;
+  late int _secondsLeft;
+  late String _status;
+
+  int get _initialSeconds =>
+      (widget.node.data['timerInitialSeconds'] as num?)?.toInt() ??
+      (widget.node.data['timerSeconds'] as num?)?.toInt() ??
+      1500;
+
+  @override
+  void initState() {
+    super.initState();
+    _secondsLeft = (widget.node.data['timerSeconds'] as num?)?.toInt() ?? 1500;
+    _status = widget.node.data['timerStatus'] as String? ?? 'stopped';
+    if (_status == 'running') {
+      _startTimer();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_TimerNodeDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newSeconds =
+        (widget.node.data['timerSeconds'] as num?)?.toInt() ?? 1500;
+    final newStatus = widget.node.data['timerStatus'] as String? ?? 'stopped';
+    if (newSeconds != _secondsLeft || newStatus != _status) {
+      _secondsLeft = newSeconds;
+      _status = newStatus;
+      _timer?.cancel();
+      if (_status == 'running') {
+        _startTimer();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsLeft <= 1) {
+        timer.cancel();
+        _updateState(0, 'stopped');
+      } else {
+        setState(() {
+          _secondsLeft--;
+        });
+        if (_secondsLeft % 10 == 0) {
+          _updateState(_secondsLeft, 'running');
+        }
+      }
+    });
+  }
+
+  void _updateState(int seconds, String status) {
+    if (widget.onNodeUpdated == null) return;
+    final newData = Map<String, Object?>.from(widget.node.data)
+      ..['timerInitialSeconds'] = _initialSeconds
+      ..['timerSeconds'] = seconds
+      ..['timerStatus'] = status;
+    widget.onNodeUpdated!(
+      widget.node.copyWith(
+        data: newData,
+        isDone: seconds == 0,
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  String _formatTime(int totalSecs) {
+    final mins = totalSecs ~/ 60;
+    final secs = totalSecs % 60;
+    return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = nodeColor(widget.node.type);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Center(
+          child: Text(
+            _formatTime(_secondsLeft),
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              icon: Icon(
+                _status == 'running' ? Icons.pause_circle : Icons.play_circle,
+              ),
+              iconSize: 32,
+              color: color,
+              onPressed: () {
+                if (_status == 'running') {
+                  _timer?.cancel();
+                  _updateState(_secondsLeft, 'paused');
+                } else {
+                  _updateState(_secondsLeft, 'running');
+                }
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.replay_circle_filled),
+              iconSize: 32,
+              color: theme.colorScheme.onSurfaceVariant,
+              onPressed: () {
+                _timer?.cancel();
+                _updateState(_initialSeconds, 'stopped');
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _QuoteNodeDetails extends StatelessWidget {
+  const _QuoteNodeDetails({required this.node});
+  final MindmapNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final author = node.data['author'] as String? ?? 'Unknown';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Center(
+          child: Text(
+            '“${node.body.isNotEmpty ? node.body : "No quote text yet."}”',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontStyle: FontStyle.italic,
+              height: 1.4,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.bottomRight,
+          child: Text(
+            '— $author',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: nodeColor(node.type),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AudioNodeDetails extends StatefulWidget {
+  const _AudioNodeDetails({required this.node, required this.onNodeUpdated});
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  State<_AudioNodeDetails> createState() => _AudioNodeDetailsState();
+}
+
+class _AudioNodeDetailsState extends State<_AudioNodeDetails> {
+  bool _isPlaying = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = widget.node.data['audioPath'] as String? ?? '';
+    final duration = widget.node.data['audioDuration'] as String? ?? '0:00';
+    final transcript = widget.node.data['audioTranscript'] as String? ?? '';
+    final color = nodeColor(widget.node.type);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              icon: Icon(
+                _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill,
+              ),
+              iconSize: 40,
+              color: color,
+              onPressed: path.isEmpty
+                  ? null
+                  : () {
+                      setState(() {
+                        _isPlaying = !_isPlaying;
+                      });
+                    },
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    path.isEmpty ? 'No recording' : path.split('/').last,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: _isPlaying ? 0.4 : 0.0,
+                          backgroundColor: color.withValues(alpha: 0.1),
+                          valueColor: AlwaysStoppedAnimation<Color>(color),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        duration,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (transcript.trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            transcript.trim(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(fontStyle: FontStyle.italic),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ChecklistNodeDetails extends StatefulWidget {
+  const _ChecklistNodeDetails({
+    required this.node,
+    required this.onNodeUpdated,
+  });
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  State<_ChecklistNodeDetails> createState() => _ChecklistNodeDetailsState();
+}
+
+class _ChecklistNodeDetailsState extends State<_ChecklistNodeDetails> {
+  final _todoInputController = TextEditingController();
+  bool _isAdding = false;
+
+  @override
+  void dispose() {
+    _todoInputController.dispose();
+    super.dispose();
+  }
+
+  void _addTodo() {
+    final text = _todoInputController.text.trim();
+    if (text.isEmpty || widget.onNodeUpdated == null) return;
+    final newItem = TaskChecklistItem(
+      id: const Uuid().v4(),
+      title: text,
+      isDone: false,
+    );
+    final newChecklist = List<TaskChecklistItem>.from(widget.node.checklist)
+      ..add(newItem);
+    widget.onNodeUpdated!(
+      widget.node.copyWith(checklist: newChecklist, updatedAt: DateTime.now()),
+    );
+    _todoInputController.clear();
+    setState(() {
+      _isAdding = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = nodeColor(widget.node.type);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.node.checklist.isEmpty && !_isAdding)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: Text(
+                'Empty checklist',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+              ),
+            ),
+          )
+        else
+          ...widget.node.checklist.take(4).map((item) {
+            final index = widget.node.checklist.indexOf(item);
+            return Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: item.isDone,
+                    activeColor: color,
+                    onChanged: widget.onNodeUpdated == null
+                        ? null
+                        : (val) {
+                            final newChecklist = List<TaskChecklistItem>.from(
+                              widget.node.checklist,
+                            );
+                            newChecklist[index] = TaskChecklistItem(
+                              id: item.id,
+                              title: item.title,
+                              isDone: val ?? false,
+                            );
+                            widget.onNodeUpdated!(
+                              widget.node.copyWith(
+                                checklist: newChecklist,
+                                updatedAt: DateTime.now(),
+                              ),
+                            );
+                          },
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      decoration: item.isDone
+                          ? TextDecoration.lineThrough
+                          : null,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }),
+        if (widget.node.checklist.length > 4)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 2),
+            child: Text(
+              '+ ${widget.node.checklist.length - 4} more items',
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: Colors.grey),
+            ),
+          ),
+        const SizedBox(height: 4),
+        if (_isAdding)
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 28,
+                  child: TextField(
+                    controller: _todoInputController,
+                    style: const TextStyle(fontSize: 12),
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'New item...',
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 4,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    onSubmitted: (_) => _addTodo(),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.check, size: 16),
+                visualDensity: VisualDensity.compact,
+                onPressed: _addTodo,
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 16),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _isAdding = false),
+              ),
+            ],
+          )
+        else
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 24),
+              alignment: Alignment.centerLeft,
+            ),
+            icon: Icon(Icons.add, size: 14, color: color),
+            label: Text(
+              'Add item',
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: color),
+            ),
+            onPressed: () => setState(() => _isAdding = true),
+          ),
+      ],
+    );
+  }
+}
+
+class _CanvasNodeDetails extends StatefulWidget {
+  const _CanvasNodeDetails({required this.node, required this.onNodeUpdated});
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  State<_CanvasNodeDetails> createState() => _CanvasNodeDetailsState();
+}
+
+class _CanvasNodeDetailsState extends State<_CanvasNodeDetails> {
+  List<Offset> _currentLine = [];
+  List<List<Offset>> _lines = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLines();
+  }
+
+  @override
+  void didUpdateWidget(_CanvasNodeDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node.data != widget.node.data) {
+      _loadLines();
+    }
+  }
+
+  void _loadLines() {
+    final serialized = widget.node.data['lines'] as List?;
+    if (serialized == null) {
+      _lines = [];
+      return;
+    }
+    _lines = serialized.map((lineData) {
+      final points = lineData as List;
+      return points.map((p) {
+        final map = p as Map;
+        return Offset(
+          (map['x'] as num).toDouble(),
+          (map['y'] as num).toDouble(),
+        );
+      }).toList();
+    }).toList();
+  }
+
+  void _saveLines() {
+    if (widget.onNodeUpdated == null) return;
+    final serialized = _lines.map((line) {
+      return line.map((p) => {'x': p.dx, 'y': p.dy}).toList();
+    }).toList();
+    final newData = Map<String, Object?>.from(widget.node.data)
+      ..['lines'] = serialized;
+    widget.onNodeUpdated!(
+      widget.node.copyWith(data: newData, updatedAt: DateTime.now()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = nodeColor(widget.node.type);
+
+    return Container(
+      height: 120,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Stack(
+        children: [
+          GestureDetector(
+            onPanStart: (details) {
+              setState(() {
+                _currentLine = [details.localPosition];
+                _lines.add(_currentLine);
+              });
+            },
+            onPanUpdate: (details) {
+              setState(() {
+                _currentLine.add(details.localPosition);
+              });
+            },
+            onPanEnd: (_) {
+              _saveLines();
+            },
+            child: CustomPaint(
+              painter: _SketchpadPainter(lines: _lines, color: color),
+              size: Size.infinite,
+            ),
+          ),
+          if (_lines.isEmpty)
+            Center(
+              child: IgnorePointer(
+                child: Text(
+                  'Draw here',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: color.withValues(alpha: 0.55),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            right: 4,
+            top: 4,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: _lines.isEmpty
+                      ? null
+                      : () {
+                          setState(() {
+                            _lines.removeLast();
+                            _currentLine = _lines.isEmpty ? [] : _lines.last;
+                          });
+                          _saveLines();
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.undo,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: _lines.isEmpty
+                      ? null
+                      : () async {
+                          final clear = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Clear sketch?'),
+                              content: const Text(
+                                'This removes all strokes from this canvas node.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(true),
+                                  child: const Text('Clear'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (clear != true) return;
+                          setState(() {
+                            _lines.clear();
+                            _currentLine.clear();
+                          });
+                          _saveLines();
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.clear,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SketchpadPainter extends CustomPainter {
+  final List<List<Offset>> lines;
+  final Color color;
+  const _SketchpadPainter({required this.lines, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    for (final line in lines) {
+      for (var i = 0; i < line.length - 1; i++) {
+        canvas.drawLine(line[i], line[i + 1], paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SketchpadPainter oldDelegate) => true;
+}
+
+class _WeatherNodeDetails extends StatelessWidget {
+  const _WeatherNodeDetails({required this.node});
+  final MindmapNode node;
+
+  @override
+  Widget build(BuildContext context) {
+    final temp = node.data['temp'] as String? ?? '25°C';
+    final condition = node.data['weather'] as String? ?? 'Sunny';
+    final color = nodeColor(node.type);
+
+    IconData weatherIcon() {
+      final value = condition.toLowerCase();
+      if (value.contains('storm') || value.contains('thunder')) {
+        return Icons.thunderstorm_outlined;
+      }
+      if (value.contains('rain') || value.contains('drizzle')) {
+        return Icons.grain_outlined;
+      }
+      if (value.contains('snow')) return Icons.ac_unit_outlined;
+      if (value.contains('wind')) return Icons.air_outlined;
+      if (value.contains('cloud') || value.contains('overcast')) {
+        return Icons.cloud_outlined;
+      }
+      if (value.contains('fog') || value.contains('mist')) return Icons.foggy;
+      return Icons.wb_sunny_outlined;
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(weatherIcon(), size: 36, color: color),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              temp,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            Text(condition, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _FitNodeDetails extends StatelessWidget {
+  const _FitNodeDetails({required this.node, required this.onNodeUpdated});
+  final MindmapNode node;
+  final NodeUpdateCallback? onNodeUpdated;
+
+  @override
+  Widget build(BuildContext context) {
+    final steps = (node.data['steps'] as num?)?.toInt() ?? 0;
+    final water = (node.data['water'] as num?)?.toInt() ?? 0;
+    final workout = node.data['workout'] as String? ?? 'None';
+    final stepTarget = (node.data['stepTarget'] as num?)?.toInt() ?? 10000;
+    final waterTarget = (node.data['waterTarget'] as num?)?.toInt() ?? 8;
+
+    final color = nodeColor(node.type);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.directions_run_outlined, size: 16),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Steps: $steps / $stepTarget',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add, size: 14),
+              visualDensity: VisualDensity.compact,
+              onPressed: onNodeUpdated == null
+                  ? null
+                  : () {
+                      final newData = Map<String, Object?>.from(node.data)
+                        ..['steps'] = steps + 1000;
+                      onNodeUpdated!(
+                        node.copyWith(data: newData, updatedAt: DateTime.now()),
+                      );
+                    },
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 22, right: 8, bottom: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (steps / stepTarget).clamp(0.0, 1.0),
+              minHeight: 4,
+              backgroundColor: color.withValues(alpha: 0.15),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        Row(
+          children: [
+            const Icon(Icons.local_drink_outlined, size: 16),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Water: $water / $waterTarget cups',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add, size: 14),
+              visualDensity: VisualDensity.compact,
+              onPressed: onNodeUpdated == null
+                  ? null
+                  : () {
+                      final newData = Map<String, Object?>.from(node.data)
+                        ..['water'] = water + 1;
+                      onNodeUpdated!(
+                        node.copyWith(data: newData, updatedAt: DateTime.now()),
+                      );
+                    },
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 22, right: 8, bottom: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (water / waterTarget).clamp(0.0, 1.0),
+              minHeight: 4,
+              backgroundColor: color.withValues(alpha: 0.15),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        if (workout != 'None' && workout.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              '🏋️ Workout: $workout',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -6413,6 +8194,582 @@ class _NoteNodeSource extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CommandPaletteDialog extends StatefulWidget {
+  const _CommandPaletteDialog({required this.onSubmitted});
+  final void Function(
+    NodeType type,
+    String title, {
+    NodePriority? priority,
+    List<String>? tags,
+  })
+  onSubmitted;
+
+  @override
+  State<_CommandPaletteDialog> createState() => _CommandPaletteDialogState();
+}
+
+class _CommandPaletteDialogState extends State<_CommandPaletteDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      Navigator.of(context).pop();
+      return;
+    }
+    final parsed = _parseCommand(text);
+    widget.onSubmitted(
+      parsed.type,
+      parsed.title,
+      priority: parsed.priority,
+      tags: parsed.tags,
+    );
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      backgroundColor: theme.colorScheme.surface,
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 80),
+      child: Container(
+        width: 600,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.terminal_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Command Palette',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const ValueKey('command-palette-input'),
+              controller: _controller,
+              autofocus: true,
+              style: theme.textTheme.bodyLarge,
+              decoration: InputDecoration(
+                hintText: '/task Buy groceries #high @home',
+                hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                  color: theme.hintColor,
+                ),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Syntax: /type Title #priority @tag1 @tag2\n'
+              'Types: /task, /note, /decision, /plan, /habit, /goal, /event\n'
+              'Priorities: #urgent, #high, #medium, #low\n'
+              'Example: /decision Pick database #high @tech @backend',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ParsedCommand {
+  const _ParsedCommand({
+    required this.type,
+    required this.title,
+    this.priority,
+    required this.tags,
+  });
+
+  final NodeType type;
+  final String title;
+  final NodePriority? priority;
+  final List<String> tags;
+}
+
+_ParsedCommand _parseCommand(String input) {
+  final clean = input.trim();
+  if (clean.isEmpty) {
+    return const _ParsedCommand(type: NodeType.task, title: '', tags: []);
+  }
+
+  final words = clean.split(RegExp(r'\s+'));
+
+  var type = NodeType.task;
+  var startIdx = 0;
+  if (words.isNotEmpty && words[0].startsWith('/')) {
+    final possibleTypeName = words[0].substring(1).toLowerCase();
+    for (final t in NodeType.values) {
+      if (t.name == possibleTypeName ||
+          t.label.toLowerCase() == possibleTypeName) {
+        type = t;
+        startIdx = 1;
+        break;
+      }
+    }
+  }
+
+  NodePriority? priority;
+  final tags = <String>[];
+  final titleWords = <String>[];
+
+  for (var i = startIdx; i < words.length; i++) {
+    final word = words[i];
+    if (word.startsWith('#')) {
+      final pName = word.substring(1).toLowerCase();
+      switch (pName) {
+        case 'urgent':
+          priority = NodePriority.urgent;
+        case 'high':
+          priority = NodePriority.high;
+        case 'medium':
+          priority = NodePriority.medium;
+        case 'low':
+          priority = NodePriority.low;
+        case 'none':
+          priority = NodePriority.none;
+        default:
+          titleWords.add(word);
+      }
+    } else if (word.startsWith('@')) {
+      final tag = word.substring(1);
+      if (tag.isNotEmpty) {
+        tags.add(tag);
+      }
+    } else {
+      titleWords.add(word);
+    }
+  }
+
+  final title = titleWords.join(' ');
+  return _ParsedCommand(
+    type: type,
+    title: title.isEmpty ? 'New ${type.label}' : title,
+    priority: priority,
+    tags: tags,
+  );
+}
+
+class _CollaborationRoomBar extends ConsumerWidget {
+  const _CollaborationRoomBar({
+    required this.nodes,
+    this.followingId,
+    this.onFollowChanged,
+  });
+
+  final List<MindmapNode> nodes;
+  final String? followingId;
+  final ValueChanged<String?>? onFollowChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final collabState = ref.watch(collaborationProvider);
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.95),
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor, width: 1.5),
+          radius: 12,
+          wobble: 0.8,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.greenAccent,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () async {
+                final rId = collabState.roomId;
+                if (rId != null && rId.isNotEmpty) {
+                  final url = 'var-collab://var.app/room/$rId?key=collab-key';
+                  await Clipboard.setData(ClipboardData(text: url));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Collab URL copied: $url')),
+                    );
+                  }
+                }
+              },
+              child: Text(
+                collabState.isDemoMode
+                    ? 'Demo Collab'
+                    : (collabState.roomId != null &&
+                              collabState.roomId!.isNotEmpty
+                          ? 'Room: ${collabState.roomId}'
+                          : 'Collab Mode'),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  decoration: collabState.roomId != null
+                      ? TextDecoration.underline
+                      : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            for (final peer in collabState.collaborators.values) ...[
+              _PeerAvatar(
+                peer: peer,
+                isFollowing: followingId == peer.id,
+                onTap: () {
+                  if (onFollowChanged == null) return;
+                  onFollowChanged!(followingId == peer.id ? null : peer.id);
+                },
+              ),
+            ],
+            const SizedBox(width: 8),
+            IconButton(
+              icon: Icon(
+                collabState.isDemoMode
+                    ? Icons.stop_circle_outlined
+                    : Icons.play_circle_fill_outlined,
+                size: 16,
+              ),
+              tooltip: collabState.isDemoMode
+                  ? 'Disable simulation'
+                  : 'Enable simulation',
+              onPressed: () {
+                ref
+                    .read(collaborationProvider.notifier)
+                    .toggleDemoMode(!collabState.isDemoMode);
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.share_outlined, size: 16),
+              tooltip: 'Copy collab link',
+              onPressed: () async {
+                var rId = collabState.roomId;
+                if (rId == null || rId.isEmpty) {
+                  rId = const Uuid().v4().substring(0, 8);
+                  final targetDay = nodes.isNotEmpty
+                      ? nodes.first.day
+                      : DateTime.now();
+                  final dKey = dayKey(targetDay);
+                  await ref
+                      .read(collaborationProvider.notifier)
+                      .joinRoom(rId, dayKey: dKey);
+                }
+                final url = 'var-collab://var.app/room/$rId?key=collab-key';
+                await Clipboard.setData(ClipboardData(text: url));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Collab link copied: $url')),
+                  );
+                }
+              },
+            ),
+            if (collabState.roomId == null || collabState.roomId!.isEmpty)
+              IconButton(
+                icon: const Icon(Icons.login, size: 16),
+                tooltip: 'Join with Code',
+                onPressed: () {
+                  _showJoinCodeDialog(context, ref);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showJoinCodeDialog(BuildContext context, WidgetRef ref) {
+  final controller = TextEditingController();
+  final theme = Theme.of(context);
+
+  showDialog<void>(
+    context: context,
+    builder: (context) {
+      return Consumer(
+        builder: (context, ref, child) {
+          final collabState = ref.watch(collaborationProvider);
+          final history = collabState.roomHistory;
+
+          void handleJoin(String code) {
+            final val = code.trim();
+            if (val.isEmpty) return;
+
+            final messenger = ScaffoldMessenger.of(context);
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Connecting to room...'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+
+            ref.read(collaborationProvider.notifier).joinRoom(val).then((
+              success,
+            ) {
+              messenger.hideCurrentSnackBar();
+              if (success) {
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Successfully joined room!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } else {
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Failed to join room. Check internet or platform support.',
+                    ),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+            });
+
+            Navigator.of(context).pop();
+          }
+
+          return AlertDialog(
+            backgroundColor: theme.colorScheme.surface,
+            shape: DoodleShapeBorder(
+              side: BorderSide(color: theme.dividerColor, width: 1.5),
+              radius: 16,
+              wobble: 1.0,
+            ),
+            title: Text(
+              'Join Collab Room',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontFamily: 'Doodle',
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enter Room Code (ID) or link:',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    hintText: 'e.g., a1b2c3d4',
+                    hintStyle: TextStyle(
+                      color: theme.hintColor.withValues(alpha: 0.5),
+                    ),
+                    border: const OutlineInputBorder(),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                  autofocus: true,
+                  onSubmitted: handleJoin,
+                ),
+                if (history.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Recent Rooms:',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final code in history)
+                        ActionChip(
+                          padding: EdgeInsets.zero,
+                          labelPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          label: Text(
+                            code,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 11,
+                            ),
+                          ),
+                          onPressed: () => handleJoin(code),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => handleJoin(controller.text),
+                child: const Text('Join'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+/// Compact avatar shown in the collaboration toolbar. Communicates the peer's
+/// current activity (idle / selecting / editing), supports click-to-follow, and
+/// exposes a richer tooltip that explains both the action and the live state.
+class _PeerAvatar extends StatelessWidget {
+  const _PeerAvatar({
+    required this.peer,
+    required this.isFollowing,
+    required this.onTap,
+  });
+
+  final Collaborator peer;
+  final bool isFollowing;
+  final VoidCallback onTap;
+
+  IconData? get _statusIcon {
+    if (peer.isEditing) return Icons.edit;
+    if (peer.selectedNodeId != null) return Icons.touch_app;
+    return null;
+  }
+
+  String get _tooltipMessage {
+    final base = isFollowing
+        ? 'Following ${peer.name} (click to stop)'
+        : 'Follow ${peer.name}';
+    final activity = peer.isEditing
+        ? ' • currently editing'
+        : peer.selectedNodeId != null
+        ? ' • has a node selected'
+        : '';
+    return '$base$activity';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final borderColor = isFollowing ? peer.color : Colors.transparent;
+    // Subtle ring tint when peer is actively doing something, even if not
+    // followed — gives the toolbar some life at a glance.
+    final ambientRing = peer.isEditing
+        ? peer.color
+        : peer.selectedNodeId != null
+        ? peer.color.withValues(alpha: 0.45)
+        : Colors.transparent;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Tooltip(
+        message: _tooltipMessage,
+        preferBelow: false,
+        waitDuration: const Duration(milliseconds: 250),
+        child: InkResponse(
+          onTap: onTap,
+          radius: 16,
+          child: SizedBox(
+            width: 30,
+            height: 30,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: borderColor, width: 2),
+                    ),
+                    padding: const EdgeInsets.all(1.5),
+                    child: CircleAvatar(
+                      radius: 10,
+                      backgroundColor: peer.color,
+                      child: Text(
+                        peer.name.isEmpty ? '?' : peer.name[0].toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (ambientRing != Colors.transparent)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: ambientRing, width: 1),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_statusIcon != null)
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: peer.color, width: 1.2),
+                      ),
+                      child: Icon(_statusIcon, size: 8, color: peer.color),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

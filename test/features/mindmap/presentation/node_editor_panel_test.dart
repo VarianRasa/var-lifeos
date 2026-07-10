@@ -638,6 +638,105 @@ void main() {
     ]);
   });
 
+  testWidgets('NodeEditorPanel starts focus timer from smart actions', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 7, 6);
+    final node = MindmapNode.create(
+      id: 'task-1',
+      type: NodeType.task,
+      title: 'Deep work block',
+      day: today,
+    );
+    MindmapNode? savedResult;
+
+    final repository = InMemoryMindmapRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: NodeEditorPanel(
+              node: node,
+              onSave: (node) => savedResult = node,
+              onClose: () {},
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpEditor(tester);
+
+    await tester.tap(find.byKey(const ValueKey('node-editor-overflow-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Node tools'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('start-focus-timer')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('save-node')));
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await _pumpEditor(tester);
+
+    expect(savedResult?.data['focusTimer'], {
+      'status': 'running',
+      'elapsedMinutes': 0,
+    });
+    expect(savedResult?.data['activityLog'], [
+      {'action': 'focus_started', 'label': 'Started focus timer'},
+    ]);
+  });
+
+  testWidgets('NodeEditorPanel converts idea to task from smart actions', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 7, 6);
+    final repository = InMemoryMindmapRepository();
+    final editNode = MindmapNode.create(
+      id: 'idea-1',
+      type: NodeType.idea,
+      title: 'Turn idea into work',
+      day: today,
+    );
+    MindmapNode? savedResult;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: NodeEditorPanel(
+              node: editNode,
+              onSave: (node) => savedResult = node,
+              onClose: () {},
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpEditor(tester);
+
+    await tester.tap(find.byKey(const ValueKey('node-editor-overflow-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Node tools'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('convert-node-to-task')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('save-node')));
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await _pumpEditor(tester);
+
+    expect(savedResult?.type, NodeType.task);
+    expect(savedResult?.status, NodeStatus.open);
+    expect(savedResult?.effort, NodeEffort.fifteenMinutes);
+    expect(savedResult?.contextTags, contains('quick win'));
+    expect(savedResult?.data['activityLog'], [
+      {'action': 'converted', 'label': 'Converted idea to task'},
+    ]);
+  });
+
   testWidgets('NodeEditorPanel keeps header actions in overflow menu', (
     tester,
   ) async {

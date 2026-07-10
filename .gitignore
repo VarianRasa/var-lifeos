@@ -12,6 +12,8 @@
 .swiftpm/
 migrate_working_dir/
 .claude/
+.firebase/
+.hermes/
 devtools_options.yaml
 
 # IntelliJ related
@@ -33,6 +35,7 @@ devtools_options.yaml
 .pub-cache/
 .pub/
 /build/
+/dist/
 /coverage/
 
 # Symbolication related

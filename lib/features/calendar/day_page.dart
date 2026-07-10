@@ -17,10 +17,12 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/theme_controller.dart';
 import '../../core/utils/date_utils.dart';
 import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../command/domain/quick_create_command_parser.dart';
+import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/application/recurring_routine_application.dart';
 import '../mindmap/domain/canvas_position.dart';
@@ -65,7 +67,7 @@ class _DayPageState extends ConsumerState<DayPage> {
   int? _focusTargetMinutes;
   bool _focusTargetNotified = false;
   Timer? _focusTicker;
-  bool _isDayTabsCollapsed = false;
+  bool _isDayTabsCollapsed = true;
   bool _isBlankBoardHidden = false;
   bool _isCanvasAddNodeMenuOpen = false;
   bool _isCanvasAddNodeFabHovered = false;
@@ -1060,6 +1062,8 @@ class _DayPageState extends ConsumerState<DayPage> {
   @override
   Widget build(BuildContext context) {
     final normalizedDate = widget.date.dateOnly;
+    final collabState = ref.watch(collaborationProvider);
+    final variant = ref.watch(themeVariantProvider);
     final nodes = ref.watch(nodesForDayProvider(normalizedDate));
     final allNodes = ref.watch(allMindmapNodesProvider);
     final workspaceContexts = ref.watch(workspaceContextsProvider);
@@ -1520,8 +1524,37 @@ class _DayPageState extends ConsumerState<DayPage> {
                                             child: MindmapCanvas(
                                               key: _canvasKey,
                                               nodes: visibleCanvasNodes,
+                                              variant: variant,
                                               highlightedNodeId:
                                                   widget.highlightNodeId,
+                                              collaborationState: collabState,
+                                              onLocalCursorChanged: (pos) => ref
+                                                  .read(
+                                                    collaborationProvider
+                                                        .notifier,
+                                                  )
+                                                  .updateLocalCursor(pos),
+                                              onLocalSelectionChanged:
+                                                  (nodeId) => ref
+                                                      .read(
+                                                        collaborationProvider
+                                                            .notifier,
+                                                      )
+                                                      .updateLocalSelection(
+                                                        nodeId,
+                                                      ),
+                                              onLocalPingRequested: (pos) => ref
+                                                  .read(
+                                                    collaborationProvider
+                                                        .notifier,
+                                                  )
+                                                  .broadcastPing(pos),
+                                              pingStream: ref
+                                                  .read(
+                                                    collaborationProvider
+                                                        .notifier,
+                                                  )
+                                                  .pingStream,
                                               onNodeDropped: (type, offset) {
                                                 _createNodeOfType(
                                                   context,
@@ -1532,6 +1565,23 @@ class _DayPageState extends ConsumerState<DayPage> {
                                                   offset,
                                                 );
                                               },
+                                              onNodeQuickCreate:
+                                                  (
+                                                    type,
+                                                    title, {
+                                                    priority,
+                                                    tags,
+                                                  }) {
+                                                    _createNodeOfType(
+                                                      context,
+                                                      ref,
+                                                      normalizedDate,
+                                                      canvasNodes,
+                                                      type,
+                                                      null,
+                                                      title: title,
+                                                    );
+                                                  },
                                               onClearNodes: () =>
                                                   _clearMindmapNodes(
                                                     context,
@@ -1582,8 +1632,12 @@ class _DayPageState extends ConsumerState<DayPage> {
                                                   return;
                                                 }
                                                 setState(() {
+                                                  final shouldOpenPanel =
+                                                      _isRightPanelOpen ||
+                                                      _selectedNodeId == null;
                                                   _selectedNodeId = node.id;
-                                                  _isRightPanelOpen = true;
+                                                  _isRightPanelOpen =
+                                                      shouldOpenPanel;
                                                 });
                                               },
                                               onNodeConnected: (source, target) async {
@@ -2953,7 +3007,7 @@ class _DayPageState extends ConsumerState<DayPage> {
     Offset globalPosition,
     Offset canvasPosition,
   ) async {
-    const panelWidth = 368.0;
+    const panelWidth = 560.0;
     const panelHeight = 374.0;
     const margin = 12.0;
     final screenSize = MediaQuery.sizeOf(context);
@@ -3038,6 +3092,14 @@ class _DayPageState extends ConsumerState<DayPage> {
     NodeType.expense,
     NodeType.routine,
     NodeType.kanban,
+    NodeType.mood,
+    NodeType.timer,
+    NodeType.quote,
+    NodeType.audio,
+    NodeType.checklist,
+    NodeType.canvas,
+    NodeType.weather,
+    NodeType.fit,
   ];
 
   Future<void> _clearMindmapNodes(
@@ -3134,6 +3196,20 @@ class _DayPageState extends ConsumerState<DayPage> {
       NodeType.expense => '## Expense\n\nAmount:\nCategory:\nNotes:\n',
       NodeType.bookmark => '## Bookmark\n\nURL:\nWhy saved:\n',
       NodeType.routine => '## Routine\n\nTrigger:\nSteps:\n- ',
+      NodeType.mood =>
+        '## Mood & Energy\n\nMood: 😊\nEnergy: 3/5\nTrigger:\nNotes:',
+      NodeType.timer =>
+        '## Focus Session\n\nFocus: \nDistraction log:\n- \nDone: false',
+      NodeType.quote => '“Quote text here.”\n\nAuthor: Unknown\nSource: ',
+      NodeType.audio =>
+        '## Voice Recording\n\nPath: \nDuration: 0:00\nNotes/Transcript:\n- ',
+      NodeType.checklist =>
+        '## Checklist\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3',
+      NodeType.canvas => '## Sketchpad\n\nDrawings & doodles.',
+      NodeType.weather =>
+        '## Weather Report\n\nTemp: 25°C\nWeather: Sunny\nMood impact: ',
+      NodeType.fit =>
+        '## Fitness Tracker\n\nSteps: 0\nWater: 0\nWorkout: None\nStep Target: 10000\nWater Target: 8',
       NodeType.empty => '',
     };
 
@@ -3900,95 +3976,230 @@ class _CanvasAddNodeContextPanel extends StatefulWidget {
 class _CanvasAddNodeContextPanelState
     extends State<_CanvasAddNodeContextPanel> {
   late final TextEditingController _searchController;
+  late final FocusNode _searchFocusNode;
+  late final ScrollController _listScrollController;
   String _query = '';
+  _CanvasAddNodeFolder? _hoveredFolder;
+  _CanvasAddNodeFolder? _lockedFolder;
+  int _activeTypeIndex = 0;
+
+  static const List<_CanvasAddNodeFolder> _folders = [
+    _CanvasAddNodeFolder('Action', Icons.bolt_outlined, [
+      NodeType.task,
+      NodeType.kanban,
+      NodeType.plan,
+      NodeType.timer,
+      NodeType.checklist,
+    ]),
+    _CanvasAddNodeFolder('Thinking', Icons.psychology_alt_outlined, [
+      NodeType.note,
+      NodeType.idea,
+      NodeType.question,
+      NodeType.decision,
+      NodeType.canvas,
+    ]),
+    _CanvasAddNodeFolder('Knowledge', Icons.menu_book_outlined, [
+      NodeType.resource,
+      NodeType.bookmark,
+      NodeType.link,
+      NodeType.journal,
+      NodeType.quote,
+      NodeType.audio,
+    ]),
+    _CanvasAddNodeFolder('Life', Icons.local_florist_outlined, [
+      NodeType.habit,
+      NodeType.routine,
+      NodeType.goal,
+      NodeType.event,
+      NodeType.mood,
+      NodeType.weather,
+      NodeType.fit,
+    ]),
+    _CanvasAddNodeFolder('People & Data', Icons.scatter_plot_outlined, [
+      NodeType.contact,
+      NodeType.metric,
+      NodeType.expense,
+      NodeType.empty,
+    ]),
+  ];
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController();
-    _searchController.addListener(() {
-      setState(() => _query = _searchController.text.trim().toLowerCase());
-    });
+    _searchFocusNode = FocusNode();
+    _listScrollController = ScrollController();
+    _searchController.addListener(
+      () => setState(() {
+        _query = _searchController.text.trim().toLowerCase();
+        _activeTypeIndex = 0;
+      }),
+    );
   }
 
   @override
   void dispose() {
+    _searchFocusNode.dispose();
     _searchController.dispose();
+    _listScrollController.dispose();
     super.dispose();
+  }
+
+  List<NodeType> get _allFolderTypes => [
+    for (final f in _folders)
+      for (final t in f.types)
+        if (widget.types.contains(t)) t,
+  ];
+  static const Map<NodeType, List<String>> _synonyms = {
+    NodeType.mood: [
+      'mood',
+      'feelings',
+      'journal',
+      'emotion',
+      'mental',
+      'energy',
+    ],
+    NodeType.timer: [
+      'timer',
+      'pomodoro',
+      'focus',
+      'countdown',
+      'clock',
+      'time',
+    ],
+    NodeType.quote: ['quote', 'inspiration', 'author', 'words', 'motivation'],
+    NodeType.audio: ['audio', 'voice', 'record', 'recording', 'memo', 'sound'],
+    NodeType.checklist: ['checklist', 'todo', 'list', 'tasks', 'items'],
+    NodeType.canvas: ['canvas', 'draw', 'sketch', 'doodle', 'paint', 'art'],
+    NodeType.weather: ['weather', 'temp', 'forecast', 'temperature', 'sky'],
+    NodeType.fit: [
+      'fit',
+      'steps',
+      'water',
+      'workout',
+      'health',
+      'exercise',
+      'gym',
+    ],
+  };
+
+  List<NodeType> get _visibleTypes {
+    if (_query.isNotEmpty) {
+      return _allFolderTypes
+          .where(
+            (t) =>
+                t.label.toLowerCase().contains(_query) ||
+                t.name.contains(_query) ||
+                (_synonyms[t]?.any((s) => s.contains(_query)) ?? false),
+          )
+          .toList(growable: false);
+    }
+    return (_lockedFolder ?? _hoveredFolder)?.types
+            .where(widget.types.contains)
+            .toList(growable: false) ??
+        const [];
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.slash) {
+      _searchFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    final types = _visibleTypes;
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown && types.isNotEmpty) {
+      setState(() => _activeTypeIndex = (_activeTypeIndex + 1) % types.length);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && types.isNotEmpty) {
+      setState(() => _activeTypeIndex = (_activeTypeIndex - 1) % types.length);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter && types.isNotEmpty) {
+      widget.onSelect(types[_activeTypeIndex.clamp(0, types.length - 1)]);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      if (_query.isNotEmpty) {
+        _searchController.clear();
+      } else {
+        Navigator.of(context).maybePop();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final types = _query.isEmpty
-        ? widget.types
-        : widget.types
-              .where((type) {
-                final label = type.label.toLowerCase();
-                return label.contains(_query) || type.name.contains(_query);
-              })
-              .toList(growable: false);
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        key: const ValueKey('canvas-add-node-context-panel'),
-        width: 368,
-        padding: const EdgeInsets.all(10),
-        decoration: ShapeDecoration(
-          color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.98),
-          shape: DoodleShapeBorder(
-            side: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
+    final types = _visibleTypes;
+    if (_activeTypeIndex >= types.length) _activeTypeIndex = 0;
+    final activeFolder = _query.isEmpty
+        ? _lockedFolder ?? _hoveredFolder
+        : null;
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _handleKey,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          key: const ValueKey('canvas-add-node-context-panel'),
+          width: 560,
+          padding: const EdgeInsets.all(10),
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surfaceContainerHigh.withValues(
+              alpha: 0.98,
             ),
-            radius: 18,
-            wobble: 2.2,
-          ),
-          shadows: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.34),
-              blurRadius: 28,
-              offset: const Offset(0, 14),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 16,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Create node',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    'Right click',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.64,
-                      ),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+            shape: DoodleShapeBorder(
+              side: BorderSide(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
               ),
+              radius: 18,
+              wobble: 2.2,
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-              child: TextField(
+            shadows: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.34),
+                blurRadius: 28,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.add_circle_outline_rounded,
+                      size: 16,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        activeFolder == null
+                            ? 'Create node'
+                            : 'Create node · ${activeFolder.label}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text('Right click', style: theme.textTheme.labelSmall),
+                  ],
+                ),
+              ),
+              TextField(
                 controller: _searchController,
+                focusNode: _searchFocusNode,
                 autofocus: true,
                 minLines: 1,
                 maxLines: 1,
@@ -4012,46 +4223,158 @@ class _CanvasAddNodeContextPanelState
                     radius: 14,
                     wobble: 1.6,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 9,
-                  ),
                 ),
               ),
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 178,
+                    child: Column(
+                      children: [
+                        for (final folder in _folders) ...[
+                          _CanvasAddNodeFolderTile(
+                            folder: folder,
+                            selected: _lockedFolder == folder,
+                            previewed: _hoveredFolder == folder,
+                            onEnter: () => setState(() {
+                              _hoveredFolder = folder;
+                              _activeTypeIndex = 0;
+                            }),
+                            onExit: () => setState(() => _hoveredFolder = null),
+                            onPressed: () => setState(() {
+                              _lockedFolder = folder;
+                              _activeTypeIndex = 0;
+                            }),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 252),
+                      child: types.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 28),
+                              child: Center(
+                                child: Text(
+                                  _query.isEmpty
+                                      ? 'Pick a folder'
+                                      : 'No node type found',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : Scrollbar(
+                              controller: _listScrollController,
+                              thumbVisibility: types.length > 5,
+                              child: ListView.separated(
+                                controller: _listScrollController,
+                                shrinkWrap: true,
+                                padding: EdgeInsets.zero,
+                                itemCount: types.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 8),
+                                itemBuilder: (context, i) =>
+                                    _CanvasAddNodeTypeTile(
+                                      type: types[i],
+                                      active: i == _activeTypeIndex,
+                                      onPressed: () =>
+                                          widget.onSelect(types[i]),
+                                    ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CanvasAddNodeFolder {
+  const _CanvasAddNodeFolder(this.label, this.icon, this.types);
+  final String label;
+  final IconData icon;
+  final List<NodeType> types;
+}
+
+class _CanvasAddNodeFolderTile extends StatelessWidget {
+  const _CanvasAddNodeFolderTile({
+    required this.folder,
+    required this.selected,
+    required this.previewed,
+    required this.onEnter,
+    required this.onExit,
+    required this.onPressed,
+  });
+  final _CanvasAddNodeFolder folder;
+  final bool selected;
+  final bool previewed;
+  final VoidCallback onEnter;
+  final VoidCallback onExit;
+  final VoidCallback onPressed;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final active = selected || previewed;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => onEnter(),
+      onExit: (_) => onExit(),
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const DoodleShapeBorder(radius: 14, wobble: 1.6),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: active ? 0.7 : 0.42,
             ),
-            if (types.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Center(
+            shape: DoodleShapeBorder(
+              side: BorderSide(
+                color: active
+                    ? theme.colorScheme.primary.withValues(alpha: 0.72)
+                    : theme.colorScheme.outlineVariant.withValues(alpha: 0.44),
+                width: selected ? 1.7 : 1,
+              ),
+              radius: 14,
+              wobble: 1.6,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            child: Row(
+              children: [
+                Icon(folder.icon, size: 16, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
                   child: Text(
-                    'No node type found',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    folder.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-              )
-            else
-              GridView.builder(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisExtent: 44,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
+                Text(
+                  '${folder.types.length}',
+                  style: theme.textTheme.labelSmall,
                 ),
-                itemCount: types.length,
-                itemBuilder: (context, index) {
-                  final type = types[index];
-                  return _CanvasAddNodeTypeTile(
-                    type: type,
-                    onPressed: () => widget.onSelect(type),
-                  );
-                },
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -4059,142 +4382,75 @@ class _CanvasAddNodeContextPanelState
 }
 
 class _CanvasAddNodeTypeTile extends StatefulWidget {
-  const _CanvasAddNodeTypeTile({required this.type, required this.onPressed});
-
+  const _CanvasAddNodeTypeTile({
+    required this.type,
+    required this.active,
+    required this.onPressed,
+  });
   final NodeType type;
+  final bool active;
   final VoidCallback onPressed;
-
   @override
   State<_CanvasAddNodeTypeTile> createState() => _CanvasAddNodeTypeTileState();
 }
 
 class _CanvasAddNodeTypeTileState extends State<_CanvasAddNodeTypeTile> {
   bool _isHovered = false;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = nodeColor(widget.type);
-    final surfaceColor = theme.colorScheme.surfaceContainerHighest;
-    final bgColor = Color.alphaBlend(
-      color.withValues(alpha: _isHovered ? 0.18 : 0.08),
-      surfaceColor.withValues(alpha: _isHovered ? 0.72 : 0.46),
-    );
-
+    final active = widget.active || _isHovered;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedSlide(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        offset: _isHovered ? const Offset(0.025, -0.015) : Offset.zero,
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOutCubic,
-          scale: _isHovered ? 1.035 : 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOutCubic,
-            decoration: ShapeDecoration(
-              color: bgColor,
-              shape: DoodleShapeBorder(
-                side: BorderSide(
-                  color: color.withValues(alpha: _isHovered ? 0.62 : 0.24),
-                ),
-                radius: _isHovered ? 15 : 13,
-                wobble: 1.7,
-              ),
-              shadows: _isHovered
-                  ? [
-                      BoxShadow(
-                        color: color.withValues(alpha: 0.24),
-                        blurRadius: 18,
-                        spreadRadius: 1,
-                        offset: const Offset(0, 8),
-                      ),
-                    ]
-                  : const [],
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 44,
+        decoration: ShapeDecoration(
+          color: Color.alphaBlend(
+            color.withValues(alpha: active ? 0.18 : 0.08),
+            theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: active ? 0.72 : 0.46,
             ),
-            child: InkWell(
-              onTap: widget.onPressed,
-              customBorder: DoodleShapeBorder(
-                radius: _isHovered ? 15 : 13,
-                wobble: 1.7,
-              ),
-              overlayColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.pressed)) {
-                  return color.withValues(alpha: 0.18);
-                }
-                if (states.contains(WidgetState.hovered)) {
-                  return color.withValues(alpha: 0.08);
-                }
-                return null;
-              }),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOutCubic,
-                      width: _isHovered ? 30 : 26,
-                      height: _isHovered ? 30 : 26,
-                      decoration: BoxDecoration(
-                        color: color.withValues(
-                          alpha: _isHovered ? 0.26 : 0.16,
-                        ),
-                        borderRadius: BorderRadius.circular(
-                          _isHovered ? 11 : 9,
-                        ),
-                      ),
-                      child: Icon(
-                        nodeIcon(widget.type),
-                        size: _isHovered ? 16 : 15,
-                        color: color,
-                      ),
+          ),
+          shape: DoodleShapeBorder(
+            side: BorderSide(
+              color: color.withValues(alpha: active ? 0.72 : 0.24),
+              width: widget.active ? 1.8 : 1,
+            ),
+            radius: active ? 15 : 13,
+            wobble: 1.7,
+          ),
+        ),
+        child: InkWell(
+          onTap: widget.onPressed,
+          customBorder: DoodleShapeBorder(
+            radius: active ? 15 : 13,
+            wobble: 1.7,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                Icon(nodeIcon(widget.type), size: 16, color: color),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    widget.type.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: active
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.onSurfaceVariant,
+                      fontWeight: active ? FontWeight.w900 : FontWeight.w800,
                     ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 150),
-                        curve: Curves.easeOutCubic,
-                        style:
-                            theme.textTheme.labelMedium?.copyWith(
-                              color: _isHovered
-                                  ? theme.colorScheme.onSurface
-                                  : theme.colorScheme.onSurfaceVariant,
-                              fontWeight: _isHovered
-                                  ? FontWeight.w900
-                                  : FontWeight.w800,
-                            ) ??
-                            TextStyle(
-                              color: _isHovered
-                                  ? theme.colorScheme.onSurface
-                                  : theme.colorScheme.onSurfaceVariant,
-                              fontWeight: _isHovered
-                                  ? FontWeight.w900
-                                  : FontWeight.w800,
-                            ),
-                        child: Text(
-                          widget.type.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                    AnimatedOpacity(
-                      duration: const Duration(milliseconds: 120),
-                      opacity: _isHovered ? 1 : 0,
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
-                        size: 15,
-                        color: color,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                Icon(Icons.arrow_forward_rounded, size: 15, color: color),
+              ],
             ),
           ),
         ),
@@ -7587,6 +7843,14 @@ IconData _relationIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 

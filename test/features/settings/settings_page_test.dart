@@ -220,6 +220,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const ValueKey('sync-backup-status-chips')),
+      findsOneWidget,
+    );
+    expect(find.text('Firebase sync backend'), findsOneWidget);
+    expect(find.text('Local only'), findsOneWidget);
+    expect(find.text('Auto backup off'), findsOneWidget);
+
     await _expandSyncSections(tester);
     await _tapKey(tester, 'sync-sign-in-button');
     await tester.enterText(

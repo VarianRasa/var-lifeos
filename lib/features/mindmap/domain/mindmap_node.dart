@@ -45,6 +45,44 @@ enum NodePriority {
   }
 }
 
+enum NodeEffort {
+  unspecified('Unspecified'),
+  fiveMinutes('5m'),
+  fifteenMinutes('15m'),
+  thirtyMinutes('30m'),
+  oneHourPlus('1h+');
+
+  const NodeEffort(this.label);
+
+  final String label;
+
+  static NodeEffort fromName(String? name) {
+    for (final effort in values) {
+      if (effort.name == name) return effort;
+    }
+    return NodeEffort.unspecified;
+  }
+}
+
+enum NodeReviewState {
+  none('None'),
+  needsReview('Needs review'),
+  stale('Stale'),
+  someday('Someday'),
+  parked('Parked');
+
+  const NodeReviewState(this.label);
+
+  final String label;
+
+  static NodeReviewState fromName(String? name) {
+    for (final state in values) {
+      if (state.name == name) return state;
+    }
+    return NodeReviewState.none;
+  }
+}
+
 final class TaskChecklistItem {
   const TaskChecklistItem({
     required this.id,
@@ -99,9 +137,12 @@ final class MindmapNode {
     this.isDone = false,
     this.status = NodeStatus.open,
     this.priority = NodePriority.none,
+    this.effort = NodeEffort.unspecified,
+    this.reviewState = NodeReviewState.none,
     this.project = '',
     this.area = '',
     this.tags = const [],
+    this.contextTags = const [],
     this.dueDate,
     this.progress = 0,
     this.isPinned = false,
@@ -121,9 +162,12 @@ final class MindmapNode {
     bool isDone = false,
     NodeStatus status = NodeStatus.open,
     NodePriority priority = NodePriority.none,
+    NodeEffort effort = NodeEffort.unspecified,
+    NodeReviewState reviewState = NodeReviewState.none,
     String project = '',
     String area = '',
     List<String> tags = const [],
+    List<String> contextTags = const [],
     DateTime? dueDate,
     double progress = 0,
     bool isPinned = false,
@@ -146,9 +190,12 @@ final class MindmapNode {
       isDone: isDone,
       status: status,
       priority: priority,
+      effort: effort,
+      reviewState: reviewState,
       project: _normalizeContextName(project),
       area: _normalizeContextName(area),
       tags: _normalizeTags(tags),
+      contextTags: _normalizeTags(contextTags),
       dueDate: dueDate?.dateOnly,
       progress: _normalizeProgress(progress),
       isPinned: isPinned,
@@ -175,9 +222,12 @@ final class MindmapNode {
       isDone: json['isDone'] as bool? ?? false,
       status: NodeStatus.fromName(json['status'] as String?),
       priority: NodePriority.fromName(json['priority'] as String?),
+      effort: NodeEffort.fromName(json['effort'] as String?),
+      reviewState: NodeReviewState.fromName(json['reviewState'] as String?),
       project: _contextNameFromJson(json['project']),
       area: _contextNameFromJson(json['area']),
       tags: _tagsFromJson(json['tags']),
+      contextTags: _tagsFromJson(json['contextTags']),
       dueDate: _dateFromJson(json['dueDate']),
       progress: _normalizeProgress((json['progress'] as num?)?.toDouble() ?? 0),
       isPinned: json['isPinned'] as bool? ?? false,
@@ -199,9 +249,12 @@ final class MindmapNode {
   final bool isDone;
   final NodeStatus status;
   final NodePriority priority;
+  final NodeEffort effort;
+  final NodeReviewState reviewState;
   final String project;
   final String area;
   final List<String> tags;
+  final List<String> contextTags;
   final DateTime? dueDate;
   final double progress;
   final bool isPinned;
@@ -221,6 +274,93 @@ final class MindmapNode {
 
   bool get hasDueDate => dueDate != null;
 
+  bool isNextActionCandidate(DateTime today) {
+    if (isDone || status == NodeStatus.done || isArchived) return false;
+    if (reviewState == NodeReviewState.someday ||
+        reviewState == NodeReviewState.parked) {
+      return false;
+    }
+    return nextActionScore(today) > 0;
+  }
+
+  List<String> reviewNudges(DateTime today) {
+    if (isDone || status == NodeStatus.done || isArchived) return const [];
+    final normalizedToday = today.dateOnly;
+    final nudges = <String>[];
+    if (reviewState == NodeReviewState.needsReview ||
+        reviewState == NodeReviewState.stale) {
+      nudges.add('Pick next action');
+    }
+    if (effort == NodeEffort.unspecified && type == NodeType.task) {
+      nudges.add('Set effort');
+    }
+    final due = dueDate;
+    if (due != null && due.dateOnly.isBefore(normalizedToday)) {
+      nudges.add('Reschedule overdue node');
+    }
+    if (checklist.isNotEmpty && checklistProgress < 1) {
+      nudges.add(
+        'Finish checklist: $completedChecklistCount/${checklist.length} done',
+      );
+    }
+    if (status == NodeStatus.waiting && relatedNodeIds.isEmpty) {
+      nudges.add('Link blocker or owner');
+    }
+    if (contextTags.isEmpty && type == NodeType.task) {
+      nudges.add('Add context tag');
+    }
+    return List.unmodifiable(nudges.take(4));
+  }
+
+  int nextActionScore(DateTime today) {
+    if (isDone || status == NodeStatus.done || isArchived) return 0;
+    final normalizedToday = today.dateOnly;
+    var score = 0;
+    score += switch (priority) {
+      NodePriority.urgent => 50,
+      NodePriority.high => 35,
+      NodePriority.medium => 20,
+      NodePriority.low => 8,
+      NodePriority.none => 0,
+    };
+    score += switch (status) {
+      NodeStatus.doing => 20,
+      NodeStatus.planned => 14,
+      NodeStatus.open => 8,
+      NodeStatus.waiting => -20,
+      NodeStatus.done => -100,
+    };
+    score += switch (effort) {
+      NodeEffort.fiveMinutes => 16,
+      NodeEffort.fifteenMinutes => 12,
+      NodeEffort.thirtyMinutes => 8,
+      NodeEffort.oneHourPlus => 2,
+      NodeEffort.unspecified => 4,
+    };
+    score += switch (reviewState) {
+      NodeReviewState.needsReview => 12,
+      NodeReviewState.stale => 6,
+      NodeReviewState.none => 0,
+      NodeReviewState.someday => -40,
+      NodeReviewState.parked => -60,
+    };
+    final due = dueDate;
+    if (due != null) {
+      final days = due.dateOnly.difference(normalizedToday).inDays;
+      if (days < 0) {
+        score += 35;
+      } else if (days == 0) {
+        score += 28;
+      } else if (days <= 3) {
+        score += 16;
+      } else if (days <= 7) {
+        score += 8;
+      }
+    }
+    if (checklist.isNotEmpty && checklistProgress < 1) score += 6;
+    return score < 0 ? 0 : score;
+  }
+
   MindmapNode copyWith({
     String? id,
     NodeType? type,
@@ -233,9 +373,12 @@ final class MindmapNode {
     bool? isDone,
     NodeStatus? status,
     NodePriority? priority,
+    NodeEffort? effort,
+    NodeReviewState? reviewState,
     String? project,
     String? area,
     List<String>? tags,
+    List<String>? contextTags,
     DateTime? dueDate,
     bool clearDueDate = false,
     double? progress,
@@ -258,9 +401,12 @@ final class MindmapNode {
       isDone: isDone ?? this.isDone,
       status: status ?? this.status,
       priority: priority ?? this.priority,
+      effort: effort ?? this.effort,
+      reviewState: reviewState ?? this.reviewState,
       project: _normalizeContextName(project ?? this.project),
       area: _normalizeContextName(area ?? this.area),
       tags: _normalizeTags(tags ?? this.tags),
+      contextTags: _normalizeTags(contextTags ?? this.contextTags),
       dueDate: clearDueDate ? null : (dueDate ?? this.dueDate)?.dateOnly,
       progress: _normalizeProgress(progress ?? this.progress),
       isPinned: isPinned ?? this.isPinned,
@@ -286,9 +432,12 @@ final class MindmapNode {
     'isDone': isDone,
     'status': status.name,
     'priority': priority.name,
+    'effort': effort.name,
+    'reviewState': reviewState.name,
     'project': project,
     'area': area,
     'tags': tags,
+    'contextTags': contextTags,
     'dueDate': dueDate == null ? null : dayKey(dueDate!),
     'progress': progress,
     'isPinned': isPinned,
@@ -312,9 +461,12 @@ final class MindmapNode {
         other.isDone == isDone &&
         other.status == status &&
         other.priority == priority &&
+        other.effort == effort &&
+        other.reviewState == reviewState &&
         other.project == project &&
         other.area == area &&
         const ListEquality<String>().equals(other.tags, tags) &&
+        const ListEquality<String>().equals(other.contextTags, contextTags) &&
         other.dueDate == dueDate &&
         other.progress == progress &&
         other.isPinned == isPinned &&
@@ -343,9 +495,12 @@ final class MindmapNode {
     isDone,
     status,
     priority,
+    effort,
+    reviewState,
     project,
     area,
     const ListEquality<String>().hash(tags),
+    const ListEquality<String>().hash(contextTags),
     dueDate,
     progress,
     isPinned,

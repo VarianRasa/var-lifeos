@@ -1,6 +1,7 @@
 /// Riverpod graph for local-first mindmap data.
 library;
 
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sembast/sembast.dart';
 
@@ -13,6 +14,7 @@ import '../data/persistent_mindmap_repository.dart';
 import '../data/seed_mindmap_nodes.dart';
 import '../data/sembast_mindmap_node_database.dart';
 import '../data/shared_preferences_mindmap_node_store.dart';
+import '../data/xor_sembast_codec.dart';
 import '../domain/automation_suggestion.dart';
 import '../domain/day_node_summary.dart';
 import '../domain/life_os_summary.dart';
@@ -23,6 +25,7 @@ import '../domain/node_knowledge_index.dart';
 import '../domain/node_relations.dart';
 import '../domain/smart_node_view.dart';
 import '../domain/workspace_context.dart';
+import 'database_lock_provider.dart';
 import 'recurring_routine_application.dart';
 
 final mindmapNodeStoreProvider = Provider<MindmapNodeStore>((ref) {
@@ -30,6 +33,19 @@ final mindmapNodeStoreProvider = Provider<MindmapNodeStore>((ref) {
 });
 
 final mindmapDatabaseProvider = Provider<Future<Database>>((ref) {
+  final lock = ref.watch(databaseLockProvider);
+  if (lock.isLocked) {
+    final completer = Completer<Database>();
+    ref.onDispose(() {
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('Database is locked'));
+      }
+    });
+    return completer.future;
+  }
+  if (lock.unlockedPin != null) {
+    return openMindmapDatabase(codec: getXorSembastCodec(lock.unlockedPin!));
+  }
   return openMindmapDatabase();
 });
 

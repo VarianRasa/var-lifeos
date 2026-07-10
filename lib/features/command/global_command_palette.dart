@@ -3,9 +3,11 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' as io;
 import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +18,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/utils/date_utils.dart';
+import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/application/recurring_routine_application.dart';
@@ -35,6 +38,49 @@ typedef CommandNodeCallback = void Function(MindmapNode node);
 typedef CommandDateCallback = void Function(DateTime date);
 
 final List<_RecentCommand> _recentCommands = <_RecentCommand>[];
+
+Widget _buildCollapsibleSection({
+  required BuildContext context,
+  required String title,
+  required IconData icon,
+  required bool isExpanded,
+  required VoidCallback onToggle,
+  required Widget child,
+}) {
+  final theme = Theme.of(context);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      InkWell(
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(
+                isExpanded ? Icons.expand_less : Icons.expand_more,
+                size: 16,
+                color: theme.colorScheme.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
+      if (isExpanded) ...[const SizedBox(height: 4), child],
+    ],
+  );
+}
 
 Future<void> showGlobalCommandPalette(
   BuildContext context, {
@@ -69,12 +115,14 @@ class GlobalCommandPalette extends ConsumerStatefulWidget {
     required this.initialDate,
     required this.onOpenNode,
     required this.onJumpToDate,
+    this.defaultExpanded = false,
     super.key,
   });
 
   final DateTime initialDate;
   final CommandNodeCallback onOpenNode;
   final CommandDateCallback onJumpToDate;
+  final bool defaultExpanded;
 
   @override
   ConsumerState<GlobalCommandPalette> createState() =>
@@ -98,6 +146,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
   RecurringRoutinePlan? _routinePlan;
   Set<String> _selectedRoutineIds = const {};
   String _query = '';
+  String? _createContextQuery;
   int _activeIndex = 0;
   String? _dateFilterError;
   String? _createTitleError;
@@ -106,6 +155,25 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
   List<_CommandSavedView> _customSavedViews = const [];
   List<_CommandGraphFilter> _graphFilters = const [];
   List<NodeTemplate> _customTemplates = const [];
+
+  late bool _expandedSavedSearches =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
+  late bool _expandedSavedViews =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
+  late bool _expandedPowerActions =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
+  late bool _expandedNavigation =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
+  late bool _expandedQuickCreate =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
+  late bool _expandedFilters =
+      widget.defaultExpanded ||
+      (!kIsWeb && io.Platform.environment.containsKey('FLUTTER_TEST'));
 
   @override
   void initState() {
@@ -298,11 +366,13 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
     final today = ref.watch(currentDateProvider);
     final smartViews = SmartNodeViews.fromNodes(today: today, nodes: nodes);
     final filteredNodes = _filterNodes(nodes, smartViews);
+    final collabState = ref.watch(collaborationProvider);
     final commandEntries = commandPaletteEntriesFromQuery(
       query: _query,
       today: today,
       defaultDay: widget.initialDate,
       filteredNodes: filteredNodes,
+      roomHistory: collabState.roomHistory,
     );
     final tags = _availableTags(nodes);
     final workspaceContexts = WorkspaceContexts.fromNodes(nodes);
@@ -373,6 +443,9 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
             onChanged: (value) {
               setState(() {
                 _query = value;
+                if (_looksLikeCommandContext(value)) {
+                  _createContextQuery = value;
+                }
                 _activeIndex = 0;
               });
             },
@@ -384,23 +457,6 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (MediaQuery.sizeOf(context).height >= 700 &&
-                    _query.trim().isEmpty &&
-                    _createTitleController.text.trim().isEmpty &&
-                    _routinePlan == null &&
-                    _recentCommands.isNotEmpty) ...[
-                  _RecentCommandPanel(
-                    commands: _recentCommands,
-                    onSelected: (command) {
-                      _searchController.text = command.title;
-                      setState(() {
-                        _query = command.title;
-                        _activeIndex = 0;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                ],
                 if (mutator != null) ...[
                   _CommandMutatorPanel(
                     mutator: mutator,
@@ -408,140 +464,317 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                   ),
                   const SizedBox(height: 10),
                 ],
-                _CommandSavedSearchesPanel(
-                  searches: _savedSearches,
-                  onSave: _saveCurrentSearch,
-                  onApply: _applySavedSearch,
-                  onDelete: _deleteSavedSearch,
-                ),
-                const SizedBox(height: 10),
-                _CommandSavedViewsPanel(
-                  customViews: _customSavedViews,
-                  graphFilters: _graphFilters,
-                  onApply: _applySavedViewPreset,
-                  onApplyGraphFilter: _applyGraphFilter,
-                ),
-                const SizedBox(height: 10),
-                _CommandPowerActionsPanel(
-                  nodes: nodes,
-                  today: today,
-                  onCompleteTask: _completeFirstOpenTask,
-                  onRescheduleOverdue: _rescheduleOverdueTasks,
-                  onCreateWeeklyReview: _createWeeklyReview,
-                  onApplyRoutines: _applyReadyRoutinesForToday,
-                ),
-                const SizedBox(height: 10),
-                _CommandNavigationPanel(
-                  initialDate: widget.initialDate,
-                  onNavigate: (route) {
-                    _rememberCommand(
-                      icon: route.icon,
-                      title: route.label,
-                      subtitle: 'Navigate',
-                    );
-                    Navigator.of(context).pop();
-                    context.go(route.path);
-                  },
-                ),
-                const SizedBox(height: 10),
-                _QuickCreatePanel(
-                  titleController: _createTitleController,
-                  dateController: _createDateController,
-                  selectedType: _createType,
-                  titleError: _createTitleError,
-                  dateError: _createDateError,
-                  templates: [...defaultNodeTemplates, ..._customTemplates],
-                  selectedTemplateId: _selectedTemplateId,
-                  routinePlan: _routinePlan,
-                  selectedRoutineIds: _selectedRoutineIds,
-                  onTypeChanged: _changeCreateType,
-                  onTemplateChanged: _applyCreateTemplate,
-                  onCreate: _quickCreate,
-                  onPreviewRoutines: _previewRoutines,
-                  onRoutineSelectionChanged: _toggleRoutineSelection,
-                  onApplySelectedRoutines: _applySelectedRoutines,
-                  onDateChanged: _handleCreateDateChanged,
-                ),
-                const Divider(height: 18),
-                _FilterPanel(
-                  smartViewFilter: _smartViewFilter,
-                  typeFilter: _typeFilter,
-                  statusFilter: _statusFilter,
-                  tagFilter: _tagFilter,
-                  projectFilter: _projectFilter,
-                  areaFilter: _areaFilter,
-                  smartViews: smartViews.views,
-                  tags: tags,
-                  projects: workspaceContexts.projects,
-                  areas: workspaceContexts.areas,
-                  dateFilterController: _dateFilterController,
-                  dateFilterError: _dateFilterError,
-                  onTypeChanged: (type) {
-                    setState(() {
-                      _typeFilter = _typeFilter == type ? null : type;
-                    });
-                  },
-                  onSmartViewChanged: (view) {
-                    setState(() {
-                      _smartViewFilter = _smartViewFilter == view ? null : view;
-                    });
-                  },
-                  onStatusChanged: (status) {
-                    setState(() {
-                      _statusFilter = _statusFilter == status ? null : status;
-                    });
-                  },
-                  onTagChanged: (tag) {
-                    setState(() => _tagFilter = _tagFilter == tag ? null : tag);
-                  },
-                  onProjectChanged: (project) {
-                    setState(() {
-                      _projectFilter = _projectFilter == project
-                          ? null
-                          : project;
-                      if (_projectFilter != null) _areaFilter = null;
-                    });
-                  },
-                  onAreaChanged: (area) {
-                    setState(() {
-                      _areaFilter = _areaFilter == area ? null : area;
-                      if (_areaFilter != null) _projectFilter = null;
-                    });
-                  },
-                  onDateChanged: (_) => setState(() => _dateFilterError = null),
-                  onJumpToDate: _jumpToDate,
-                ),
-                const SizedBox(height: 10),
-                if (commandEntries.isEmpty)
-                  _CommandEmptyState(
-                    query: _query,
-                    onClear: () {
-                      _searchController.clear();
+                if (_query.trim().isNotEmpty) ...[
+                  _QuickCreatePanel(
+                    titleController: _createTitleController,
+                    dateController: _createDateController,
+                    selectedType: _createType,
+                    titleError: _createTitleError,
+                    dateError: _createDateError,
+                    templates: [...defaultNodeTemplates, ..._customTemplates],
+                    selectedTemplateId: _selectedTemplateId,
+                    routinePlan: _routinePlan,
+                    selectedRoutineIds: _selectedRoutineIds,
+                    onTypeChanged: _changeCreateType,
+                    onTemplateChanged: _applyCreateTemplate,
+                    onCreate: _quickCreate,
+                    onPreviewRoutines: _previewRoutines,
+                    onRoutineSelectionChanged: _toggleRoutineSelection,
+                    onApplySelectedRoutines: _applySelectedRoutines,
+                    onDateChanged: _handleCreateDateChanged,
+                  ),
+                  const Divider(height: 18),
+                  _FilterPanel(
+                    smartViewFilter: _smartViewFilter,
+                    typeFilter: _typeFilter,
+                    statusFilter: _statusFilter,
+                    tagFilter: _tagFilter,
+                    projectFilter: _projectFilter,
+                    areaFilter: _areaFilter,
+                    smartViews: smartViews.views,
+                    tags: tags,
+                    projects: workspaceContexts.projects,
+                    areas: workspaceContexts.areas,
+                    dateFilterController: _dateFilterController,
+                    dateFilterError: _dateFilterError,
+                    onTypeChanged: (type) {
                       setState(() {
-                        _query = '';
-                        _activeIndex = 0;
+                        _typeFilter = _typeFilter == type ? null : type;
                       });
                     },
-                  )
-                else
-                  Column(
-                    children: [
-                      for (
-                        var index = 0;
-                        index < commandEntries.length;
-                        index++
-                      )
-                        Padding(
-                          padding: EdgeInsets.only(
-                            bottom: index == commandEntries.length - 1 ? 0 : 8,
-                          ),
-                          child: _buildCommandEntryTile(
-                            commandEntries[index],
-                            isActive: index == _activeIndex,
-                          ),
-                        ),
-                    ],
+                    onSmartViewChanged: (view) {
+                      setState(() {
+                        _smartViewFilter = _smartViewFilter == view
+                            ? null
+                            : view;
+                      });
+                    },
+                    onStatusChanged: (status) {
+                      setState(() {
+                        _statusFilter = _statusFilter == status ? null : status;
+                      });
+                    },
+                    onTagChanged: (tag) {
+                      setState(
+                        () => _tagFilter = _tagFilter == tag ? null : tag,
+                      );
+                    },
+                    onProjectChanged: (project) {
+                      setState(() {
+                        _projectFilter = _projectFilter == project
+                            ? null
+                            : project;
+                        if (_projectFilter != null) _areaFilter = null;
+                      });
+                    },
+                    onAreaChanged: (area) {
+                      setState(() {
+                        _areaFilter = _areaFilter == area ? null : area;
+                        if (_areaFilter != null) _projectFilter = null;
+                      });
+                    },
+                    onDateChanged: (_) =>
+                        setState(() => _dateFilterError = null),
+                    onJumpToDate: _jumpToDate,
                   ),
+                  const Divider(height: 18),
+                  if (commandEntries.isEmpty)
+                    _CommandEmptyState(
+                      query: _query,
+                      onClear: () {
+                        _searchController.clear();
+                        setState(() {
+                          _query = '';
+                          _activeIndex = 0;
+                        });
+                      },
+                    )
+                  else
+                    Column(
+                      children: [
+                        for (
+                          var index = 0;
+                          index < commandEntries.length;
+                          index++
+                        )
+                          Padding(
+                            padding: EdgeInsets.only(
+                              bottom: index == commandEntries.length - 1
+                                  ? 0
+                                  : 8,
+                            ),
+                            child: _buildCommandEntryTile(
+                              commandEntries[index],
+                              isActive: index == _activeIndex,
+                            ),
+                          ),
+                      ],
+                    ),
+                ] else ...[
+                  if (MediaQuery.sizeOf(context).height >= 700 &&
+                      _createTitleController.text.trim().isEmpty &&
+                      _routinePlan == null &&
+                      _recentCommands.isNotEmpty) ...[
+                    _RecentCommandPanel(
+                      commands: _recentCommands,
+                      onSelected: (command) {
+                        _searchController.text = command.title;
+                        setState(() {
+                          _query = command.title;
+                          _activeIndex = 0;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Saved searches',
+                    icon: Icons.saved_search_outlined,
+                    isExpanded: _expandedSavedSearches,
+                    onToggle: () => setState(() {
+                      _expandedSavedSearches = !_expandedSavedSearches;
+                    }),
+                    child: _CommandSavedSearchesPanel(
+                      searches: _savedSearches,
+                      onSave: _saveCurrentSearch,
+                      onApply: _applySavedSearch,
+                      onDelete: _deleteSavedSearch,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Saved views & presets',
+                    icon: Icons.view_quilt_outlined,
+                    isExpanded: _expandedSavedViews,
+                    onToggle: () => setState(() {
+                      _expandedSavedViews = !_expandedSavedViews;
+                    }),
+                    child: _CommandSavedViewsPanel(
+                      customViews: _customSavedViews,
+                      graphFilters: _graphFilters,
+                      onApply: _applySavedViewPreset,
+                      onApplyGraphFilter: _applyGraphFilter,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Power actions',
+                    icon: Icons.bolt_outlined,
+                    isExpanded: _expandedPowerActions,
+                    onToggle: () => setState(() {
+                      _expandedPowerActions = !_expandedPowerActions;
+                    }),
+                    child: _CommandPowerActionsPanel(
+                      nodes: nodes,
+                      today: today,
+                      onCompleteTask: _completeFirstOpenTask,
+                      onRescheduleOverdue: _rescheduleOverdueTasks,
+                      onCreateWeeklyReview: _createWeeklyReview,
+                      onApplyRoutines: _applyReadyRoutinesForToday,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Navigation',
+                    icon: Icons.explore_outlined,
+                    isExpanded: _expandedNavigation,
+                    onToggle: () => setState(() {
+                      _expandedNavigation = !_expandedNavigation;
+                    }),
+                    child: _CommandNavigationPanel(
+                      initialDate: widget.initialDate,
+                      onNavigate: (route) {
+                        _rememberCommand(
+                          icon: route.icon,
+                          title: route.label,
+                          subtitle: 'Navigate',
+                        );
+                        Navigator.of(context).pop();
+                        context.go(route.path);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Quick create',
+                    icon: Icons.add_circle_outline,
+                    isExpanded: _expandedQuickCreate,
+                    onToggle: () => setState(() {
+                      _expandedQuickCreate = !_expandedQuickCreate;
+                    }),
+                    child: _QuickCreatePanel(
+                      titleController: _createTitleController,
+                      dateController: _createDateController,
+                      selectedType: _createType,
+                      titleError: _createTitleError,
+                      dateError: _createDateError,
+                      templates: [...defaultNodeTemplates, ..._customTemplates],
+                      selectedTemplateId: _selectedTemplateId,
+                      routinePlan: _routinePlan,
+                      selectedRoutineIds: _selectedRoutineIds,
+                      onTypeChanged: _changeCreateType,
+                      onTemplateChanged: _applyCreateTemplate,
+                      onCreate: _quickCreate,
+                      onPreviewRoutines: _previewRoutines,
+                      onRoutineSelectionChanged: _toggleRoutineSelection,
+                      onApplySelectedRoutines: _applySelectedRoutines,
+                      onDateChanged: _handleCreateDateChanged,
+                    ),
+                  ),
+                  const Divider(height: 18),
+                  _buildCollapsibleSection(
+                    context: context,
+                    title: 'Search filters',
+                    icon: Icons.filter_alt_outlined,
+                    isExpanded: _expandedFilters,
+                    onToggle: () => setState(() {
+                      _expandedFilters = !_expandedFilters;
+                    }),
+                    child: _FilterPanel(
+                      smartViewFilter: _smartViewFilter,
+                      typeFilter: _typeFilter,
+                      statusFilter: _statusFilter,
+                      tagFilter: _tagFilter,
+                      projectFilter: _projectFilter,
+                      areaFilter: _areaFilter,
+                      smartViews: smartViews.views,
+                      tags: tags,
+                      projects: workspaceContexts.projects,
+                      areas: workspaceContexts.areas,
+                      dateFilterController: _dateFilterController,
+                      dateFilterError: _dateFilterError,
+                      onTypeChanged: (type) {
+                        setState(() {
+                          _typeFilter = _typeFilter == type ? null : type;
+                        });
+                      },
+                      onSmartViewChanged: (view) {
+                        setState(() {
+                          _smartViewFilter = _smartViewFilter == view
+                              ? null
+                              : view;
+                        });
+                      },
+                      onStatusChanged: (status) {
+                        setState(() {
+                          _statusFilter = _statusFilter == status
+                              ? null
+                              : status;
+                        });
+                      },
+                      onTagChanged: (tag) {
+                        setState(
+                          () => _tagFilter = _tagFilter == tag ? null : tag,
+                        );
+                      },
+                      onProjectChanged: (project) {
+                        setState(() {
+                          _projectFilter = _projectFilter == project
+                              ? null
+                              : project;
+                          if (_projectFilter != null) _areaFilter = null;
+                        });
+                      },
+                      onAreaChanged: (area) {
+                        setState(() {
+                          _areaFilter = _areaFilter == area ? null : area;
+                          if (_areaFilter != null) _projectFilter = null;
+                        });
+                      },
+                      onDateChanged: (_) =>
+                          setState(() => _dateFilterError = null),
+                      onJumpToDate: _jumpToDate,
+                    ),
+                  ),
+                  if (commandEntries.isNotEmpty) ...[
+                    const Divider(height: 18),
+                    Column(
+                      children: [
+                        for (
+                          var index = 0;
+                          index < commandEntries.length;
+                          index++
+                        )
+                          Padding(
+                            padding: EdgeInsets.only(
+                              bottom: index == commandEntries.length - 1
+                                  ? 0
+                                  : 8,
+                            ),
+                            child: _buildCommandEntryTile(
+                              commandEntries[index],
+                              isActive: index == _activeIndex,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
               ],
             ),
           ),
@@ -576,6 +809,41 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
           subtitle: '${node.type.name} • ${dayKey(node.day)}',
         );
         widget.onOpenNode(node);
+      case CommandPaletteEntryKind.collab:
+        final link = entry.collabLink!;
+        _rememberCommand(
+          icon: Icons.people_outline,
+          title: 'Join Room',
+          subtitle: link,
+        );
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Connecting to room...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        ref.read(collaborationProvider.notifier).joinRoom(link).then((success) {
+          messenger.hideCurrentSnackBar();
+          if (success) {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Successfully joined room!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Failed to join room. Check internet or platform support.',
+                ),
+                backgroundColor: Colors.redAccent,
+              ),
+            );
+          }
+        });
+        Navigator.of(context).pop();
     }
   }
 
@@ -597,6 +865,11 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
       CommandPaletteEntryKind.node => _CommandResultTile(
         node: entry.node!,
         query: _currentCommandQuery().searchText,
+        isActive: isActive,
+        onTap: () => _executeCommandPaletteEntry(entry),
+      ),
+      CommandPaletteEntryKind.collab => _CollabCommandTile(
+        link: entry.collabLink!,
         isActive: isActive,
         onTap: () => _executeCommandPaletteEntry(entry),
       ),
@@ -693,11 +966,13 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
   }
 
   Future<void> _quickCreate() async {
-    final title = _createTitleController.text.trim();
+    final title = _createTitleController.text.trim().isEmpty
+        ? _query.trim()
+        : _createTitleController.text.trim();
     final enteredDate = DateTime.tryParse(
       _createDateController.text.trim(),
     )?.dateOnly;
-    final commandQuery = _currentCommandQuery();
+    final commandQuery = _currentCommandQuery(forCreate: true);
     final date = commandQuery.day ?? enteredDate;
 
     setState(() {
@@ -1187,11 +1462,18 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
     return null;
   }
 
-  CommandNodeQuery _currentCommandQuery() {
+  CommandNodeQuery _currentCommandQuery({bool forCreate = false}) {
     return commandNodeQueryFromText(
-      _query,
+      forCreate ? (_createContextQuery ?? _query) : _query,
       today: ref.read(currentDateProvider),
     );
+  }
+
+  bool _looksLikeCommandContext(String value) {
+    return value
+        .trim()
+        .split(RegExp(r'\s+'))
+        .any((token) => token.startsWith('#') || token.contains(':'));
   }
 
   NodeType _quickCreateType(
@@ -3139,8 +3421,6 @@ class _QuickCreateCommandTile extends StatelessWidget {
   }
 }
 
-
-
 IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.task => Icons.check_circle_outline,
   NodeType.kanban => Icons.view_kanban_outlined,
@@ -3160,6 +3440,14 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 
@@ -3215,4 +3503,39 @@ String _weekdayName(int? weekday) {
     DateTime.sunday => 'Sunday',
     _ => 'schedule',
   };
+}
+
+class _CollabCommandTile extends StatelessWidget {
+  const _CollabCommandTile({
+    required this.link,
+    required this.onTap,
+    required this.isActive,
+  });
+
+  final String link;
+  final VoidCallback onTap;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      key: const ValueKey('global-command-collab-result'),
+      dense: true,
+      tileColor: isActive
+          ? theme.colorScheme.primary.withValues(alpha: 0.12)
+          : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: isActive ? theme.colorScheme.primary : theme.dividerColor,
+          width: isActive ? 2.0 : 1.0,
+        ),
+      ),
+      leading: const Icon(Icons.people_alt_outlined),
+      title: const Text('Join Collaboration Room', maxLines: 1),
+      subtitle: Text(link, maxLines: 1, overflow: TextOverflow.ellipsis),
+      onTap: onTap,
+    );
+  }
 }

@@ -31,6 +31,70 @@ void main() {
     view.resetPhysicalSize();
     view.resetDevicePixelRatio();
   });
+  testWidgets(
+    'InsightsPage renders productivity distribution, overdue and weekly wins',
+    (tester) async {
+      final today = DateTime(2026, 7, 6);
+      final repository = InMemoryMindmapRepository(
+        seedNodes: [
+          MindmapNode.create(
+            id: 'overdue-task',
+            type: NodeType.task,
+            title: 'Overdue assignment',
+            day: today.subtract(const Duration(days: 3)),
+            status: NodeStatus.open,
+            dueDate: today.subtract(const Duration(days: 2)),
+            effort: NodeEffort.thirtyMinutes,
+            now: DateTime(2026, 7, 3),
+          ),
+          MindmapNode.create(
+            id: 'win-task',
+            type: NodeType.task,
+            title: 'Completed project milestone',
+            day: today.subtract(const Duration(days: 1)),
+            status: NodeStatus.done,
+            isDone: true,
+            effort: NodeEffort.oneHourPlus,
+            reviewState: NodeReviewState.someday,
+            now: DateTime(2026, 7, 5),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            mindmapRepositoryProvider.overrideWithValue(repository),
+            currentDateProvider.overrideWithValue(today),
+          ],
+          child: const MaterialApp(
+            home: InsightsPage(initialShowDashboardPanels: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('Overdue Work'),
+        500,
+        scrollable: find.byType(Scrollable).first,
+      );
+
+      // Verify Productivity Distribution panel exists
+      expect(find.text('Productivity Distribution'), findsOneWidget);
+      expect(find.text('Effort'), findsOneWidget);
+      expect(find.text('Review State'), findsOneWidget);
+
+      // Verify Weekly Wins & Overdue Work panel exists
+      expect(find.text('Overdue Work'), findsOneWidget);
+      expect(find.text('Weekly Wins (Last 7 Days)'), findsOneWidget);
+
+      // Verify contents
+      expect(find.text('• Overdue assignment'), findsOneWidget);
+      expect(find.text('• Completed project milestone'), findsOneWidget);
+    },
+  );
+
   testWidgets('InsightsPage hides secondary dashboard panels until toggled', (
     tester,
   ) async {

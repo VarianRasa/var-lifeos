@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/domain/canvas_position.dart';
@@ -216,6 +217,116 @@ void main() {
     await tester.pump();
 
     expect(movedPosition, const CanvasPosition(-88, -24));
+  });
+
+  testWidgets(
+    'MindmapCanvas opens Command Palette on Ctrl+K and parses command',
+    (tester) async {
+      NodeType? createdType;
+      String? createdTitle;
+      NodePriority? createdPriority;
+      List<String>? createdTags;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: Scaffold(
+            body: MindmapCanvas(
+              nodes: const [],
+              onNodeQuickCreate:
+                  (
+                    NodeType type,
+                    String title, {
+                    NodePriority? priority,
+                    List<String>? tags,
+                  }) {
+                    createdType = type;
+                    createdTitle = title;
+                    createdPriority = priority;
+                    createdTags = tags;
+                  },
+            ),
+          ),
+        ),
+      );
+
+      // Press Ctrl+K to open Command Palette
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('command-palette-input')),
+        findsOneWidget,
+      );
+
+      // Type command
+      await tester.enterText(
+        find.byKey(const ValueKey('command-palette-input')),
+        '/task Buy groceries #high @home @offline',
+      );
+      await tester.pump();
+
+      // Submit
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(createdType, NodeType.task);
+      expect(createdTitle, 'Buy groceries');
+      expect(createdPriority, NodePriority.high);
+      expect(createdTags, containsAll(['home', 'offline']));
+      expect(find.byKey(const ValueKey('command-palette-input')), findsNothing);
+    },
+  );
+
+  testWidgets('MindmapCanvas drag-selects nodes from empty canvas space', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 6, 18);
+    final nodes = [
+      MindmapNode.create(
+        id: 'task-1',
+        type: NodeType.task,
+        title: 'Plan the day',
+        day: day,
+        position: const CanvasPosition(-140, -50),
+        now: DateTime(2026, 6, 18, 8),
+      ),
+      MindmapNode.create(
+        id: 'note-1',
+        type: NodeType.note,
+        title: 'Context',
+        day: day,
+        position: const CanvasPosition(120, 20),
+        now: DateTime(2026, 6, 18, 9),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(useMaterial3: true),
+        home: Scaffold(body: MindmapCanvas(nodes: nodes)),
+      ),
+    );
+
+    final firstRect = tester.getRect(
+      find.byKey(const ValueKey('mindmap-node-task-1')),
+    );
+    final secondRect = tester.getRect(
+      find.byKey(const ValueKey('mindmap-node-note-1')),
+    );
+    final dragStart = firstRect.topLeft - const Offset(40, 32);
+    final dragEnd = secondRect.bottomRight + const Offset(40, 32);
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.down(dragStart);
+    await tester.pump();
+    await gesture.moveTo(dragEnd);
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('2 selected'), findsOneWidget);
   });
 
   testWidgets('MindmapCanvas reports a tapped node selection', (tester) async {
@@ -1072,6 +1183,64 @@ void main() {
 
       expect(disconnectedSource?.id, 'task-1');
       expect(disconnectedTarget?.id, 'task-2');
+    },
+  );
+
+  testWidgets(
+    'MindmapCanvas navigates selection and pans viewport using keyboard keys',
+    (tester) async {
+      final day = DateTime(2026, 6, 18);
+      final nodeA = MindmapNode.create(
+        id: 'node-a',
+        type: NodeType.task,
+        title: 'Node A',
+        day: day,
+        position: const CanvasPosition(0, 0),
+        now: DateTime(2026, 6, 18, 8),
+      );
+      final nodeB = MindmapNode.create(
+        id: 'node-b',
+        type: NodeType.task,
+        title: 'Node B',
+        day: day,
+        position: const CanvasPosition(0, 200), // Below node A
+        now: DateTime(2026, 6, 18, 8),
+      );
+
+      MindmapNode? selectedNode;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: Scaffold(
+            body: MindmapCanvas(
+              nodes: [nodeA, nodeB],
+              onNodeSelected: (node) {
+                selectedNode = node;
+              },
+            ),
+          ),
+        ),
+      );
+
+      // Focus the canvas
+      final focusFinder = find.byType(Focus);
+      expect(focusFinder, findsAtLeast(1));
+
+      // 1. Initial selection: Tap node A
+      await tester.tap(find.byKey(const ValueKey('mindmap-node-node-a')));
+      await tester.pumpAndSettle();
+      expect(selectedNode?.id, 'node-a');
+
+      // 2. Press ArrowDown to navigate selection to Node B
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(selectedNode?.id, 'node-b');
+
+      // 3. Press ArrowUp to navigate selection back to Node A
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(selectedNode?.id, 'node-a');
     },
   );
 }

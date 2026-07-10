@@ -1,7 +1,9 @@
 /// UI-facing controller for sync account and backup actions.
 library;
 
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/date_utils.dart';
 import '../../mindmap/application/mindmap_providers.dart';
@@ -83,6 +85,8 @@ final class SyncControllerState {
     this.restorePoints = const [],
     this.deviceIdentity,
     this.lastSyncedAt,
+    this.autoBackupEnabled = false,
+    this.autoBackupFrequency = 'daily',
   });
 
   final SyncAuthState authState;
@@ -97,6 +101,8 @@ final class SyncControllerState {
   final List<SyncRestorePoint> restorePoints;
   final SyncDeviceIdentity? deviceIdentity;
   final DateTime? lastSyncedAt;
+  final bool autoBackupEnabled;
+  final String autoBackupFrequency;
 
   bool get isSignedIn => authState.isSignedIn;
 
@@ -122,6 +128,8 @@ final class SyncControllerState {
     List<SyncRestorePoint>? restorePoints,
     SyncDeviceIdentity? deviceIdentity,
     DateTime? lastSyncedAt,
+    bool? autoBackupEnabled,
+    String? autoBackupFrequency,
   }) {
     return SyncControllerState(
       authState: authState ?? this.authState,
@@ -136,6 +144,8 @@ final class SyncControllerState {
       restorePoints: restorePoints ?? this.restorePoints,
       deviceIdentity: deviceIdentity ?? this.deviceIdentity,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      autoBackupEnabled: autoBackupEnabled ?? this.autoBackupEnabled,
+      autoBackupFrequency: autoBackupFrequency ?? this.autoBackupFrequency,
     );
   }
 }
@@ -192,18 +202,121 @@ final class SyncController extends StateNotifier<SyncControllerState> {
 
   String get lastMessage => state.lastMessage;
 
+  Timer? _autoBackupTimer;
+
+  SharedPreferencesAsync get _prefs => SharedPreferencesAsync();
+
+  void startAutoBackup({Duration interval = const Duration(hours: 24)}) {
+    _autoBackupTimer?.cancel();
+    _autoBackupTimer = Timer.periodic(interval, (timer) {
+      if (state.isSignedIn && !state.isBusy) {
+        syncNow();
+      }
+    });
+  }
+
+  void stopAutoBackup() {
+    _autoBackupTimer?.cancel();
+    _autoBackupTimer = null;
+  }
+
+  Future<void> setAutoBackupEnabled(bool enabled) async {
+    try {
+      await _prefs.setBool('auto_backup_enabled', enabled);
+    } catch (_) {}
+    state = state.copyWith(autoBackupEnabled: enabled);
+    if (enabled) {
+      String freq = 'daily';
+      try {
+        freq = await _prefs.getString('auto_backup_frequency') ?? 'daily';
+      } catch (_) {}
+      startAutoBackup(interval: _intervalForFrequency(freq));
+    } else {
+      stopAutoBackup();
+    }
+  }
+
+  Future<void> setAutoBackupFrequency(String frequency) async {
+    try {
+      await _prefs.setString('auto_backup_frequency', frequency);
+    } catch (_) {}
+    state = state.copyWith(autoBackupFrequency: frequency);
+    bool enabled = false;
+    try {
+      enabled = await _prefs.getBool('auto_backup_enabled') ?? false;
+    } catch (_) {}
+    if (enabled) {
+      startAutoBackup(interval: _intervalForFrequency(frequency));
+    }
+  }
+
+  Duration _intervalForFrequency(String freq) {
+    return switch (freq) {
+      'daily' => const Duration(hours: 24),
+      'weekly' => const Duration(days: 7),
+      'monthly' => const Duration(days: 30),
+      _ => const Duration(hours: 24),
+    };
+  }
+
+  Timer? _offlineRetryTimer;
+  bool _hasPendingOfflineSync = false;
+
+  bool _isNetworkError(Object error) {
+    final str = error.toString().toLowerCase();
+    return str.contains('socketexception') ||
+        str.contains('httpclientexception') ||
+        str.contains('connection failed') ||
+        str.contains('failed host lookup') ||
+        str.contains('network_error') ||
+        str.contains('network error') ||
+        str.contains('clientexception');
+  }
+
+  void _scheduleOfflineRetry() {
+    _offlineRetryTimer?.cancel();
+    _offlineRetryTimer = Timer(const Duration(seconds: 30), () {
+      if (_hasPendingOfflineSync) {
+        syncNow();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoBackupTimer?.cancel();
+    _offlineRetryTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> load() async {
     try {
       final authState = await _authGateway.currentState();
       final deviceIdentity = await _deviceIdentityStore.readOrCreateIdentity();
       final activityLog = await _activityStore.recent();
       final restorePoints = await _restorePointStore.recent();
+
+      bool autoBackupEnabled = false;
+      String autoBackupFrequency = 'daily';
+      try {
+        autoBackupEnabled = await _prefs.getBool('auto_backup_enabled') ?? false;
+        autoBackupFrequency = await _prefs.getString('auto_backup_frequency') ?? 'daily';
+      } catch (_) {
+        // SharedPreferencesAsync may throw if not mocked in tests
+      }
+
       state = state.copyWith(
         authState: authState,
         activityLog: activityLog,
         restorePoints: restorePoints,
         deviceIdentity: deviceIdentity,
+        autoBackupEnabled: autoBackupEnabled,
+        autoBackupFrequency: autoBackupFrequency,
       );
+
+      if (autoBackupEnabled) {
+        startAutoBackup(interval: _intervalForFrequency(autoBackupFrequency));
+      }
     } on Object catch (error) {
       _reportFailure(error);
     }
@@ -405,6 +518,8 @@ final class SyncController extends StateNotifier<SyncControllerState> {
 
       final pushedDocument = report.pushedDocument;
       _pendingConflictResolutions.clear();
+      _hasPendingOfflineSync = false;
+      _offlineRetryTimer?.cancel();
       state = state.copyWith(
         isBusy: false,
         lastMessage: 'Sync complete',
@@ -428,9 +543,20 @@ final class SyncController extends StateNotifier<SyncControllerState> {
       }
     } on Object catch (error) {
       _reportFailure(error);
+      final isOffline = _isNetworkError(error);
+      if (isOffline) {
+        _hasPendingOfflineSync = true;
+        state = state.copyWith(
+          lastMessage: 'Sync queued (Offline)',
+        );
+        _scheduleOfflineRetry();
+      } else {
+        _hasPendingOfflineSync = false;
+        _offlineRetryTimer?.cancel();
+      }
       await _recordActivity(
         action: SyncActivityAction.syncNow,
-        status: SyncActivityStatus.failed,
+        status: isOffline ? SyncActivityStatus.blocked : SyncActivityStatus.failed,
         message: state.lastMessage,
       );
     }

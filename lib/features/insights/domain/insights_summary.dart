@@ -132,6 +132,8 @@ final class InsightsSummary {
             NodeType.routine ||
             NodeType.empty:
           break;
+        default:
+          break;
       }
     }
 

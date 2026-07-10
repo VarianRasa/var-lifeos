@@ -7,23 +7,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
+import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
+import 'features/mindmap/application/database_lock_provider.dart';
+import 'features/mindmap/presentation/pin_lock_screen.dart';
 
 class VarApp extends ConsumerWidget {
   const VarApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final router = ref.watch(appRouterProvider);
+    final lock = ref.watch(databaseLockProvider);
     final mode = ref.watch(themeModeProvider);
     final accentColor = ref.watch(themeAccentColorProvider);
+    final variant = ref.watch(themeVariantProvider);
+    final fontSize = ref.watch(themeFontSizeProvider);
+    ThemeVariantConfig.active = variant;
+
+    if (lock.isLocked) {
+      return MaterialApp(
+        title: AppInfo.name,
+        debugShowCheckedModeBanner: false,
+        themeMode: mode,
+        theme: AppTheme.lightWithAccent(accentColor, variant, fontSize),
+        darkTheme: AppTheme.darkWithAccent(accentColor, variant, fontSize),
+        home: const PinLockScreen(),
+      );
+    }
+
+    final router = ref.watch(appRouterProvider);
     return MaterialApp.router(
       title: AppInfo.name,
       debugShowCheckedModeBanner: false,
       themeMode: mode,
-      theme: AppTheme.lightWithAccent(accentColor),
-      darkTheme: AppTheme.darkWithAccent(accentColor),
+      theme: AppTheme.lightWithAccent(accentColor, variant, fontSize),
+      darkTheme: AppTheme.darkWithAccent(accentColor, variant, fontSize),
       routerConfig: router,
       scrollBehavior: const _AppScrollBehavior(),
     );

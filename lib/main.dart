@@ -29,9 +29,9 @@ bool get _shouldInitializeFirebase {
   return switch (defaultTargetPlatform) {
     TargetPlatform.android ||
     TargetPlatform.iOS ||
-    TargetPlatform.macOS => true,
+    TargetPlatform.macOS ||
+    TargetPlatform.windows => true,
     TargetPlatform.fuchsia ||
-    TargetPlatform.linux ||
-    TargetPlatform.windows => false,
+    TargetPlatform.linux => false,
   };
 }

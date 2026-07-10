@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_utils.dart';
 import '../application/mindmap_providers.dart';
 import '../domain/goal_progress.dart';
@@ -1295,6 +1294,11 @@ class NodeDetailPage extends ConsumerWidget {
           node: node,
           fields: const ['placeholder'],
         );
+      default:
+        return _EditableFieldWorkspace(
+          node: node,
+          fields: const [],
+        );
     }
   }
 
@@ -2384,9 +2388,9 @@ class _HabitHeatmap extends StatelessWidget {
                         cellColor = theme.colorScheme.surfaceContainerHighest
                             .withValues(alpha: 0.1);
                       } else if (isDone) {
-                        cellColor = NodeColors.habit;
+                        cellColor = nodeColor(NodeType.habit);
                       } else if (isToday) {
-                        cellColor = NodeColors.habit.withValues(alpha: 0.15);
+                        cellColor = nodeColor(NodeType.habit).withValues(alpha: 0.15);
                       } else {
                         cellColor = theme.colorScheme.surfaceContainerHighest
                             .withValues(alpha: 0.4);
@@ -2394,8 +2398,8 @@ class _HabitHeatmap extends StatelessWidget {
 
                       BorderSide borderSide;
                       if (isToday) {
-                        borderSide = const BorderSide(
-                          color: NodeColors.habit,
+                        borderSide = BorderSide(
+                          color: nodeColor(NodeType.habit),
                           width: 1.5,
                         );
                       } else {

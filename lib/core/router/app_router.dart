@@ -13,6 +13,7 @@ import '../../features/calendar/calendar_page.dart';
 import '../../features/calendar/day_page.dart';
 import '../../features/graph/graph_page.dart';
 import '../../features/insights/insights_page.dart';
+import '../../features/mindmap/presentation/collab_page.dart';
 import '../../features/mindmap/presentation/node_detail_page.dart';
 import '../../features/settings/settings_page.dart';
 import '../../features/workspace/workspace_detail_page.dart';
@@ -94,6 +95,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             name: AppRoute.settings.name,
             builder: (context, state) => const SettingsPage(),
           ),
+          GoRoute(
+            path: '/collab',
+            name: AppRoute.collab.name,
+            builder: (context, state) {
+              final roomId =
+                  state.uri.queryParameters['room'] ??
+                  state.uri.queryParameters['id'];
+              final dayKey =
+                  state.uri.queryParameters['key'] ??
+                  state.uri.queryParameters['date'];
+              return CollabPage(initialRoomId: roomId, initialDayKey: dayKey);
+            },
+          ),
         ],
       ),
     ],
@@ -102,7 +116,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 });
 
 /// Named route identifiers, used for nav rail / bottom nav active state.
-enum AppRoute { calendar, insights, graph, workspaces, settings }
+enum AppRoute { calendar, insights, graph, workspaces, collab, settings }
 
 extension AppRouteX on AppRoute {
   String get path {
@@ -115,6 +129,8 @@ extension AppRouteX on AppRoute {
         return '/graph';
       case AppRoute.workspaces:
         return '/workspaces';
+      case AppRoute.collab:
+        return '/collab';
       case AppRoute.settings:
         return '/settings';
     }
@@ -125,6 +141,7 @@ extension AppRouteX on AppRoute {
     AppRoute.insights => Icons.insights_outlined,
     AppRoute.graph => Icons.account_tree_outlined,
     AppRoute.workspaces => Icons.workspaces_outline,
+    AppRoute.collab => Icons.people_outline,
     AppRoute.settings => Icons.settings_outlined,
   };
 
@@ -133,6 +150,7 @@ extension AppRouteX on AppRoute {
     AppRoute.insights => Icons.insights_rounded,
     AppRoute.graph => Icons.account_tree,
     AppRoute.workspaces => Icons.workspaces,
+    AppRoute.collab => Icons.people,
     AppRoute.settings => Icons.settings_rounded,
   };
 
@@ -141,6 +159,7 @@ extension AppRouteX on AppRoute {
     AppRoute.insights => 'Insights',
     AppRoute.graph => 'Graph',
     AppRoute.workspaces => 'Workspaces',
+    AppRoute.collab => 'Collab',
     AppRoute.settings => 'Settings',
   };
 }

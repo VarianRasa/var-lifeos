@@ -7,7 +7,9 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../shared/widgets/doodle_border.dart';
+import '../constants/app_constants.dart';
 import 'app_colors.dart';
+import 'theme_controller.dart';
 
 class AppTheme {
   const AppTheme._();
@@ -25,6 +27,28 @@ class AppTheme {
     'Marker Felt',
   ];
 
+  static String? _fontFor(AppThemeVariant variant) {
+    switch (variant) {
+      case AppThemeVariant.blueprint:
+        return 'RobotoMono';
+      case AppThemeVariant.midnight:
+        return 'Roboto';
+      default:
+        return _handwrittenFont;
+    }
+  }
+
+  static List<String>? _fallbackFor(AppThemeVariant variant) {
+    switch (variant) {
+      case AppThemeVariant.blueprint:
+        return const ['Courier New', 'Courier', 'monospace'];
+      case AppThemeVariant.midnight:
+        return const ['Arial', 'sans-serif'];
+      default:
+        return _handwrittenFallback;
+    }
+  }
+
   static DoodleShapeBorder _doodleShape({
     BorderSide side = BorderSide.none,
     double radius = 20,
@@ -41,15 +65,15 @@ class AppTheme {
     return DoodleInputBorder(borderSide: side, radius: radius, wobble: wobble);
   }
 
-  static ThemeData get dark => _base(Brightness.dark, seed);
+  static ThemeData get dark => _base(Brightness.dark, seed, AppThemeVariant.blackboard, AppFontSize.medium);
 
-  static ThemeData get light => _base(Brightness.light, seed);
+  static ThemeData get light => _base(Brightness.light, seed, AppThemeVariant.blackboard, AppFontSize.medium);
 
-  static ThemeData darkWithAccent(Color accent) =>
-      _base(Brightness.dark, accent);
+  static ThemeData darkWithAccent(Color accent, AppThemeVariant variant, AppFontSize fontSize) =>
+      _base(Brightness.dark, accent, variant, fontSize);
 
-  static ThemeData lightWithAccent(Color accent) =>
-      _base(Brightness.light, accent);
+  static ThemeData lightWithAccent(Color accent, AppThemeVariant variant, AppFontSize fontSize) =>
+      _base(Brightness.light, accent, variant, fontSize);
 
   /// Smooth page transition used across all routes.
   static const pageTransitionsTheme = PageTransitionsTheme(
@@ -62,31 +86,34 @@ class AppTheme {
     },
   );
 
-  static ThemeData _base(Brightness brightness, Color seedColor) {
+  static ThemeData _base(Brightness brightness, Color seedColor, AppThemeVariant variant, AppFontSize fontSize) {
+    final scale = fontSize.scaleFactor;
     final isDark = brightness == Brightness.dark;
+    final palette = AppThemeVariantColors.of(variant);
     final textPrimary = isDark
-        ? NeutralColors.darkTextPrimary
-        : NeutralColors.lightTextPrimary;
+        ? palette.darkTextPrimary
+        : palette.lightTextPrimary;
     final textSecondary = isDark
-        ? NeutralColors.darkTextSecondary
-        : NeutralColors.lightTextSecondary;
+        ? palette.darkTextSecondary
+        : palette.lightTextSecondary;
     final border = isDark
-        ? NeutralColors.darkBorder
-        : NeutralColors.lightBorder;
+        ? palette.darkBorder
+        : palette.lightBorder;
     final surface = isDark
-        ? NeutralColors.darkSurface
-        : NeutralColors.lightSurface;
+        ? palette.darkSurface
+        : palette.lightSurface;
     final surfaceHigh = isDark
-        ? NeutralColors.darkSurfaceHigh
-        : NeutralColors.lightSurfaceHigh;
+        ? palette.darkSurfaceHigh
+        : palette.lightSurfaceHigh;
     final primary = seedColor;
-    const secondary = NodeColors.kanban;
-    const tertiary = NodeColors.plan;
+    final secondary = palette.nodeColors[NodeType.kanban] ?? NodeColors.kanban;
+    final tertiary = palette.nodeColors[NodeType.plan] ?? NodeColors.plan;
+    final scaffoldBg = isDark ? palette.darkBg : palette.lightBg;
     final scheme =
         ColorScheme.fromSeed(
           seedColor: seedColor,
           brightness: brightness,
-          surface: isDark ? NeutralColors.darkBg : NeutralColors.lightBg,
+          surface: scaffoldBg,
         ).copyWith(
           primary: primary,
           onPrimary: _bestOnColor(primary),
@@ -96,7 +123,7 @@ class AppTheme {
           onTertiary: _bestOnColor(tertiary),
           error: StatusColors.error,
           onError: _bestOnColor(StatusColors.error),
-          surface: isDark ? NeutralColors.darkBg : NeutralColors.lightBg,
+          surface: scaffoldBg,
           onSurface: textPrimary,
           surfaceContainer: surface,
           surfaceContainerHigh: surfaceHigh,
@@ -110,11 +137,9 @@ class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: isDark
-          ? NeutralColors.darkBg
-          : NeutralColors.lightBg,
+      scaffoldBackgroundColor: scaffoldBg,
       pageTransitionsTheme: pageTransitionsTheme,
-      textTheme: _buildTextTheme(textPrimary, textSecondary),
+      textTheme: _buildTextTheme(textPrimary, textSecondary, variant, scale),
       cardTheme: CardThemeData(
         color: surface,
         elevation: 0,
@@ -133,9 +158,9 @@ class AppTheme {
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: textPrimary,
-          fontFamily: _handwrittenFont,
-          fontFamilyFallback: _handwrittenFallback,
-          fontSize: 19,
+          fontFamily: _fontFor(variant),
+          fontFamilyFallback: _fallbackFor(variant),
+          fontSize: 19 * scale,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.15,
         ),
@@ -166,8 +191,8 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: surfaceHigh,
         selectedColor: scheme.primary,
-        labelStyle: TextStyle(color: textPrimary, fontSize: 12),
-        secondaryLabelStyle: TextStyle(color: scheme.onPrimary, fontSize: 12),
+        labelStyle: TextStyle(color: textPrimary, fontSize: 12 * scale),
+        secondaryLabelStyle: TextStyle(color: scheme.onPrimary, fontSize: 12 * scale),
         side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
         shape: _doodleShape(radius: 16, wobble: 1.7),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
@@ -176,9 +201,9 @@ class AppTheme {
         style: FilledButton.styleFrom(
           shape: _doodleShape(radius: 18, wobble: 1.9),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-          textStyle: const TextStyle(
+          textStyle: TextStyle(
             fontWeight: FontWeight.w700,
-            fontSize: 14,
+            fontSize: 14 * scale,
             letterSpacing: 0.1,
           ),
         ),
@@ -188,9 +213,9 @@ class AppTheme {
           shape: _doodleShape(radius: 18, wobble: 1.9),
           side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-          textStyle: const TextStyle(
+          textStyle: TextStyle(
             fontWeight: FontWeight.w700,
-            fontSize: 14,
+            fontSize: 14 * scale,
             letterSpacing: 0.1,
           ),
         ),
@@ -212,8 +237,8 @@ class AppTheme {
             return BorderSide(color: color, width: isDark ? 1.8 : 1.4);
           }),
           shape: WidgetStatePropertyAll(_doodleShape(radius: 999, wobble: 1.6)),
-          textStyle: const WidgetStatePropertyAll(
-            TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontWeight: FontWeight.w800, fontSize: 12 * scale),
           ),
           visualDensity: VisualDensity.compact,
         ),
@@ -248,8 +273,8 @@ class AppTheme {
         ),
         titleTextStyle: TextStyle(
           color: textPrimary,
-          fontFamily: _handwrittenFont,
-          fontFamilyFallback: _handwrittenFallback,
+          fontFamily: _fontFor(variant),
+          fontFamilyFallback: _fallbackFor(variant),
           fontSize: 19,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.15,
@@ -423,75 +448,89 @@ class AppTheme {
     return (lighter + 0.05) / (darker + 0.05);
   }
 
-  static TextTheme _buildTextTheme(Color primary, Color secondary) {
-    const body = TextStyle(letterSpacing: 0, height: 1.38);
-    const hand = TextStyle(
-      fontFamily: _handwrittenFont,
-      fontFamilyFallback: _handwrittenFallback,
+  static TextTheme _buildTextTheme(
+    Color primary,
+    Color secondary,
+    AppThemeVariant variant,
+    double scale,
+  ) {
+    final font = _fontFor(variant);
+    final fallback = _fallbackFor(variant);
+    final isMonospace = variant == AppThemeVariant.blueprint;
+
+    final body = TextStyle(
+      fontFamily: isMonospace ? 'RobotoMono' : null,
+      fontFamilyFallback: isMonospace ? const ['Courier New', 'Courier', 'monospace'] : null,
+      letterSpacing: 0,
+      height: 1.38,
+    );
+    final hand = TextStyle(
+      fontFamily: font,
+      fontFamilyFallback: fallback,
       letterSpacing: 0.18,
       height: 1.22,
     );
     return TextTheme(
       displayLarge: hand.copyWith(
-        fontSize: 42,
+        fontSize: 42 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       displayMedium: hand.copyWith(
-        fontSize: 34,
+        fontSize: 34 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       displaySmall: hand.copyWith(
-        fontSize: 28,
+        fontSize: 28 * scale,
         fontWeight: FontWeight.w700,
         color: primary,
       ),
       headlineLarge: hand.copyWith(
-        fontSize: 24,
+        fontSize: 24 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       headlineMedium: hand.copyWith(
-        fontSize: 21,
+        fontSize: 21 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       headlineSmall: hand.copyWith(
-        fontSize: 18,
+        fontSize: 18 * scale,
         fontWeight: FontWeight.w700,
         color: primary,
       ),
       titleLarge: hand.copyWith(
-        fontSize: 17,
+        fontSize: 17 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       titleMedium: hand.copyWith(
-        fontSize: 15,
+        fontSize: 15 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       titleSmall: hand.copyWith(
-        fontSize: 14,
+        fontSize: 14 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
-      bodyLarge: body.copyWith(fontSize: 14, color: primary),
-      bodyMedium: body.copyWith(fontSize: 13, color: primary),
-      bodySmall: body.copyWith(fontSize: 12, color: secondary),
+      bodyLarge: body.copyWith(fontSize: 14 * scale, color: primary),
+      bodyMedium: body.copyWith(fontSize: 13 * scale, color: primary),
+      bodySmall: body.copyWith(fontSize: 12 * scale, color: secondary),
       labelLarge: hand.copyWith(
-        fontSize: 13,
+        fontSize: 13 * scale,
         fontWeight: FontWeight.w800,
         color: primary,
       ),
       labelMedium: hand.copyWith(
-        fontSize: 12,
+        fontSize: 12 * scale,
         fontWeight: FontWeight.w700,
         color: secondary,
       ),
       labelSmall: hand.copyWith(
-        fontSize: 11,
+        fontSize: 11 * scale,
         fontWeight: FontWeight.w700,
         color: secondary,
       ),

@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
+import '../application/collaboration_controller.dart';
 import '../application/mindmap_providers.dart';
 import '../domain/automation_rule.dart';
 import '../domain/canvas_position.dart';
@@ -66,6 +67,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   final _projectController = TextEditingController();
   final _areaController = TextEditingController();
   final _tagsController = TextEditingController();
+  final _contextTagsController = TextEditingController();
   final _dueDateController = TextEditingController();
   final _progressController = TextEditingController();
   final _relatedNodeIdsController = TextEditingController();
@@ -115,6 +117,23 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   final _calReasonController = TextEditingController();
   final _calRemindAtController = TextEditingController();
 
+  // New node controllers
+  final _quoteAuthorController = TextEditingController();
+  final _timerSecondsController = TextEditingController();
+  final _audioPathController = TextEditingController();
+  final _audioDurationController = TextEditingController();
+  final _audioTranscriptController = TextEditingController();
+  final _weatherTempController = TextEditingController();
+  final _weatherConditionController = TextEditingController();
+  final _fitStepsController = TextEditingController();
+  final _fitWaterController = TextEditingController();
+  final _fitWorkoutController = TextEditingController();
+  final _fitStepTargetController = TextEditingController();
+  final _fitWaterTargetController = TextEditingController();
+
+  String _moodEmoji = '😊';
+  double _moodEnergy = 3.0;
+
   String _habitRecurrence = 'daily';
   bool _journalWeeklyReview = false;
   bool _journalMonthlyReview = false;
@@ -157,6 +176,15 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       controller.addListener(_markDirty);
     }
     _bodyController.addListener(_onBodyChanged);
+
+    // Broadcast editing status to remote collaborators
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref
+            .read(collaborationProvider.notifier)
+            .updateLocalSelection(widget.node.id, isEditing: true);
+      }
+    });
   }
 
   List<TextEditingController> get _dirtyControllers => [
@@ -165,6 +193,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _projectController,
     _areaController,
     _tagsController,
+    _contextTagsController,
     _dueDateController,
     _progressController,
     _relatedNodeIdsController,
@@ -209,6 +238,18 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _calSelectedOptionController,
     _calReasonController,
     _calRemindAtController,
+    _quoteAuthorController,
+    _timerSecondsController,
+    _audioPathController,
+    _audioDurationController,
+    _audioTranscriptController,
+    _weatherTempController,
+    _weatherConditionController,
+    _fitStepsController,
+    _fitWaterController,
+    _fitWorkoutController,
+    _fitStepTargetController,
+    _fitWaterTargetController,
   ];
 
   void _markDirty() {
@@ -233,6 +274,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _projectController.text = node.project;
     _areaController.text = node.area;
     _tagsController.text = node.tags.join(', ');
+    _contextTagsController.text = node.contextTags.join(', ');
     _dueDateController.text = node.dueDate == null ? '' : dayKey(node.dueDate!);
     _progressController.text = node.progress == 0
         ? ''
@@ -242,7 +284,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
 
     _hasChecklist = node.checklist.isNotEmpty;
     _hasDueDate = node.dueDate != null;
-    _hasTags = node.tags.isNotEmpty;
+    _hasTags = node.tags.isNotEmpty || node.contextTags.isNotEmpty;
     _hasContext = node.project.isNotEmpty || node.area.isNotEmpty;
     _hasProgress = node.progress > 0;
 
@@ -270,6 +312,9 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         node.type == NodeType.goal ||
         node.type == NodeType.metric;
     _hasTimeBlock = data.containsKey('time_block');
+
+    _moodEmoji = node.data['mood'] as String? ?? '😊';
+    _moodEnergy = (node.data['energy'] as num?)?.toDouble() ?? 3.0;
 
     _loadStructuredTypeFields(node);
 
@@ -399,6 +444,42 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       'merchant',
       bodyFields,
     );
+    _quoteAuthorController.text = _stringFromData(data, 'author', bodyFields);
+    _timerSecondsController.text = _stringFromData(
+      data,
+      'timerSeconds',
+      bodyFields,
+    );
+    _audioPathController.text = _stringFromData(data, 'audioPath', bodyFields);
+    _audioDurationController.text = _stringFromData(
+      data,
+      'audioDuration',
+      bodyFields,
+    );
+    _audioTranscriptController.text = _stringFromData(
+      data,
+      'audioTranscript',
+      bodyFields,
+    );
+    _weatherTempController.text = _stringFromData(data, 'temp', bodyFields);
+    _weatherConditionController.text = _stringFromData(
+      data,
+      'weather',
+      bodyFields,
+    );
+    _fitStepsController.text = _stringFromData(data, 'steps', bodyFields);
+    _fitWaterController.text = _stringFromData(data, 'water', bodyFields);
+    _fitWorkoutController.text = _stringFromData(data, 'workout', bodyFields);
+    _fitStepTargetController.text = _stringFromData(
+      data,
+      'stepTarget',
+      bodyFields,
+    );
+    _fitWaterTargetController.text = _stringFromData(
+      data,
+      'waterTarget',
+      bodyFields,
+    );
   }
 
   String _stringFromData(
@@ -427,6 +508,13 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
 
   @override
   void dispose() {
+    // Reset remote collaboration editing state
+    try {
+      ref
+          .read(collaborationProvider.notifier)
+          .updateLocalSelection(null, isEditing: false);
+    } catch (_) {}
+
     for (final controller in _dirtyControllers) {
       controller.removeListener(_markDirty);
     }
@@ -435,6 +523,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _bodyController.dispose();
     _projectController.dispose();
     _areaController.dispose();
+    _contextTagsController.dispose();
     _timeBlockStartController.dispose();
     _timeBlockEndController.dispose();
     _contactRoleController.dispose();
@@ -480,6 +569,18 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _journalEnergyController.dispose();
     _journalPromptController.dispose();
     _journalGratitudeController.dispose();
+    _quoteAuthorController.dispose();
+    _timerSecondsController.dispose();
+    _audioPathController.dispose();
+    _audioDurationController.dispose();
+    _audioTranscriptController.dispose();
+    _weatherTempController.dispose();
+    _weatherConditionController.dispose();
+    _fitStepsController.dispose();
+    _fitWaterController.dispose();
+    _fitWorkoutController.dispose();
+    _fitStepTargetController.dispose();
+    _fitWaterTargetController.dispose();
     super.dispose();
   }
 
@@ -705,6 +806,44 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
             _bodyController,
             'Spark:\nWhy it matters:\nNext experiment:',
           );
+        case NodeType.mood:
+          _fillEmpty(
+            _bodyController,
+            'Mood: 😊\nEnergy: 3/5\nTrigger:\nNotes:',
+          );
+        case NodeType.timer:
+          _fillEmpty(
+            _bodyController,
+            'Focus: \nDistraction log:\n- \nDone: false',
+          );
+          _fillEmpty(_timerSecondsController, '1500');
+        case NodeType.quote:
+          _fillEmpty(_bodyController, '“Quote text here.”');
+          _fillEmpty(_quoteAuthorController, 'Unknown');
+        case NodeType.audio:
+          _fillEmpty(
+            _bodyController,
+            '## Voice Recording\n\nNotes/Transcript:\n- ',
+          );
+          _fillEmpty(_audioPathController, '/voice-notes/memo.mp3');
+          _fillEmpty(_audioDurationController, '0:00');
+          _fillEmpty(_audioTranscriptController, '');
+        case NodeType.checklist:
+          _hasChecklist = true;
+          _fillEmpty(_bodyController, '## Checklist');
+          _fillEmpty(_checklistController, 'Task 1\nTask 2\nTask 3');
+        case NodeType.canvas:
+          _fillEmpty(_bodyController, '## Sketchpad\n\nDrawings & doodles.');
+        case NodeType.weather:
+          _fillEmpty(_bodyController, 'Mood impact: ');
+          _fillEmpty(_weatherTempController, '25°C');
+          _fillEmpty(_weatherConditionController, 'Sunny');
+        case NodeType.fit:
+          _fillEmpty(_bodyController, 'Workout: None\nSteps: 0\nWater: 0');
+          _fillEmpty(_fitStepsController, '0');
+          _fillEmpty(_fitWaterController, '0');
+          _fillEmpty(_fitStepTargetController, '10000');
+          _fillEmpty(_fitWaterTargetController, '8');
         default:
           _fillEmpty(_bodyController, 'Summary:\nNext action:\nNotes:');
       }
@@ -1264,10 +1403,15 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       isDone: _draft.isDone,
       status: _draft.status,
       priority: _draft.priority,
+      effort: _draft.effort,
+      reviewState: _draft.reviewState,
       project: _hasContext ? _projectController.text.trim() : '',
       area: _hasContext ? _areaController.text.trim() : '',
       tags: _hasTags
           ? _parseLines(_tagsController.text.replaceAll(',', '\n'))
+          : const [],
+      contextTags: _hasTags
+          ? _parseLines(_contextTagsController.text.replaceAll(',', '\n'))
           : const [],
       dueDate: dueDate,
       progress: effectiveProgress,
@@ -1315,6 +1459,37 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         data['source'] = _noteSourceController.text.trim();
       case NodeType.bookmark:
         data['url'] = _noteSourceController.text.trim();
+      case NodeType.mood:
+        data.addAll({'mood': _moodEmoji, 'energy': _moodEnergy.round()});
+      case NodeType.quote:
+        data['author'] = _quoteAuthorController.text.trim();
+      case NodeType.timer:
+        final seconds =
+            int.tryParse(_timerSecondsController.text.trim()) ?? 1500;
+        data
+          ..['timerSeconds'] = seconds
+          ..['timerInitialSeconds'] = seconds;
+      case NodeType.audio:
+        data.addAll({
+          'audioPath': _audioPathController.text.trim(),
+          'audioDuration': _audioDurationController.text.trim(),
+          'audioTranscript': _audioTranscriptController.text.trim(),
+        });
+      case NodeType.weather:
+        data.addAll({
+          'temp': _weatherTempController.text.trim(),
+          'weather': _weatherConditionController.text.trim(),
+        });
+      case NodeType.fit:
+        data.addAll({
+          'steps': int.tryParse(_fitStepsController.text.trim()) ?? 0,
+          'water': int.tryParse(_fitWaterController.text.trim()) ?? 0,
+          'workout': _fitWorkoutController.text.trim(),
+          'stepTarget':
+              int.tryParse(_fitStepTargetController.text.trim()) ?? 10000,
+          'waterTarget':
+              int.tryParse(_fitWaterTargetController.text.trim()) ?? 8,
+        });
       default:
         break;
     }
@@ -1627,14 +1802,38 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     ).showSnackBar(SnackBar(content: Text('Copied [[$title]]')));
   }
 
+  IconData _weatherIconFor(String condition) {
+    final value = condition.toLowerCase();
+    if (value.contains('storm') || value.contains('thunder')) {
+      return Icons.thunderstorm_outlined;
+    }
+    if (value.contains('rain') || value.contains('drizzle')) {
+      return Icons.grain_outlined;
+    }
+    if (value.contains('snow')) return Icons.ac_unit_outlined;
+    if (value.contains('wind')) return Icons.air_outlined;
+    if (value.contains('cloud') || value.contains('overcast')) {
+      return Icons.cloud_outlined;
+    }
+    if (value.contains('fog') || value.contains('mist')) return Icons.foggy;
+    return Icons.wb_sunny_outlined;
+  }
+
   Widget _buildStructuredTypeSection() {
     final type = _draft.type;
+    final theme = Theme.of(context);
     if (!{
       NodeType.contact,
       NodeType.metric,
       NodeType.expense,
       NodeType.resource,
       NodeType.bookmark,
+      NodeType.quote,
+      NodeType.timer,
+      NodeType.audio,
+      NodeType.weather,
+      NodeType.fit,
+      NodeType.mood,
     }.contains(type)) {
       return const SizedBox.shrink();
     }
@@ -1737,6 +1936,188 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
               hintText: 'https://...',
             ),
             keyboardType: TextInputType.url,
+          ),
+          NodeType.quote => TextField(
+            controller: _quoteAuthorController,
+            decoration: const InputDecoration(
+              labelText: 'Quote Author',
+              hintText: 'e.g. Marcus Aurelius',
+            ),
+          ),
+          NodeType.mood => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Mood Emoji', style: theme.textTheme.labelMedium),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: ['😢', '😔', '😐', '😊', '😁', '🔥'].map((emoji) {
+                  final isSelected = emoji == _moodEmoji;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _moodEmoji = emoji;
+                        _hasUnsavedChanges = true;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 120),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? theme.colorScheme.primaryContainer
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected
+                              ? theme.colorScheme.primary
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text(
+                    'Energy: ${_moodEnergy.round()}/5',
+                    style: theme.textTheme.labelMedium,
+                  ),
+                  Expanded(
+                    child: Slider(
+                      min: 1,
+                      max: 5,
+                      divisions: 4,
+                      activeColor: theme.colorScheme.primary,
+                      value: _moodEnergy.clamp(1.0, 5.0),
+                      onChanged: (val) {
+                        setState(() {
+                          _moodEnergy = val;
+                          _hasUnsavedChanges = true;
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          NodeType.timer => TextField(
+            controller: _timerSecondsController,
+            decoration: const InputDecoration(
+              labelText: 'Timer Duration (seconds)',
+              hintText: 'e.g. 1500 for 25 minutes',
+            ),
+            keyboardType: TextInputType.number,
+          ),
+          NodeType.audio => Column(
+            children: [
+              TextField(
+                controller: _audioPathController,
+                decoration: const InputDecoration(
+                  labelText: 'Audio File Path',
+                  hintText: 'e.g. /path/to/voice_note.mp3',
+                ),
+              ),
+              const SizedBox(height: 8),
+              _editorRow(
+                TextField(
+                  controller: _audioDurationController,
+                  decoration: const InputDecoration(labelText: 'Duration'),
+                ),
+                TextField(
+                  controller: _audioTranscriptController,
+                  decoration: const InputDecoration(
+                    labelText: 'Transcript / Notes',
+                  ),
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ),
+          NodeType.weather => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _editorRow(
+                TextField(
+                  controller: _weatherTempController,
+                  decoration: const InputDecoration(
+                    labelText: 'Temperature (e.g. 29°C)',
+                  ),
+                ),
+                TextField(
+                  controller: _weatherConditionController,
+                  decoration: const InputDecoration(labelText: 'Condition'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children:
+                    [
+                      'Sunny',
+                      'Cloudy',
+                      'Rainy',
+                      'Stormy',
+                      'Windy',
+                      'Snowy',
+                    ].map((condition) {
+                      return ActionChip(
+                        label: Text(condition),
+                        avatar: Icon(_weatherIconFor(condition), size: 16),
+                        onPressed: () {
+                          setState(() {
+                            _weatherConditionController.text = condition;
+                            _hasUnsavedChanges = true;
+                          });
+                        },
+                      );
+                    }).toList(),
+              ),
+            ],
+          ),
+          NodeType.fit => Column(
+            children: [
+              _editorRow(
+                TextField(
+                  controller: _fitStepsController,
+                  decoration: const InputDecoration(labelText: 'Steps Count'),
+                  keyboardType: TextInputType.number,
+                ),
+                TextField(
+                  controller: _fitWaterController,
+                  decoration: const InputDecoration(
+                    labelText: 'Water Intake (cups)',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _editorRow(
+                TextField(
+                  controller: _fitStepTargetController,
+                  decoration: const InputDecoration(labelText: 'Step Target'),
+                  keyboardType: TextInputType.number,
+                ),
+                TextField(
+                  controller: _fitWaterTargetController,
+                  decoration: const InputDecoration(labelText: 'Water Target'),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _fitWorkoutController,
+                decoration: const InputDecoration(
+                  labelText: 'Workout Name/Activity',
+                ),
+              ),
+            ],
           ),
           _ => const SizedBox.shrink(),
         },
@@ -1963,6 +2344,8 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         label: const Text('Save as template'),
         onPressed: () => unawaited(_saveDraftAsTemplate()),
       ),
+      ..._buildConversionActions(),
+      ..._buildFocusTimerActions(),
       if (isTask && !_draft.isDone)
         ActionChip(
           avatar: const Icon(Icons.check_circle_outline, size: 16),
@@ -2037,6 +2420,175 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         ],
       ),
     );
+  }
+
+  List<Widget> _buildFocusTimerActions() {
+    final timer = _focusTimerData();
+    final status = timer['status'] as String?;
+    if (status == 'running') {
+      return [
+        ActionChip(
+          key: const ValueKey('pause-focus-timer'),
+          avatar: const Icon(Icons.pause_circle_outline, size: 16),
+          label: const Text('Pause focus'),
+          onPressed: () => _setFocusTimerStatus('paused'),
+        ),
+        ActionChip(
+          key: const ValueKey('reset-focus-timer'),
+          avatar: const Icon(Icons.restart_alt_rounded, size: 16),
+          label: const Text('Reset focus'),
+          onPressed: _resetFocusTimer,
+        ),
+      ];
+    }
+    return [
+      ActionChip(
+        key: const ValueKey('start-focus-timer'),
+        avatar: const Icon(Icons.timer_outlined, size: 16),
+        label: Text(status == 'paused' ? 'Resume focus' : 'Start focus'),
+        onPressed: () => _setFocusTimerStatus('running'),
+      ),
+      if (status == 'paused')
+        ActionChip(
+          key: const ValueKey('reset-focus-timer'),
+          avatar: const Icon(Icons.restart_alt_rounded, size: 16),
+          label: const Text('Reset focus'),
+          onPressed: _resetFocusTimer,
+        ),
+    ];
+  }
+
+  Map<String, Object?> _focusTimerData() {
+    final timer = _draft.data['focusTimer'];
+    if (timer is Map) return timer.cast<String, Object?>();
+    return const {};
+  }
+
+  void _setFocusTimerStatus(String status) {
+    final action = status == 'running' ? 'focus_started' : 'focus_paused';
+    final label = status == 'running'
+        ? 'Started focus timer'
+        : 'Paused focus timer';
+    setState(() {
+      final timer = {
+        ..._focusTimerData(),
+        'status': status,
+        'elapsedMinutes': _focusTimerData()['elapsedMinutes'] ?? 0,
+      };
+      final data = <String, Object?>{..._draft.data, 'focusTimer': timer};
+      _draft = _draft.copyWith(
+        data: _appendActivityLog(data, action: action, label: label),
+      );
+      _hasUnsavedChanges = true;
+    });
+    Navigator.of(context).maybePop();
+  }
+
+  void _resetFocusTimer() {
+    setState(() {
+      final data = <String, Object?>{..._draft.data}..remove('focusTimer');
+      _draft = _draft.copyWith(
+        data: _appendActivityLog(
+          data,
+          action: 'focus_reset',
+          label: 'Reset focus timer',
+        ),
+      );
+      _hasUnsavedChanges = true;
+    });
+  }
+
+  List<Widget> _buildConversionActions() {
+    final conversions = <_NodeConversion>[
+      if (_draft.type == NodeType.idea)
+        const _NodeConversion(
+          key: 'convert-node-to-task',
+          icon: Icons.task_alt_outlined,
+          label: 'Convert to task',
+          type: NodeType.task,
+          status: NodeStatus.open,
+          effort: NodeEffort.fifteenMinutes,
+          contextTags: ['quick win'],
+        ),
+      if (_draft.type == NodeType.question)
+        const _NodeConversion(
+          key: 'convert-node-to-decision',
+          icon: Icons.rule_outlined,
+          label: 'Convert to decision',
+          type: NodeType.decision,
+          reviewState: NodeReviewState.needsReview,
+        ),
+      if (_draft.type == NodeType.note)
+        const _NodeConversion(
+          key: 'convert-node-to-resource',
+          icon: Icons.inventory_2_outlined,
+          label: 'Convert to resource',
+          type: NodeType.resource,
+        ),
+      if (_draft.type == NodeType.task)
+        const _NodeConversion(
+          key: 'convert-node-to-event',
+          icon: Icons.event_available_outlined,
+          label: 'Convert to event',
+          type: NodeType.event,
+        ),
+    ];
+    return [
+      for (final conversion in conversions)
+        ActionChip(
+          key: ValueKey(conversion.key),
+          avatar: Icon(conversion.icon, size: 16),
+          label: Text(conversion.label),
+          onPressed: () => _convertDraft(conversion),
+        ),
+    ];
+  }
+
+  void _convertDraft(_NodeConversion conversion) {
+    setState(() {
+      final contextTags = {
+        ..._draft.contextTags,
+        ...conversion.contextTags,
+      }.toList();
+      _draft = _draft.copyWith(
+        type: conversion.type,
+        status: conversion.status,
+        effort: conversion.effort,
+        reviewState: conversion.reviewState,
+        contextTags: contextTags,
+        data: _appendActivityLog(
+          _draft.data,
+          action: 'converted',
+          label:
+              'Converted ${_draft.type.label.toLowerCase()} to ${conversion.type.label.toLowerCase()}',
+        ),
+      );
+      _contextTagsController.text = contextTags.join(', ');
+      _applyTypeDefaults(conversion.type);
+      _hasTags |= contextTags.isNotEmpty;
+      _hasUnsavedChanges = true;
+    });
+    Navigator.of(context).maybePop();
+  }
+
+  Map<String, Object?> _appendActivityLog(
+    Map<String, Object?> data, {
+    required String action,
+    required String label,
+  }) {
+    final existing = data['activityLog'];
+    final log = <Map<String, Object?>>[
+      if (existing is List)
+        for (final entry in existing)
+          if (entry is Map) entry.cast<String, Object?>(),
+    ];
+    return {
+      ...data,
+      'activityLog': [
+        {'action': action, 'label': label},
+        ...log,
+      ].take(10).toList(),
+    };
   }
 
   Future<void> _duplicateDraftNode() async {
@@ -2121,6 +2673,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       NodeType.expense ||
       NodeType.routine ||
       NodeType.empty => null,
+      _ => null,
     };
   }
 
@@ -2150,6 +2703,11 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         isDone: true,
         status: NodeStatus.done,
         progress: 1,
+        data: _appendActivityLog(
+          _draft.data,
+          action: 'completed',
+          label: 'Completed task',
+        ),
       );
       _progressController.text = '100';
       _hasProgress = true;
@@ -2160,7 +2718,14 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   void _rescheduleDraftTomorrow() {
     final tomorrow = DateTime.now().dateOnly.addDays(1);
     setState(() {
-      _draft = _draft.copyWith(dueDate: tomorrow);
+      _draft = _draft.copyWith(
+        dueDate: tomorrow,
+        data: _appendActivityLog(
+          _draft.data,
+          action: 'rescheduled',
+          label: 'Rescheduled to tomorrow',
+        ),
+      );
       _dueDateController.text = dayKey(tomorrow);
       _hasDueDate = true;
       _hasUnsavedChanges = true;
@@ -2169,7 +2734,14 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
 
   void _pinDraft() {
     setState(() {
-      _draft = _draft.copyWith(isPinned: true);
+      _draft = _draft.copyWith(
+        isPinned: true,
+        data: _appendActivityLog(
+          _draft.data,
+          action: 'pinned',
+          label: 'Pinned node',
+        ),
+      );
       _hasUnsavedChanges = true;
     });
   }
@@ -2897,6 +3469,10 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                       const SizedBox(height: 12),
                       _buildSmartActionsSection(),
                       const SizedBox(height: 12),
+                      _buildReviewNudgesSection(),
+                      const SizedBox(height: 12),
+                      _buildActivityLogSection(),
+                      const SizedBox(height: 12),
                       _buildConnectionSection(),
                       const SizedBox(height: 12),
                       _buildBacklinksSection(),
@@ -2910,6 +3486,104 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
           },
         );
       },
+    );
+  }
+
+  Widget _buildReviewNudgesSection() {
+    final nudges = _draft.reviewNudges(DateTime.now());
+    if (nudges.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('node-review-nudges-section'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.tertiary.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.tips_and_updates_outlined,
+                size: 18,
+                color: theme.colorScheme.tertiary,
+              ),
+              const SizedBox(width: 8),
+              Text('Suggestions', style: theme.textTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final nudge in nudges)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('• ', style: theme.textTheme.bodySmall),
+                  Expanded(
+                    child: Text(nudge, style: theme.textTheme.bodySmall),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActivityLogSection() {
+    final existing = _draft.data['activityLog'];
+    final entries = <Map<String, Object?>>[
+      if (existing is List)
+        for (final entry in existing)
+          if (entry is Map) entry.cast<String, Object?>(),
+    ];
+    if (entries.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('node-activity-log-section'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.28,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.history_rounded,
+                size: 18,
+                color: theme.colorScheme.secondary,
+              ),
+              const SizedBox(width: 8),
+              Text('Activity', style: theme.textTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final entry in entries.take(4))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                (entry['label'] as String?) ??
+                    (entry['action'] as String?) ??
+                    'Updated node',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -3147,9 +3821,12 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                           isDone: _draft.isDone,
                           status: _draft.status,
                           priority: _draft.priority,
+                          effort: _draft.effort,
+                          reviewState: _draft.reviewState,
                           project: _draft.project,
                           area: _draft.area,
                           tags: _draft.tags,
+                          contextTags: _draft.contextTags,
                           dueDate: _draft.dueDate,
                           progress: _draft.progress,
                           isPinned: _draft.isPinned,
@@ -3230,9 +3907,12 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                                 isDone: _draft.isDone,
                                 status: v,
                                 priority: _draft.priority,
+                                effort: _draft.effort,
+                                reviewState: _draft.reviewState,
                                 project: _draft.project,
                                 area: _draft.area,
                                 tags: _draft.tags,
+                                contextTags: _draft.contextTags,
                                 dueDate: _draft.dueDate,
                                 progress: _draft.progress,
                                 isPinned: _draft.isPinned,
@@ -3277,9 +3957,12 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                                 isDone: _draft.isDone,
                                 status: _draft.status,
                                 priority: v,
+                                effort: _draft.effort,
+                                reviewState: _draft.reviewState,
                                 project: _draft.project,
                                 area: _draft.area,
                                 tags: _draft.tags,
+                                contextTags: _draft.contextTags,
                                 dueDate: _draft.dueDate,
                                 progress: _draft.progress,
                                 isPinned: _draft.isPinned,
@@ -3294,6 +3977,72 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<NodeEffort>(
+                        key: const ValueKey('node-editor-effort-dropdown'),
+                        initialValue: _draft.effort,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Effort'),
+                        items: NodeEffort.values
+                            .map(
+                              (e) => DropdownMenuItem(
+                                value: e,
+                                child: Text(e.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _draft = _draft.copyWith(effort: v));
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<NodeReviewState>(
+                        key: const ValueKey(
+                          'node-editor-review-state-dropdown',
+                        ),
+                        initialValue: _draft.reviewState,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Review state',
+                        ),
+                        items: NodeReviewState.values
+                            .map(
+                              (state) => DropdownMenuItem(
+                                value: state,
+                                child: Text(state.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(
+                              () => _draft = _draft.copyWith(reviewState: v),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('node-editor-context-tags-field'),
+                  controller: _contextTagsController,
+                  decoration: const InputDecoration(
+                    labelText: 'Context tags',
+                    hintText: 'deep work, quick win, offline, waiting',
+                    prefixIcon: Icon(Icons.psychology_outlined),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  onChanged: (_) => setState(() => _hasTags = true),
                 ),
                 const SizedBox(height: 24),
 
@@ -3737,6 +4486,28 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   }
 }
 
+class _NodeConversion {
+  const _NodeConversion({
+    required this.key,
+    required this.icon,
+    required this.label,
+    required this.type,
+    this.status,
+    this.effort,
+    this.reviewState,
+    this.contextTags = const [],
+  });
+
+  final String key;
+  final IconData icon;
+  final String label;
+  final NodeType type;
+  final NodeStatus? status;
+  final NodeEffort? effort;
+  final NodeReviewState? reviewState;
+  final List<String> contextTags;
+}
+
 class _KanbanWipSummary extends StatefulWidget {
   const _KanbanWipSummary({required this.controller});
 
@@ -3995,7 +4766,13 @@ class _RelatedNodeChip extends StatelessWidget {
             color: nodeColor(node.type),
             size: 14,
           ),
-          label: Text('${node.title} ? $label'),
+          label: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Text(
+              '${node.title} · $label',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           onPressed: onPreview,
           onDeleted: onRemove,
         ),

@@ -1,12 +1,35 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../core/theme/app_colors.dart';
 
 Path buildDoodleBorderPath(Rect rect, {double radius = 20, double wobble = 2}) {
   if (rect.isEmpty) return Path();
 
-  final r = math.min(radius, rect.shortestSide / 2).toDouble();
-  final w = math.min(wobble, rect.shortestSide / 8).toDouble();
+  final variant = ThemeVariantConfig.active;
+
+  if (variant == AppThemeVariant.blueprint) {
+    final r = math.min(4.0, rect.shortestSide / 2).toDouble();
+    return Path()..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(r)));
+  }
+
+  if (variant == AppThemeVariant.midnight) {
+    final r = math.min(radius, rect.shortestSide / 2).toDouble();
+    return Path()..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(r)));
+  }
+
+  var adjustedWobble = wobble;
+  var adjustedRadius = radius;
+  if (variant == AppThemeVariant.schoolboard) {
+    adjustedWobble = wobble * 0.4;
+    adjustedRadius = radius * 0.8;
+  } else if (variant == AppThemeVariant.cardboard) {
+    adjustedWobble = wobble * 1.6;
+    adjustedRadius = radius * 1.2;
+  }
+
+  final r = math.min(adjustedRadius, rect.shortestSide / 2).toDouble();
+  final w = math.min(adjustedWobble, rect.shortestSide / 8).toDouble();
   final center = rect.center;
 
   return Path()
@@ -262,9 +285,9 @@ class _DoodleUnderlinePainter extends BoxPainter {
     if (size == null || size.isEmpty) return;
 
     final y = offset.dy + size.height - strokeWidth;
-    final start = Offset(offset.dx + 2, y + wobble * 0.2);
-    final mid = Offset(offset.dx + size.width / 2, y - wobble);
-    final end = Offset(offset.dx + size.width - 2, y + wobble * 0.4);
+    final variant = ThemeVariantConfig.active;
+    final isStraight = variant == AppThemeVariant.blueprint || variant == AppThemeVariant.midnight;
+
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -272,9 +295,26 @@ class _DoodleUnderlinePainter extends BoxPainter {
       ..strokeJoin = StrokeJoin.round
       ..strokeWidth = strokeWidth;
 
-    final path = Path()
-      ..moveTo(start.dx, start.dy)
-      ..quadraticBezierTo(mid.dx, mid.dy, end.dx, end.dy);
-    canvas.drawPath(path, paint);
+    if (isStraight) {
+      canvas.drawLine(
+        Offset(offset.dx + 2, y),
+        Offset(offset.dx + size.width - 2, y),
+        paint,
+      );
+    } else {
+      var adjustedWobble = wobble;
+      if (variant == AppThemeVariant.schoolboard) {
+        adjustedWobble = wobble * 0.4;
+      } else if (variant == AppThemeVariant.cardboard) {
+        adjustedWobble = wobble * 1.6;
+      }
+      final start = Offset(offset.dx + 2, y + adjustedWobble * 0.2);
+      final mid = Offset(offset.dx + size.width / 2, y - adjustedWobble);
+      final end = Offset(offset.dx + size.width - 2, y + adjustedWobble * 0.4);
+      final path = Path()
+        ..moveTo(start.dx, start.dy)
+        ..quadraticBezierTo(mid.dx, mid.dy, end.dx, end.dy);
+      canvas.drawPath(path, paint);
+    }
   }
 }

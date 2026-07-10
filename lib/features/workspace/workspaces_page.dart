@@ -323,13 +323,7 @@ class _WorkspaceFilterBar extends StatefulWidget {
 class _WorkspaceFilterBarState extends State<_WorkspaceFilterBar> {
   bool _expanded = false;
 
-  bool get _hasActiveFilters =>
-      widget.filter.type != null ||
-      widget.filter.health != null ||
-      widget.filter.overdueOnly ||
-      widget.filter.staleOnly ||
-      widget.filter.activeOnly ||
-      widget.filter.sortMode != WorkspaceSortMode.manual;
+  bool get _hasActiveFilters => widget.filter.hasFilters;
 
   void _clearFilters() {
     widget.onClearSearch();
@@ -384,6 +378,13 @@ class _WorkspaceFilterBarState extends State<_WorkspaceFilterBar> {
                   ],
                 ],
               ),
+              if (_hasActiveFilters) ...[
+                const SizedBox(height: 8),
+                _WorkspaceActiveFilterChips(
+                  filter: filter,
+                  onChanged: widget.onChanged,
+                ),
+              ],
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
                 child: _expanded
@@ -528,6 +529,109 @@ class _WorkspaceFilterBarState extends State<_WorkspaceFilterBar> {
     );
   }
 }
+
+class _WorkspaceActiveFilterChips extends StatelessWidget {
+  const _WorkspaceActiveFilterChips({
+    required this.filter,
+    required this.onChanged,
+  });
+
+  final WorkspaceFilterState filter;
+  final ValueChanged<WorkspaceFilterState> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      key: const ValueKey('workspace-active-filter-chips'),
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        if (filter.type != null)
+          _WorkspaceFilterChip(
+            icon: Icons.workspaces_outlined,
+            label: 'Type: ${filter.type!.label}',
+            onRemove: () => onChanged(filter.copyWith(clearType: true)),
+          ),
+        if (filter.health != null)
+          _WorkspaceFilterChip(
+            icon: Icons.health_and_safety_outlined,
+            label: 'Health: ${filter.health!.label}',
+            onRemove: () => onChanged(filter.copyWith(clearHealth: true)),
+          ),
+        if (filter.priority != null)
+          _WorkspaceFilterChip(
+            icon: Icons.priority_high_outlined,
+            label: 'Priority: ${filter.priority!.label}',
+            onRemove: () => onChanged(filter.copyWith(clearPriority: true)),
+          ),
+        if (filter.tag?.trim().isNotEmpty ?? false)
+          _WorkspaceFilterChip(
+            icon: Icons.tag_outlined,
+            label: 'Tag: #${filter.tag}',
+            onRemove: () => onChanged(filter.copyWith(clearTag: true)),
+          ),
+        if (filter.overdueOnly)
+          _WorkspaceFilterChip(
+            icon: Icons.warning_amber_outlined,
+            label: 'Overdue',
+            onRemove: () => onChanged(filter.copyWith(overdueOnly: false)),
+          ),
+        if (filter.staleOnly)
+          _WorkspaceFilterChip(
+            icon: Icons.history_toggle_off_outlined,
+            label: 'Stale',
+            onRemove: () => onChanged(filter.copyWith(staleOnly: false)),
+          ),
+        if (filter.activeOnly)
+          _WorkspaceFilterChip(
+            icon: Icons.bolt_outlined,
+            label: 'Active',
+            onRemove: () => onChanged(filter.copyWith(activeOnly: false)),
+          ),
+        if (filter.sortMode != WorkspaceSortMode.manual)
+          _WorkspaceFilterChip(
+            icon: Icons.sort_outlined,
+            label: 'Sort: ${_workspaceSortLabel(filter.sortMode)}',
+            onRemove: () => onChanged(
+              filter.copyWith(sortMode: WorkspaceSortMode.manual),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _WorkspaceFilterChip extends StatelessWidget {
+  const _WorkspaceFilterChip({
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return InputChip(
+      avatar: Icon(icon, size: 14),
+      label: Text(label),
+      onDeleted: onRemove,
+      deleteIcon: const Icon(Icons.close, size: 14),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+}
+
+String _workspaceSortLabel(WorkspaceSortMode mode) => switch (mode) {
+  WorkspaceSortMode.manual => 'Manual',
+  WorkspaceSortMode.name => 'Name',
+  WorkspaceSortMode.activity => 'Activity',
+  WorkspaceSortMode.risk => 'Risk',
+  WorkspaceSortMode.progress => 'Progress',
+};
 
 class _WorkspaceFocusStrip extends StatelessWidget {
   const _WorkspaceFocusStrip({
@@ -1395,6 +1499,14 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 

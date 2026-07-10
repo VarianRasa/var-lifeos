@@ -5977,27 +5977,10 @@ class _SummaryChip extends StatelessWidget {
 
 String _countLabel(int count) => count == 1 ? '1 node' : '$count nodes';
 
-Color _nodeColor(NodeType type) => switch (type) {
-  NodeType.task => NodeColors.task,
-  NodeType.kanban => NodeColors.kanban,
-  NodeType.plan => NodeColors.plan,
-  NodeType.note => NodeColors.note,
-  NodeType.journal => NodeColors.journal,
-  NodeType.habit => NodeColors.habit,
-  NodeType.goal => NodeColors.goal,
-  NodeType.link => NodeColors.link,
-  NodeType.event => NodeColors.event,
-  NodeType.decision => NodeColors.decision,
-  NodeType.resource => NodeColors.resource,
-  NodeType.idea => NodeColors.idea,
-  NodeType.question => NodeColors.question,
-  NodeType.contact => NodeColors.contact,
-  NodeType.metric => NodeColors.metric,
-  NodeType.expense => NodeColors.expense,
-  NodeType.bookmark => NodeColors.bookmark,
-  NodeType.routine => NodeColors.routine,
-  NodeType.empty => Colors.grey,
-};
+Color _nodeColor(NodeType type) {
+  final palette = AppThemeVariantColors.of(ThemeVariantConfig.active);
+  return palette.nodeColors[type] ?? Colors.grey;
+}
 
 IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.task => Icons.check_box_outlined,
@@ -6018,6 +6001,14 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.circle_outlined,
 };
 

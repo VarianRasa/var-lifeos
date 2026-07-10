@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../shared/widgets/doodle_border.dart';
+
 class ShortcutGroup {
   const ShortcutGroup(this.label, this.items);
   final String label;
@@ -213,34 +215,37 @@ class _KeyboardShortcutsDialogState extends State<_KeyboardShortcutsDialog> {
                                           ),
                                         ),
                                       ],
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
+                                      DecoratedBox(
+                                        decoration: ShapeDecoration(
                                           color: theme
                                               .colorScheme
                                               .surfaceContainerHighest,
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                          border: Border.all(
-                                            color: theme
-                                                .colorScheme
-                                                .outlineVariant,
+                                          shape: DoodleShapeBorder(
+                                            side: BorderSide(
+                                              color: theme
+                                                  .colorScheme
+                                                  .outlineVariant,
+                                            ),
+                                            radius: 6,
+                                            wobble: 0.8,
                                           ),
                                         ),
-                                        child: Text(
-                                          item.keys[i],
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(
-                                                fontFamily: 'monospace',
-                                                fontWeight: FontWeight.bold,
-                                                color: theme
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
-                                              ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          child: Text(
+                                            item.keys[i],
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  fontFamily: 'monospace',
+                                                  fontWeight: FontWeight.bold,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
+                                          ),
                                         ),
                                       ),
                                     ],

@@ -436,6 +436,7 @@ AppRoute _routeFromLocation(String location) {
   if (location.startsWith('/insights')) return AppRoute.insights;
   if (location.startsWith('/graph')) return AppRoute.graph;
   if (location.startsWith('/workspaces')) return AppRoute.workspaces;
+  if (location.startsWith('/collab')) return AppRoute.collab;
   if (location.startsWith('/settings')) return AppRoute.settings;
   return AppRoute.calendar;
 }

@@ -2,11 +2,13 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
@@ -766,6 +768,30 @@ class _InsightsBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+
+    // Compute stats for Productivity Distribution & Overdue/Wins
+    final effortCounts = <NodeEffort, int>{};
+    final reviewCounts = <NodeReviewState, int>{};
+    for (final node in filteredNodes) {
+      effortCounts[node.effort] = (effortCounts[node.effort] ?? 0) + 1;
+      reviewCounts[node.reviewState] =
+          (reviewCounts[node.reviewState] ?? 0) + 1;
+    }
+
+    final overdueWork = filteredNodes.where((node) {
+      if (node.isDone || node.status == NodeStatus.done) return false;
+      final due = node.dueDate;
+      if (due == null) return false;
+      return due.isBefore(today.dateOnly);
+    }).toList();
+
+    final weeklyWins = filteredNodes.where((node) {
+      if (!node.isDone && node.status != NodeStatus.done) return false;
+      final completionDate = node.updatedAt;
+      final sevenDaysAgo = today.subtract(const Duration(days: 7));
+      return completionDate.isAfter(sevenDaysAgo);
+    }).toList();
+
     final hasCleanDashboardScope =
         searchQuery.trim().isEmpty &&
         smartViewFilter == null &&
@@ -808,6 +834,36 @@ class _InsightsBody extends StatelessWidget {
             onTagChanged: onTagChanged,
             onClear: onClearInsightFilters,
           ),
+          const SizedBox(height: 6),
+          _RangeDateLabel(preset: rangePreset, today: today),
+          if (_hasActiveFilters(
+            smartView: smartViewFilter,
+            project: projectFilter,
+            area: areaFilter,
+            status: statusFilter,
+            priority: priorityFilter,
+            type: typeFilter,
+            tag: tagFilter,
+          )) ...[
+            const SizedBox(height: 8),
+            _ActiveFilterRail(
+              smartView: smartViewFilter,
+              project: projectFilter,
+              area: areaFilter,
+              status: statusFilter,
+              priority: priorityFilter,
+              type: typeFilter,
+              tag: tagFilter,
+              onSmartViewChanged: onSmartViewChanged,
+              onProjectChanged: onProjectChanged,
+              onAreaChanged: onAreaChanged,
+              onStatusChanged: onStatusChanged,
+              onPriorityChanged: onPriorityChanged,
+              onTypeChanged: onTypeChanged,
+              onTagChanged: onTagChanged,
+              onClearAll: onClearInsightFilters,
+            ),
+          ],
           const SizedBox(height: 8),
           const _InsightShortcutHintBar(),
           SizedBox(height: spacing),
@@ -1020,6 +1076,10 @@ class _InsightsBody extends StatelessWidget {
               onProjectChanged: onProjectChanged,
               onAreaChanged: onAreaChanged,
             ),
+            SizedBox(height: spacing),
+            _buildProductivityDistribution(context, effortCounts, reviewCounts),
+            SizedBox(height: spacing),
+            _buildOverdueAndWins(context, overdueWork, weeklyWins),
           ],
           SizedBox(height: spacing),
           _FilterBand(
@@ -1045,6 +1105,328 @@ class _InsightsBody extends StatelessWidget {
               _InsightNodeTile(node: filteredNodes[index]),
             ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildProductivityDistribution(
+    BuildContext context,
+    Map<NodeEffort, int> efforts,
+    Map<NodeReviewState, int> reviews,
+  ) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final chalk = theme.colorScheme.onSurface.withValues(alpha: 0.86);
+    final board = theme.colorScheme.surfaceContainerHighest.withValues(
+      alpha: 0.42,
+    );
+
+    Widget buildMiniBar(String label, int count, int total, Color color) {
+      final pct = total > 0 ? count / total : 0.0;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: ShapeDecoration(
+          color: Color.alphaBlend(
+            color.withValues(alpha: 0.07),
+            theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.74),
+          ),
+          shape: DoodleShapeBorder(
+            side: BorderSide(color: color.withValues(alpha: 0.22)),
+            radius: 12,
+            wobble: 1.2,
+          ),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 80,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.labelSmall?.copyWith(color: chalk),
+              ),
+            ),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  minHeight: 5,
+                  backgroundColor: Colors.black.withValues(alpha: 0.22),
+                  valueColor: AlwaysStoppedAnimation<Color>(color),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$count',
+              style: textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget buildColumn(String title, Iterable<Widget> rows, Color color) {
+      return Expanded(
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: board,
+            shape: DoodleShapeBorder(
+              side: BorderSide(color: color.withValues(alpha: 0.26)),
+              radius: 14,
+              wobble: 1.5,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: textTheme.labelLarge?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final row in rows) ...[row, const SizedBox(height: 6)],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final totalEfforts = efforts.values.fold<int>(0, (a, b) => a + b);
+    final totalReviews = reviews.values.fold<int>(0, (a, b) => a + b);
+    final primary = theme.colorScheme.primary;
+    final secondary = theme.colorScheme.secondary;
+
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.86),
+        shape: DoodleShapeBorder(
+          side: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
+          ),
+          radius: 18,
+          wobble: 1.9,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.query_stats_rounded, size: 17, color: primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Productivity Distribution',
+                  style: textTheme.titleSmall?.copyWith(
+                    color: chalk,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                buildColumn(
+                  'Effort',
+                  NodeEffort.values.map(
+                    (e) => buildMiniBar(
+                      e.label,
+                      efforts[e] ?? 0,
+                      totalEfforts,
+                      primary,
+                    ),
+                  ),
+                  primary,
+                ),
+                const SizedBox(width: 10),
+                buildColumn(
+                  'Review State',
+                  NodeReviewState.values.map(
+                    (r) => buildMiniBar(
+                      r.label,
+                      reviews[r] ?? 0,
+                      totalReviews,
+                      secondary,
+                    ),
+                  ),
+                  secondary,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOverdueAndWins(
+    BuildContext context,
+    List<MindmapNode> overdue,
+    List<MindmapNode> wins,
+  ) {
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
+    final chalk = theme.colorScheme.onSurface.withValues(alpha: 0.86);
+    final danger = theme.colorScheme.error;
+    final win = theme.colorScheme.secondary;
+
+    Widget buildNodeItem(MindmapNode node, {bool isWin = false}) {
+      final color = isWin ? win : danger;
+      return Container(
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        decoration: ShapeDecoration(
+          color: Color.alphaBlend(
+            color.withValues(alpha: 0.08),
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.68),
+          ),
+          shape: DoodleShapeBorder(
+            side: BorderSide(color: color.withValues(alpha: 0.25)),
+            radius: 12,
+            wobble: 1.2,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isWin ? Icons.check_circle_outline : Icons.warning_amber_outlined,
+              size: 15,
+              color: color,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '• ${node.title}',
+                style: textTheme.labelMedium?.copyWith(color: chalk),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget buildLane(
+      String title,
+      IconData icon,
+      Color color,
+      List<MindmapNode> nodes,
+      String empty,
+      bool isWin,
+    ) {
+      return Expanded(
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.42,
+            ),
+            shape: DoodleShapeBorder(
+              side: BorderSide(color: color.withValues(alpha: 0.28)),
+              radius: 14,
+              wobble: 1.5,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, size: 16, color: color),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.labelLarge?.copyWith(
+                          color: color,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${nodes.length}',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                if (nodes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      empty,
+                      style: textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else
+                  ...nodes
+                      .take(3)
+                      .map((node) => buildNodeItem(node, isWin: isWin)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.86),
+        shape: DoodleShapeBorder(
+          side: BorderSide(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
+          ),
+          radius: 18,
+          wobble: 1.9,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            buildLane(
+              'Overdue Work',
+              Icons.warning_amber_outlined,
+              danger,
+              overdue,
+              'No overdue work!',
+              false,
+            ),
+            const SizedBox(width: 10),
+            buildLane(
+              'Weekly Wins (Last 7 Days)',
+              Icons.emoji_events_outlined,
+              win,
+              wins,
+              'No wins this week yet.',
+              true,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1593,9 +1975,13 @@ class _MissionDashboardPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-mission-dashboard'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2170,9 +2556,13 @@ class _HabitRoutineInsightPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-habit-routine-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2296,9 +2686,13 @@ class _ReviewInsightPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-review-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2393,9 +2787,13 @@ class _ContextHealthPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-context-health-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2534,9 +2932,13 @@ class _GoalInsightPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-goal-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2689,9 +3091,13 @@ class _InsightRiskPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-risk-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2861,9 +3267,13 @@ class _RecommendationPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-recommendation-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3183,9 +3593,13 @@ class _WeeklyReviewPanel extends StatelessWidget {
     final theme = Theme.of(context);
     return DecoratedBox(
       key: const ValueKey('insights-weekly-review-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -5304,6 +5718,196 @@ class _ShortcutHint extends StatelessWidget {
   }
 }
 
+class _RangeDateLabel extends StatelessWidget {
+  const _RangeDateLabel({required this.preset, required this.today});
+
+  final insight_filters.InsightRangePreset preset;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final range = insight_filters.insightDateRangeForPreset(
+      preset: preset,
+      today: today,
+    );
+    final formatter = DateFormat.MMMd();
+    final label = '${formatter.format(range.start)} – ${formatter.format(
+      range.end,
+    )}';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.date_range_outlined,
+          size: 14,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+bool _hasActiveFilters({
+  SmartNodeViewType? smartView,
+  String? project,
+  String? area,
+  NodeStatus? status,
+  NodePriority? priority,
+  NodeType? type,
+  String? tag,
+}) {
+  return smartView != null ||
+      project != null ||
+      area != null ||
+      status != null ||
+      priority != null ||
+      type != null ||
+      tag != null;
+}
+
+class _ActiveFilterPill extends StatelessWidget {
+  const _ActiveFilterPill({
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InputChip(
+      avatar: Icon(icon, size: 14),
+      label: Text(label),
+      onDeleted: onRemove,
+      deleteIcon: const Icon(Icons.close, size: 14),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      side: BorderSide(
+        color: theme.colorScheme.outlineVariant,
+      ),
+    );
+  }
+}
+
+class _ActiveFilterRail extends StatelessWidget {
+  const _ActiveFilterRail({
+    required this.smartView,
+    required this.project,
+    required this.area,
+    required this.status,
+    required this.priority,
+    required this.type,
+    required this.tag,
+    required this.onSmartViewChanged,
+    required this.onProjectChanged,
+    required this.onAreaChanged,
+    required this.onStatusChanged,
+    required this.onPriorityChanged,
+    required this.onTypeChanged,
+    required this.onTagChanged,
+    required this.onClearAll,
+  });
+
+  final SmartNodeViewType? smartView;
+  final String? project;
+  final String? area;
+  final NodeStatus? status;
+  final NodePriority? priority;
+  final NodeType? type;
+  final String? tag;
+  final ValueChanged<SmartNodeViewType> onSmartViewChanged;
+  final ValueChanged<String> onProjectChanged;
+  final ValueChanged<String> onAreaChanged;
+  final ValueChanged<NodeStatus> onStatusChanged;
+  final ValueChanged<NodePriority> onPriorityChanged;
+  final ValueChanged<NodeType> onTypeChanged;
+  final ValueChanged<String> onTagChanged;
+  final VoidCallback onClearAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pills = <Widget>[
+      if (smartView != null)
+        _ActiveFilterPill(
+          icon: Icons.view_agenda_outlined,
+          label: smartView!.label,
+          onRemove: () => onSmartViewChanged(smartView!),
+        ),
+      if (project != null)
+        _ActiveFilterPill(
+          icon: Icons.workspaces_outlined,
+          label: 'Project: $project',
+          onRemove: () => onProjectChanged(project!),
+        ),
+      if (area != null)
+        _ActiveFilterPill(
+          icon: Icons.bookmark_outline,
+          label: 'Area: $area',
+          onRemove: () => onAreaChanged(area!),
+        ),
+      if (status != null)
+        _ActiveFilterPill(
+          icon: Icons.flag_circle_outlined,
+          label: 'Status: ${status!.label}',
+          onRemove: () => onStatusChanged(status!),
+        ),
+      if (priority != null)
+        _ActiveFilterPill(
+          icon: Icons.priority_high_outlined,
+          label: 'Priority: ${priority!.label}',
+          onRemove: () => onPriorityChanged(priority!),
+        ),
+      if (type != null)
+        _ActiveFilterPill(
+          icon: Icons.category_outlined,
+          label: 'Type: ${type!.label}',
+          onRemove: () => onTypeChanged(type!),
+        ),
+      if (tag != null)
+        _ActiveFilterPill(
+          icon: Icons.tag_outlined,
+          label: 'Tag: #$tag',
+          onRemove: () => onTagChanged(tag!),
+        ),
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final pill in pills) pill,
+          TextButton(
+            onPressed: onClearAll,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              foregroundColor: theme.colorScheme.onSurfaceVariant,
+            ),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InsightRangeFilterBar extends StatelessWidget {
   const _InsightRangeFilterBar({
     required this.rangePreset,
@@ -5521,9 +6125,13 @@ class _KnowledgeGraphPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-knowledge-graph-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -5918,6 +6526,14 @@ IconData _nodeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 
@@ -6215,6 +6831,35 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Close'),
         ),
+        OutlinedButton.icon(
+          onPressed: () async {
+            try {
+              final directory = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+              final ext = switch (_format) {
+                _ExportFormat.markdown => 'md',
+                _ExportFormat.json => 'json',
+                _ExportFormat.csv => 'csv',
+              };
+              final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+              final file = File('${directory.path}/var_insights_export_$timestamp.$ext');
+              await file.writeAsString(_data);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Saved to: ${file.path}')),
+                );
+                Navigator.pop(context);
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to save file: $e')),
+                );
+              }
+            }
+          },
+          icon: const Icon(Icons.save_alt, size: 16),
+          label: const Text('Save to File'),
+        ),
         FilledButton.icon(
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: _data));
@@ -6285,9 +6930,13 @@ class _InsightDrillDownPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-drill-down-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -6539,9 +7188,13 @@ class _FocusTimerAnalyticsPanel extends StatelessWidget {
 
     return DecoratedBox(
       key: const ValueKey('insights-focus-timer-panel'),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(8),
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),

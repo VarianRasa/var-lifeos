@@ -176,6 +176,14 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
     NodeType.bookmark => 'A saved URL, reference, or external destination.',
     NodeType.routine =>
       'A repeatable workflow, ritual, or operating checklist.',
+    NodeType.mood => 'A daily mood log with energy slider and emoji tracking.',
+    NodeType.timer => 'A focus session timer (Pomodoro) with customizable durations.',
+    NodeType.quote => 'A quotation card with author details.',
+    NodeType.audio => 'A voice memo or audio recording card.',
+    NodeType.checklist => 'A checklist card with interactive checkable items.',
+    NodeType.canvas => 'A sketchpad card to draw doodles directly inside.',
+    NodeType.weather => 'A weather logger tracking conditions and temperature.',
+    NodeType.fit => 'A fitness tracker for steps, water intake, and workouts.',
     NodeType.empty => 'A basic spacer/empty node.',
   };
 
@@ -939,6 +947,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
           NodeType.routine => const Text(
             'Use the description for trigger, steps, cadence, and checklist.',
           ),
+          _ => const SizedBox.shrink(),
         },
       ),
     );
@@ -1219,6 +1228,7 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
       },
       NodeType.routine => const <String, Object?>{},
       NodeType.empty => const <String, Object?>{},
+      _ => const <String, Object?>{},
     };
     return {...data, ..._parseCalendarPayloadData()};
   }

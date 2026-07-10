@@ -101,6 +101,7 @@ CarryOverReason? _carryOverReason(MindmapNode node) {
     case NodeType.expense:
     case NodeType.bookmark:
     case NodeType.empty:
+    default:
       return null;
   }
 }

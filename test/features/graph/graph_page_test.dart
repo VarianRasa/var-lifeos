@@ -207,7 +207,16 @@ void main() {
       find.text('Drag to pan, pinch to zoom, tap node for details'),
       findsOneWidget,
     );
+    expect(find.byTooltip('Zoom out'), findsOneWidget);
+    expect(find.byTooltip('Reset graph view'), findsOneWidget);
     expect(find.byTooltip('Zoom in'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Zoom out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Reset graph view'));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Hide graph controls'));
     await tester.pumpAndSettle();

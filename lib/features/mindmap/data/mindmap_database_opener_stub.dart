@@ -3,6 +3,6 @@ library;
 
 import 'package:sembast/sembast.dart';
 
-Future<Database> openMindmapDatabase() {
+Future<Database> openMindmapDatabase({SembastCodec? codec}) {
   throw UnsupportedError('Mindmap database is not supported on this platform.');
 }

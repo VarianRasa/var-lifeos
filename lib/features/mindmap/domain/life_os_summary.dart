@@ -73,6 +73,8 @@ final class LifeOsSummary {
             NodeType.routine ||
             NodeType.empty:
           break;
+        default:
+          break;
       }
     }
 
@@ -194,6 +196,8 @@ final class LifeOsRhythm {
             NodeType.bookmark ||
             NodeType.routine ||
             NodeType.empty:
+          break;
+        default:
           break;
       }
     }

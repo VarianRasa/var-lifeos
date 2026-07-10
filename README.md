@@ -1,5 +1,7 @@
 # Var
 
+[![Web App](https://img.shields.io/badge/Web-var--lifeos.web.app-039BE5?logo=firebase)](https://var-lifeos.web.app)
+
 **Var** is a calendar-centric productivity app built with Flutter. Time is the
 center of everything: the main screen is a calendar, and every day is an open
 canvas. Each day cell opens a **mindmap** where you can drop tasks, kanban
@@ -29,11 +31,20 @@ Calendar (when)  →  Day cell (summary)  →  Mindmap (anything)
 - **Local-first + optional HTTP sync/backup** so it works fully offline, with
   sync adapters layered behind runtime configuration.
 
+## Use Var
+
+- **Web:** [var-lifeos.web.app](https://var-lifeos.web.app)
+- **Windows and Android:** download latest files from [GitHub Releases](https://github.com/VarianRasa/var-lifeos/releases/latest).
+- **iOS:** no public build yet. Apple builds require macOS, Xcode, signing, and App Store/TestFlight distribution.
+
+Windows packages are portable ZIP files. Extract the full folder, then run
+`var_app.exe`. Android packages are APK files; Android may ask permission to
+install apps from the browser or file manager used to open the APK.
+
 ## Status
 
-Under active development. Built phase by phase — see [ROADMAP.md](ROADMAP.md).
-The current phase focuses on stabilization, CI, and release-readiness for the
-local-first app foundation.
+Public beta. Data is local-first, so keep backups before testing sync or restore
+flows with important data.
 
 ## Getting Started
 
@@ -60,6 +71,9 @@ seeding demo nodes into a fresh database.
 This project is a multi-platform Flutter application (Android, iOS, macOS,
 Windows, Linux, Web).
 
+Firebase platform configuration is intentionally excluded from source control.
+Contributors need their own Firebase project and generated platform config.
+
 ## Beta verification
 
 Before sharing a beta build, run the automated preflight and manual smoke flow in
@@ -77,5 +91,6 @@ and sync endpoint paths.
 
 ## License
 
-Proprietary. All rights reserved.
+Proprietary. See [LICENSE](LICENSE). Source visibility does not grant permission
+to use, copy, modify, or redistribute the software.
 

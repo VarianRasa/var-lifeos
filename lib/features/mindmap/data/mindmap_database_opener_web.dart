@@ -3,6 +3,6 @@ library;
 
 import 'package:sembast_web/sembast_web.dart';
 
-Future<Database> openMindmapDatabase() {
-  return databaseFactoryWeb.openDatabase('var_mindmap_v2');
+Future<Database> openMindmapDatabase({SembastCodec? codec}) {
+  return databaseFactoryWeb.openDatabase('var_mindmap_v2', codec: codec);
 }

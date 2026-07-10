@@ -896,16 +896,11 @@ class _GraphOverviewHud extends StatelessWidget {
 
     return DecoratedBox(
       decoration: ShapeDecoration(
+        color: colorScheme.surface,
         shape: DoodleShapeBorder(
-          side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.22)),
+          side: BorderSide(color: theme.dividerColor),
           radius: 28,
           wobble: 2.6,
-        ),
-        gradient: LinearGradient(
-          colors: [
-            colorScheme.primaryContainer.withValues(alpha: 0.26),
-            colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
-          ],
         ),
       ),
       child: Padding(
@@ -2181,15 +2176,25 @@ class _VisualGraphViewState extends State<VisualGraphView> {
     }
   }
 
-  void _centerGraph() {
+  void _centerGraph({double scale = 1}) {
     final viewportSize = context.size;
     if (viewportSize == null) return;
 
-    final tx = (viewportSize.width - 1200.0) / 2;
-    final ty = (viewportSize.height - 800.0) / 2;
+    final tx = (viewportSize.width - 1200.0 * scale) / 2;
+    final ty = (viewportSize.height - 800.0 * scale) / 2;
 
-    _transformationController.value = Matrix4.translationValues(tx, ty, 0);
+    _transformationController.value = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(scale, scale, 1, 1);
   }
+
+  void _zoomBy(double factor) {
+    final nextScale = (_transformationController.value.getMaxScaleOnAxis() * factor)
+        .clamp(0.4, 2.0);
+    _centerGraph(scale: nextScale);
+  }
+
+  void _resetView() => _centerGraph();
 
   void _computeLayout() {
     if (widget.nodes.isEmpty) return;
@@ -2395,9 +2400,19 @@ class _VisualGraphViewState extends State<VisualGraphView> {
                             style: TextStyle(fontSize: 10),
                           ),
                           IconButton(
+                            tooltip: 'Zoom out',
+                            icon: const Icon(Icons.remove, size: 16),
+                            onPressed: () => _zoomBy(0.85),
+                          ),
+                          IconButton(
+                            tooltip: 'Reset graph view',
+                            icon: const Icon(Icons.center_focus_strong, size: 16),
+                            onPressed: _resetView,
+                          ),
+                          IconButton(
                             tooltip: 'Zoom in',
                             icon: const Icon(Icons.add, size: 16),
-                            onPressed: () {},
+                            onPressed: () => _zoomBy(1.18),
                           ),
                           IconButton(
                             tooltip: 'Hide graph controls',

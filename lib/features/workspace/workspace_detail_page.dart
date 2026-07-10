@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/widgets/doodle_border.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/workspace_context.dart';
@@ -173,12 +174,13 @@ class _WorkspaceDetailHeader extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.32,
+        decoration: ShapeDecoration(
+          color: theme.colorScheme.surface,
+          shape: DoodleShapeBorder(
+            side: BorderSide(color: theme.dividerColor),
+            radius: 20,
+            wobble: 1.2,
           ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -488,7 +490,17 @@ class _StatsRow extends StatelessWidget {
     final completion = (workspace.completionRate * 100).round();
     final progress = (workspace.averageProgress * 100).round();
 
-    return Card(
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -1279,5 +1291,13 @@ IconData _nodeTypeIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };

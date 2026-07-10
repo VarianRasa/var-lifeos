@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,9 +9,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/utils/date_utils.dart';
 import '../../shared/layout/adaptive_scaffold.dart';
+import '../../shared/widgets/doodle_border.dart';
+import '../mindmap/application/database_lock_provider.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/custom_node_template_codec.dart';
 import '../mindmap/domain/mindmap_node.dart';
@@ -28,10 +32,58 @@ import 'keyboard_shortcuts_dialog.dart';
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
+  void _showPaletteDialog(BuildContext context, WidgetRef ref) {
+    final active = ref.read(themeVariantProvider);
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          title: const Text('Select Palette'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: AppThemeVariant.values.map((v) {
+              final colors = AppThemeVariantColors.of(v);
+              return ListTile(
+                title: Text(v.name[0].toUpperCase() + v.name.substring(1)),
+                leading: Icon(
+                  v == active
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: v == active ? theme.colorScheme.primary : null,
+                ),
+                trailing: Container(
+                  width: 36,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    gradient: LinearGradient(
+                      colors: [
+                        colors.nodeColors[NodeType.task] ?? Colors.transparent,
+                        colors.nodeColors[NodeType.kanban] ??
+                            Colors.transparent,
+                        colors.nodeColors[NodeType.plan] ?? Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+                onTap: () {
+                  ref.read(themeVariantProvider.notifier).setThemeVariant(v);
+                  Navigator.of(context).pop();
+                },
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final mode = ref.watch(themeModeProvider);
+    final variant = ref.watch(themeVariantProvider);
     return Scaffold(
       appBar: AppBar(
         title: const AppRouteChromeTabs(currentRoute: AppRoute.settings),
@@ -81,9 +133,10 @@ class SettingsPage extends ConsumerWidget {
             child: ListTile(
               leading: const Icon(Icons.palette_outlined),
               title: const Text('Palette'),
-              subtitle: const Text(
-                'Doodle marker colors are applied across light and dark mode.',
+              subtitle: Text(
+                'Active: ${variant.name[0].toUpperCase() + variant.name.substring(1)}. Marker colors are adapted to the active theme.',
               ),
+              onTap: () => _showPaletteDialog(context, ref),
               trailing: Container(
                 width: 44,
                 height: 24,
@@ -117,6 +170,10 @@ class SettingsPage extends ConsumerWidget {
           Text('Reminders', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),
           const _ReminderPreviewCard(),
+          const SizedBox(height: 24),
+          Text('Security', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 8),
+          const _DatabaseLockCard(),
           const SizedBox(height: 24),
           const _DataManagementCard(),
           const SizedBox(height: 24),
@@ -355,15 +412,13 @@ class _SettingsOverviewCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-          ],
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 22,
+          wobble: 1.2,
         ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -748,7 +803,15 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final nodes = ref.watch(allMindmapNodesProvider).valueOrNull ?? const [];
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -1198,7 +1261,15 @@ class _SavedViewsManagerCardState extends State<_SavedViewsManagerCard> {
         tableView: 'open',
       ),
     ];
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -1617,6 +1688,14 @@ IconData _templateIcon(NodeType type) => switch (type) {
   NodeType.expense => Icons.payments_outlined,
   NodeType.bookmark => Icons.bookmark_border,
   NodeType.routine => Icons.repeat_on_outlined,
+  NodeType.mood => Icons.mood,
+  NodeType.timer => Icons.timer_outlined,
+  NodeType.quote => Icons.format_quote_outlined,
+  NodeType.audio => Icons.mic_none_outlined,
+  NodeType.checklist => Icons.checklist_rtl_outlined,
+  NodeType.canvas => Icons.gesture_outlined,
+  NodeType.weather => Icons.wb_sunny_outlined,
+  NodeType.fit => Icons.directions_run_outlined,
   NodeType.empty => Icons.crop_square_outlined,
 };
 
@@ -1805,7 +1884,15 @@ class _GraphFiltersManagerCardState extends State<_GraphFiltersManagerCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -2048,7 +2135,15 @@ class _ReminderPreviewCardState extends ConsumerState<_ReminderPreviewCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final nodes = ref.watch(allMindmapNodesProvider);
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: nodes.when(
@@ -2340,7 +2435,15 @@ class _FeatureGuideCardState extends State<_FeatureGuideCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -2470,7 +2573,15 @@ class _DataManagementCardState extends ConsumerState<_DataManagementCard> {
       children: [
         Text('Data management', style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
-        Card(
+        DecoratedBox(
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surface,
+            shape: DoodleShapeBorder(
+              side: BorderSide(color: theme.dividerColor),
+              radius: 12,
+              wobble: 1.2,
+            ),
+          ),
           child: Column(
             children: [
               Padding(
@@ -2684,7 +2795,15 @@ class _SyncBackupCardState extends ConsumerState<_SyncBackupCard> {
     final theme = Theme.of(context);
     _syncDeviceNameField(syncState.deviceIdentity?.label ?? '');
 
-    return Card(
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
       child: nodes.when(
         data: (value) => Column(
           children: [
@@ -2704,22 +2823,14 @@ class _SyncBackupCardState extends ConsumerState<_SyncBackupCard> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Chip(
-                  avatar: Icon(
-                    remoteConfig.hasEndpoint
-                        ? Icons.http_outlined
-                        : Icons.local_fire_department_outlined,
-                    size: 16,
-                  ),
-                  label: Text(
-                    remoteConfig.hasEndpoint
-                        ? 'HTTP sync: ${remoteConfig.endpoint!.host}'
-                        : 'Firebase sync backend',
-                  ),
-                  visualDensity: VisualDensity.compact,
-                ),
+              child: _SyncBackupStatusChips(
+                state: syncState,
+                backendLabel: remoteConfig.hasEndpoint
+                    ? 'HTTP sync: ${remoteConfig.endpoint!.host}'
+                    : 'Firebase sync backend',
+                backendIcon: remoteConfig.hasEndpoint
+                    ? Icons.http_outlined
+                    : Icons.local_fire_department_outlined,
               ),
             ),
             const Divider(height: 1),
@@ -3228,6 +3339,66 @@ class _SyncAuthDialogState extends State<_SyncAuthDialog> {
     if (close && widget.controller.isSignedIn) {
       Navigator.of(context).pop();
     }
+  }
+}
+
+class _SyncBackupStatusChips extends StatelessWidget {
+  const _SyncBackupStatusChips({
+    required this.state,
+    required this.backendLabel,
+    required this.backendIcon,
+  });
+
+  final SyncControllerState state;
+  final String backendLabel;
+  final IconData backendIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      key: const ValueKey('sync-backup-status-chips'),
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _SyncStatusChip(icon: backendIcon, label: backendLabel),
+        _SyncStatusChip(
+          icon: state.isSignedIn
+              ? Icons.verified_user_outlined
+              : Icons.lock_outline,
+          label: state.isSignedIn ? 'Cloud signed in' : 'Local only',
+        ),
+        _SyncStatusChip(
+          icon: state.autoBackupEnabled
+              ? Icons.event_repeat_outlined
+              : Icons.event_busy_outlined,
+          label: state.autoBackupEnabled
+              ? 'Auto backup: ${state.autoBackupFrequency}'
+              : 'Auto backup off',
+        ),
+        if (state.restorePoints.isNotEmpty)
+          _SyncStatusChip(
+            icon: Icons.restore_outlined,
+            label: '${state.restorePoints.length} restore points',
+          ),
+      ],
+    );
+  }
+}
+
+class _SyncStatusChip extends StatelessWidget {
+  const _SyncStatusChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      avatar: Icon(icon, size: 16),
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
   }
 }
 
@@ -4108,4 +4279,91 @@ String _activityCounts(SyncActivityEntry entry) {
     'Deleted ${entry.deletedCount}',
     'Conflicts ${entry.conflictCount}',
   ].join(' / ');
+}
+
+class _DatabaseLockCard extends ConsumerWidget {
+  const _DatabaseLockCard();
+
+  void _showPinDialog(BuildContext context, WidgetRef ref, bool isSet) {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(isSet ? 'Change/Disable PIN' : 'Set PIN Lock'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                isSet
+                    ? 'Enter new PIN (or leave empty to disable):'
+                    : 'Enter a 4-6 digit numeric PIN to encrypt your local database:',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                maxLength: 6,
+                decoration: const InputDecoration(
+                  labelText: 'PIN',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final pin = controller.text;
+                if (pin.isEmpty) {
+                  if (isSet) {
+                    ref.read(databaseLockProvider.notifier).removePin();
+                  }
+                } else {
+                  ref.read(databaseLockProvider.notifier).setPin(pin);
+                }
+                Navigator.of(context).pop();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lock = ref.watch(databaseLockProvider);
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        color: theme.colorScheme.surface,
+        shape: DoodleShapeBorder(
+          side: BorderSide(color: theme.dividerColor),
+          radius: 12,
+          wobble: 1.2,
+        ),
+      ),
+      child: ListTile(
+        leading: const Icon(Icons.security_outlined),
+        title: const Text('Database PIN Lock'),
+        subtitle: Text(
+          lock.hasPin
+              ? 'PIN Lock is active. Local database is encrypted.'
+              : 'PIN Lock is inactive.',
+        ),
+        trailing: Icon(
+          lock.hasPin ? Icons.lock_rounded : Icons.lock_open_rounded,
+        ),
+        onTap: () => _showPinDialog(context, ref, lock.hasPin),
+      ),
+    );
+  }
 }

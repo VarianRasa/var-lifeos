@@ -33,6 +33,14 @@ enum NodeType {
   expense,
   bookmark,
   routine,
+  mood,
+  timer,
+  quote,
+  audio,
+  checklist,
+  canvas,
+  weather,
+  fit,
   empty;
 
   /// Human-readable label for chips, menus, and dialogs.
@@ -74,6 +82,22 @@ enum NodeType {
         return 'Bookmark';
       case NodeType.routine:
         return 'Routine';
+      case NodeType.mood:
+        return 'Mood';
+      case NodeType.timer:
+        return 'Timer';
+      case NodeType.quote:
+        return 'Quote';
+      case NodeType.audio:
+        return 'Audio';
+      case NodeType.checklist:
+        return 'Checklist';
+      case NodeType.canvas:
+        return 'Canvas';
+      case NodeType.weather:
+        return 'Weather';
+      case NodeType.fit:
+        return 'Fitness';
       case NodeType.empty:
         return 'Empty';
     }

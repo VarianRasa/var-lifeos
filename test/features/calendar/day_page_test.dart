@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -115,7 +116,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Create node'), findsOneWidget);
-    expect(find.text('Task'), findsWidgets);
+    expect(find.text('Action'), findsOneWidget);
+    expect(find.text('Thinking'), findsOneWidget);
+    expect(find.text('Task'), findsNothing);
+
+    await tester.tap(find.text('Life'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Habit'), findsWidgets);
+    expect(find.text('Routine'), findsWidgets);
+
+    await tester.enterText(find.byType(TextField).last, 'kan');
+    await tester.pumpAndSettle();
+    expect(find.text('Kanban'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final nodes = await repository.listNodes(day: day);
+    expect(nodes.single.type, NodeType.kanban);
   });
 
   testWidgets('DayPage table project edit does not reuse disposed controller', (
@@ -792,4 +811,67 @@ void main() {
     expect(find.text('Personal task'), findsNothing);
     expect(find.text('Context: Project: launch'), findsOneWidget);
   });
+
+  testWidgets(
+    'DayPage day tabs collapse and selection rail state preservation',
+    (tester) async {
+      final day = DateTime(2026, 6, 18);
+      final repository = InMemoryMindmapRepository(
+        seedNodes: [
+          MindmapNode.create(
+            id: 'node-a',
+            type: NodeType.task,
+            title: 'Node A',
+            day: day,
+          ),
+          MindmapNode.create(
+            id: 'node-b',
+            type: NodeType.task,
+            title: 'Node B',
+            day: day,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(home: DayPage(date: day)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. Day tabs start collapsed (showing dayKey title)
+      const formattedDayStr = '2026-06-18';
+      expect(find.text(formattedDayStr), findsOneWidget);
+      expect(find.byIcon(Icons.calendar_view_week_rounded), findsOneWidget);
+
+      // Tap to expand day tabs
+      await tester.tap(find.text(formattedDayStr));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Hide day tabs'), findsOneWidget);
+
+      // 2. Select node A -> expands editor panel
+      await tester.tap(find.byKey(const ValueKey('mindmap-node-node-a')));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit Node'), findsOneWidget);
+
+      // Collapse editor panel to rail
+      await tester.tap(find.byTooltip('Collapse'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit Node'), findsNothing);
+      expect(find.byTooltip('Expand Editor'), findsOneWidget);
+
+      // 3. Select node B -> stays collapsed (does not force expand)
+      await tester.tap(find.byKey(const ValueKey('mindmap-node-node-b')));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit Node'), findsNothing);
+      expect(find.byTooltip('Expand Editor'), findsOneWidget);
+
+      // Expand manually
+      await tester.tap(find.byTooltip('Expand Editor'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit Node'), findsOneWidget);
+    },
+  );
 }
