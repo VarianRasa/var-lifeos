@@ -1,12 +1,25 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../data/search_database.dart';
+import '../data/search_privacy_preferences.dart';
 import '../data/sqlite_search_index_repository.dart';
 import '../domain/search_index_repository.dart';
 import '../domain/search_query.dart';
 import '../domain/search_result.dart';
 import 'search_index_coordinator.dart';
 import 'search_service.dart';
+
+final searchPrivacyPreferencesProvider = Provider<SearchPrivacyPreferences>((
+  ref,
+) {
+  return SearchPrivacyPreferences(SharedPreferencesAsync());
+});
+
+final cloudExtractionEnabledProvider = FutureProvider<bool>((ref) {
+  return ref.watch(searchPrivacyPreferencesProvider).cloudExtractionEnabled();
+});
 
 final searchIndexRepositoryProvider = FutureProvider<SearchIndexRepository>((
   ref,

@@ -9,6 +9,10 @@ import 'package:sembast/sembast.dart';
 import '../../../core/config/runtime_config.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../insights/domain/insights_summary.dart';
+import '../../search/application/indexed_canvas_board_repository.dart';
+import '../../search/application/indexed_mindmap_repository.dart';
+import '../../search/application/search_document_projector.dart';
+import '../../search/application/search_providers.dart';
 import '../data/aes_gcm_sembast_codec.dart';
 import '../data/canvas_board_repositories.dart';
 import '../data/canvas_board_template_repositories.dart';
@@ -92,8 +96,13 @@ final canvasBoardRepositoryProvider = Provider<CanvasBoardRepository>((ref) {
   final base = SembastCanvasBoardRepository(
     database: ref.watch(mindmapDatabaseProvider),
   );
-  return CollaborationCanvasBoardRepository(
+  final indexed = IndexedCanvasBoardRepository(
     base: base,
+    coordinator: ref.watch(searchIndexCoordinatorProvider.future),
+    projector: const SearchDocumentProjector(),
+  );
+  return CollaborationCanvasBoardRepository(
+    base: indexed,
     store: ref.watch(collaborationBoardSyncStoreProvider),
     sessionReader: ref.watch(activeCollaborationSessionProvider.notifier),
   );
@@ -164,8 +173,13 @@ final mindmapRepositoryProvider = Provider<MindmapRepository>((ref) {
     legacyStore: ref.watch(mindmapNodeStoreProvider),
     seedNodes: config.demoSeedEnabled ? buildSeedMindmapNodes() : const [],
   );
-  return CollaborationMindmapRepository(
+  final indexed = IndexedMindmapRepository(
     base: base,
+    coordinator: ref.watch(searchIndexCoordinatorProvider.future),
+    projector: const SearchDocumentProjector(),
+  );
+  return CollaborationMindmapRepository(
+    base: indexed,
     store: ref.watch(collaborationSyncStoreProvider),
     revisionRepository: ref.watch(mindmapNodeRevisionRepositoryProvider),
     sessionReader: ref.watch(activeCollaborationSessionProvider.notifier),
@@ -266,6 +280,29 @@ final activeProjectCanvasBoardsProvider = FutureProvider.autoDispose((ref) {
 final allMindmapNodesProvider = FutureProvider<List<MindmapNode>>((ref) {
   final repository = ref.watch(mindmapRepositoryProvider);
   return repository.listNodes();
+});
+
+final startupSearchIndexRebuildProvider = FutureProvider<void>((ref) async {
+  const projector = SearchDocumentProjector();
+  final nodes = await ref.watch(allMindmapNodesProvider.future);
+  final boards = await ref
+      .watch(canvasBoardRepositoryProvider)
+      .listBoards(includeArchived: true);
+  final documents = [
+    for (final node in nodes)
+      ...projector.projectNode(
+        node,
+        workspaceId: node.project.trim().isNotEmpty
+            ? 'project:${node.project}'
+            : node.area.trim().isNotEmpty
+            ? 'area:${node.area}'
+            : 'daily',
+      ),
+    for (final board in boards) ...projector.projectBoard(board),
+  ];
+  await (await ref.watch(
+    searchIndexCoordinatorProvider.future,
+  )).rebuild(documents);
 });
 
 final currentDateProvider = Provider<DateTime>((ref) {

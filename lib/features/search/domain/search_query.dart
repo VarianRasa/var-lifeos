@@ -1,4 +1,8 @@
+import 'package:collection/collection.dart';
+
 import 'search_document.dart';
+
+const _setEquality = SetEquality<Object?>();
 
 final class SearchFilters {
   const SearchFilters({
@@ -18,6 +22,47 @@ final class SearchFilters {
   final Set<String> boardIds;
   final Set<String> creatorIds;
   final Set<String> statuses;
+
+  SearchFilters copyWith({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    bool clearDates = false,
+    Set<SearchSourceKind>? sourceKinds,
+    Set<String>? workspaceIds,
+    Set<String>? boardIds,
+    Set<String>? creatorIds,
+    Set<String>? statuses,
+  }) => SearchFilters(
+    dateFrom: clearDates ? null : dateFrom ?? this.dateFrom,
+    dateTo: clearDates ? null : dateTo ?? this.dateTo,
+    sourceKinds: sourceKinds ?? this.sourceKinds,
+    workspaceIds: workspaceIds ?? this.workspaceIds,
+    boardIds: boardIds ?? this.boardIds,
+    creatorIds: creatorIds ?? this.creatorIds,
+    statuses: statuses ?? this.statuses,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is SearchFilters &&
+      other.dateFrom == dateFrom &&
+      other.dateTo == dateTo &&
+      _setEquality.equals(other.sourceKinds, sourceKinds) &&
+      _setEquality.equals(other.workspaceIds, workspaceIds) &&
+      _setEquality.equals(other.boardIds, boardIds) &&
+      _setEquality.equals(other.creatorIds, creatorIds) &&
+      _setEquality.equals(other.statuses, statuses);
+
+  @override
+  int get hashCode => Object.hash(
+    dateFrom,
+    dateTo,
+    _setEquality.hash(sourceKinds),
+    _setEquality.hash(workspaceIds),
+    _setEquality.hash(boardIds),
+    _setEquality.hash(creatorIds),
+    _setEquality.hash(statuses),
+  );
 }
 
 final class SearchQuery {
@@ -30,6 +75,16 @@ final class SearchQuery {
   final String text;
   final String? activeWorkspaceId;
   final SearchFilters filters;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SearchQuery &&
+      other.text == text &&
+      other.activeWorkspaceId == activeWorkspaceId &&
+      other.filters == filters;
+
+  @override
+  int get hashCode => Object.hash(text, activeWorkspaceId, filters);
 }
 
 bool matchesSearchFilters(SearchDocument document, SearchFilters filters) {

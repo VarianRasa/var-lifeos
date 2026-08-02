@@ -78,6 +78,30 @@ void main() {
     expect(results.map((result) => result.document.sourceId), ['1']);
   });
 
+  test('deleteBoard removes board and child documents', () async {
+    await repository.upsertAll([
+      document(
+        id: 'board:b:main',
+        sourceId: 'b',
+        text: 'roadmap',
+        boardId: 'b',
+      ),
+      document(
+        id: 'object:o:main',
+        sourceId: 'o',
+        text: 'roadmap child',
+        boardId: 'b',
+      ),
+    ]);
+
+    await repository.deleteBoard('b');
+
+    expect(
+      await repository.search(const SearchQuery(text: 'roadmap')),
+      isEmpty,
+    );
+  });
+
   test('deleteSources removes every fragment', () async {
     await repository.upsertAll([
       document(id: 'node:1:a', sourceId: '1', text: 'shared alpha'),

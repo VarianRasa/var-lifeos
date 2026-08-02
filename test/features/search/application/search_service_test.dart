@@ -35,6 +35,9 @@ final class _Repository implements SearchIndexRepository {
   Future<void> deleteSources(Set<SearchSourceRef> sources) async {}
 
   @override
+  Future<void> deleteBoard(String boardId) async {}
+
+  @override
   Future<void> clear() async {}
 
   @override

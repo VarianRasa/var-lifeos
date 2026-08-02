@@ -42,6 +42,21 @@ void main() {
     view.resetDevicePixelRatio();
   });
 
+  testWidgets('cloud extraction is disabled by default and persists opt-in', (
+    tester,
+  ) async {
+    final preferences = SharedPreferencesAsync();
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('settings-cloud-extraction'));
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(await preferences.getBool('search.cloudExtractionEnabled'), isTrue);
+  });
+
   testWidgets('persists saved view defaults from Settings controls', (
     tester,
   ) async {

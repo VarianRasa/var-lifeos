@@ -12,6 +12,8 @@ final class SearchIndexCoordinator {
   Future<void> removeSource(SearchSourceRef source) =>
       _repository.deleteSources({source});
 
+  Future<void> removeBoard(String boardId) => _repository.deleteBoard(boardId);
+
   Future<void> rebuild(Iterable<SearchDocument> documents) async {
     await _repository.clear();
     for (final batch in _batches(documents, 200)) {

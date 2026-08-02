@@ -17,6 +17,7 @@ import '../../features/insights/insights_page.dart';
 import '../../features/life_os/goals_habits_page.dart';
 import '../../features/life_os/notes_journal_page.dart';
 import '../../features/mindmap/presentation/collab_page.dart';
+import '../../features/search/presentation/search_page.dart';
 import '../../features/settings/settings_page.dart';
 import '../../features/sync/presentation/recovery_center.dart';
 import '../../features/workspace/workspace_detail_page.dart';
@@ -141,6 +142,16 @@ GoRouter createAppRouter({String? initialLocation}) {
                 },
               ),
             ],
+          ),
+          GoRoute(
+            path: '/search',
+            name: AppRoute.search.name,
+            pageBuilder: (context, state) => NoTransitionPage<void>(
+              key: state.pageKey,
+              child: SearchPage(
+                initialQuery: state.uri.queryParameters['q'] ?? '',
+              ),
+            ),
           ),
           GoRoute(
             path: '/settings',
@@ -362,6 +373,7 @@ class _ResizableRoutePanelState extends State<_ResizableRoutePanel>
 
   Widget _panelPage(AppRoute panel) => switch (panel) {
     AppRoute.calendar => const CalendarPage(),
+    AppRoute.search => const SearchPage(),
     AppRoute.focus => const FocusPage(),
     AppRoute.goalsHabits => const GoalsHabitsPage(),
     AppRoute.notesJournal => const NotesJournalPage(),
@@ -442,6 +454,7 @@ String projectCanvasLocation({
 /// Named route identifiers, used for nav rail / bottom nav active state.
 enum AppRoute {
   calendar,
+  search,
   focus,
   goalsHabits,
   notesJournal,
@@ -453,6 +466,7 @@ enum AppRoute {
 
   String get path => switch (this) {
     AppRoute.calendar => '/calendar',
+    AppRoute.search => '/search',
     AppRoute.focus => '/focus',
     AppRoute.goalsHabits => '/goals-habits',
     AppRoute.notesJournal => '/notes-journal',
@@ -472,6 +486,7 @@ enum AppRoute {
 
   IconData get icon => switch (this) {
     AppRoute.calendar => Icons.calendar_month_outlined,
+    AppRoute.search => Icons.search_outlined,
     AppRoute.focus => Icons.timer_outlined,
     AppRoute.goalsHabits => Icons.track_changes_outlined,
     AppRoute.notesJournal => Icons.auto_stories_outlined,
@@ -484,6 +499,7 @@ enum AppRoute {
 
   IconData get selectedIcon => switch (this) {
     AppRoute.calendar => Icons.calendar_month_rounded,
+    AppRoute.search => Icons.search_rounded,
     AppRoute.focus => Icons.timer_rounded,
     AppRoute.goalsHabits => Icons.track_changes_rounded,
     AppRoute.notesJournal => Icons.auto_stories_rounded,
@@ -496,6 +512,7 @@ enum AppRoute {
 
   String get label => switch (this) {
     AppRoute.calendar => 'Calendar',
+    AppRoute.search => 'Search',
     AppRoute.focus => 'Focus',
     AppRoute.goalsHabits => 'Goals & Habits',
     AppRoute.notesJournal => 'Notes & Journal',
@@ -508,6 +525,7 @@ enum AppRoute {
 }
 
 String appRouteLocation(BuildContext context, AppRoute route) {
+  if (route == AppRoute.search) return route.path;
   final state = GoRouterState.of(context);
   final date = state.pathParameters['date'] ?? dayKey(DateTime.now());
   return Uri(

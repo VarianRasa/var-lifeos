@@ -22,6 +22,7 @@ import '../mindmap/domain/custom_node_template_codec.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
+import '../search/application/search_providers.dart';
 import '../sync/application/sync_controller.dart';
 import 'application/reminder_auto_scheduler.dart';
 import 'application/reminder_notification_navigation.dart';
@@ -44,6 +45,29 @@ ShapeDecoration _settingsPanelDecoration(
       side: BorderSide(color: theme.dividerColor),
     ),
   );
+}
+
+class _CloudExtractionCard extends StatelessWidget {
+  const _CloudExtractionCard({required this.enabled, required this.onChanged});
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: SwitchListTile(
+        key: const ValueKey('settings-cloud-extraction'),
+        value: enabled,
+        onChanged: onChanged,
+        secondary: const Icon(Icons.cloud_outlined),
+        title: const Text('Cloud OCR and transcription'),
+        subtitle: const Text(
+          'Allow eligible attachments to use cloud extraction. Local-only content never uploads.',
+        ),
+      ),
+    );
+  }
 }
 
 class SettingsPage extends ConsumerWidget {
@@ -203,6 +227,18 @@ class SettingsPage extends ConsumerWidget {
                 ),
               ),
             ),
+          ),
+          const SizedBox(height: 24),
+          Text('Search privacy', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _CloudExtractionCard(
+            enabled: ref.watch(cloudExtractionEnabledProvider).value ?? false,
+            onChanged: (value) async {
+              await ref
+                  .read(searchPrivacyPreferencesProvider)
+                  .setCloudExtractionEnabled(value);
+              ref.invalidate(cloudExtractionEnabledProvider);
+            },
           ),
           const SizedBox(height: 24),
           Text('Sync & backup', style: theme.textTheme.titleSmall),

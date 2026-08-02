@@ -16,6 +16,10 @@ void main() {
     SharedPreferencesAsyncPlatform.instance =
         InMemorySharedPreferencesAsync.empty();
   });
+  test('search route uses standalone path', () {
+    expect(AppRoute.search.path, '/search');
+  });
+
   test('legacy node route redirects to encoded day highlight', () {
     expect(
       legacyNodeRouteLocation(date: '2026-06-18', nodeId: 'node / 1'),

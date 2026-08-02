@@ -46,6 +46,9 @@ final class _RecordingRepository implements SearchIndexRepository {
   }
 
   @override
+  Future<void> deleteBoard(String boardId) async {}
+
+  @override
   Future<List<SearchResult>> search(
     SearchQuery query, {
     int limit = 50,

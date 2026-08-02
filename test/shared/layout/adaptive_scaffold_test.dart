@@ -165,7 +165,7 @@ void main() {
     expect(find.byKey(const ValueKey('astryx-extended-rail')), findsOneWidget);
     final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
     expect(rail.extended, isTrue);
-    expect(rail.selectedIndex, 8);
+    expect(rail.selectedIndex, 9);
   });
 
   testWidgets('desktop navigation can collapse and expand', (tester) async {
@@ -212,6 +212,6 @@ void main() {
   testWidgets('recovery maps to Settings active destination', (tester) async {
     await pumpShell(tester, width: 1440, location: '/recovery');
     final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
-    expect(rail.selectedIndex, 8);
+    expect(rail.selectedIndex, 9);
   });
 }

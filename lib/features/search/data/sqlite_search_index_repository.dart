@@ -98,6 +98,13 @@ final class SqliteSearchIndexRepository implements SearchIndexRepository {
   }
 
   @override
+  Future<void> deleteBoard(String boardId) async {
+    _database.execute('DELETE FROM search_documents WHERE board_id = ?', [
+      boardId,
+    ]);
+  }
+
+  @override
   Future<List<SearchResult>> search(SearchQuery query, {int limit = 50}) async {
     final conditions = <String>[];
     final parameters = <Object?>[];

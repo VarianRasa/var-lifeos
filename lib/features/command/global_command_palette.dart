@@ -30,6 +30,9 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
+import '../search/application/search_providers.dart';
+import '../search/domain/search_query.dart';
+import '../search/presentation/search_result_tile.dart';
 import 'domain/command_date_parser.dart';
 import 'domain/command_node_query.dart';
 import 'domain/command_palette_entry.dart';
@@ -391,6 +394,10 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
     final tags = _availableTags(nodes);
     final workspaceContexts = WorkspaceContexts.fromNodes(nodes);
     final mutator = _CommandMutator.fromQuery(_query, nodes);
+    final globalResults =
+        _query.trim().isEmpty || _looksLikeCommandContext(_query)
+        ? null
+        : ref.watch(searchResultsProvider(SearchQuery(text: _query)));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -479,6 +486,40 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                   const SizedBox(height: 10),
                 ],
                 if (_query.trim().isNotEmpty) ...[
+                  if (globalResults != null) ...[
+                    globalResults.when(
+                      loading: () => const Text('Searching all content'),
+                      error: (error, stackTrace) =>
+                          const Text('Global search unavailable'),
+                      data: (results) => Column(
+                        children: [
+                          for (final result in results.take(8))
+                            SearchResultTile(
+                              result: result,
+                              onTap: () {
+                                final document = result.document;
+                                if (document.date case final date?) {
+                                  widget.onJumpToDate(date);
+                                } else if (document.boardId
+                                    case final boardId?) {
+                                  Navigator.maybeOf(context)?.pop();
+                                  final parts = document.workspaceId.split(':');
+                                  if (parts.length > 1) {
+                                    context.go(
+                                      projectCanvasLocation(
+                                        workspaceName: document.workspaceId,
+                                        boardId: boardId,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 18),
+                  ],
                   _QuickCreatePanel(
                     titleController: _createTitleController,
                     dateController: _createDateController,

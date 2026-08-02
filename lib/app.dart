@@ -29,6 +29,7 @@ class VarApp extends ConsumerWidget {
     ref.listen(allMindmapNodesProvider, (previous, next) {
       next.whenData(ref.read(reminderAutoSchedulerProvider).schedule);
     });
+    if (!lock.isLocked) ref.watch(startupSearchIndexRebuildProvider);
 
     if (lock.isLocked) {
       return MaterialApp(

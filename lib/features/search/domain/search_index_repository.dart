@@ -23,6 +23,8 @@ abstract interface class SearchIndexRepository {
 
   Future<void> deleteSources(Set<SearchSourceRef> sources);
 
+  Future<void> deleteBoard(String boardId);
+
   Future<List<SearchResult>> search(SearchQuery query, {int limit = 50});
 
   Future<void> clear();

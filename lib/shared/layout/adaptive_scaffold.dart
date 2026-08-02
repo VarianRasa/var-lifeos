@@ -179,6 +179,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
 
 const _primaryRoutes = <AppRoute>[
   AppRoute.calendar,
+  AppRoute.search,
   AppRoute.focus,
   AppRoute.goalsHabits,
   AppRoute.notesJournal,
@@ -417,6 +418,7 @@ class _BrandMark extends StatelessWidget {
 /// Maps a router location to the active top-level route.
 AppRoute _routeFromLocation(String location) {
   if (location.startsWith('/calendar')) return AppRoute.calendar;
+  if (location.startsWith('/search')) return AppRoute.search;
   if (location.startsWith('/focus')) return AppRoute.focus;
   if (location.startsWith('/goals-habits')) return AppRoute.goalsHabits;
   if (location.startsWith('/notes-journal')) return AppRoute.notesJournal;
