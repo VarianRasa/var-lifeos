@@ -153,6 +153,7 @@ final class SyncRestorePoint {
     required this.label,
     required this.createdAt,
     required this.document,
+    this.accountEmail = '',
   });
 
   factory SyncRestorePoint.fromJson(Map<String, Object?> json) {
@@ -166,6 +167,7 @@ final class SyncRestorePoint {
       id: json['id'] as String? ?? '',
       label: json['label'] as String? ?? '',
       createdAt: createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+      accountEmail: json['accountEmail'] as String? ?? '',
       document: rawDocument is Map<Object?, Object?>
           ? MindmapBackupDocument.fromJson(rawDocument.cast<String, Object?>())
           : throw const FormatException('Restore point document is invalid.'),
@@ -176,6 +178,7 @@ final class SyncRestorePoint {
   final String label;
   final DateTime createdAt;
   final MindmapBackupDocument document;
+  final String accountEmail;
 
   int get nodeCount => document.nodes.length;
 
@@ -189,6 +192,7 @@ final class SyncRestorePoint {
     'label': label,
     'createdAt': createdAt.toIso8601String(),
     'document': document.toJson(),
+    'accountEmail': accountEmail,
   };
 }
 
@@ -208,9 +212,9 @@ abstract interface class SyncRestorePointStore {
 
   Future<SyncRestorePoint?> read(String id);
 
-  Future<List<SyncRestorePoint>> recent({int limit = 5});
+  Future<List<SyncRestorePoint>> recent({int limit = 5, String? accountEmail});
 
-  Future<void> prune({required int keepLatest});
+  Future<void> prune({required int keepLatest, String? accountEmail});
 
   Future<void> clear();
 }

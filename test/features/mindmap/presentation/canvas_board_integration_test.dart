@@ -1254,6 +1254,84 @@ void main() {
     );
   });
 
+  testWidgets('column resize clamps width and normalizes locked child', (
+    tester,
+  ) async {
+    final now = DateTime(2026, 8, 2);
+    final column = CanvasObject(
+      id: 'minimum-column',
+      type: CanvasObjectType.column,
+      geometry: const CanvasGeometry(x: -100, y: -160, width: 300, height: 300),
+      payload: const <String, Object?>{
+        'title': 'Minimum',
+        'isCollapsed': false,
+        'orderedChildIds': <String>['locked-column-child'],
+      },
+      createdAt: now,
+      updatedAt: now,
+    );
+    final child = CanvasObject(
+      id: 'locked-column-child',
+      type: CanvasObjectType.shape,
+      geometry: const CanvasGeometry(x: -88, y: -100, width: 276, height: 80),
+      parentColumnId: column.id,
+      isLocked: true,
+      createdAt: now,
+      updatedAt: now,
+    );
+    var board = CanvasBoard(
+      id: 'project:minimum-column',
+      kind: CanvasBoardKind.project,
+      title: 'Minimum column',
+      objects: <CanvasObject>[column, child],
+      createdAt: now,
+      updatedAt: now,
+    );
+    final key = GlobalKey<MindmapCanvasState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => MindmapCanvas(
+              key: key,
+              nodes: const <MindmapNode>[],
+              board: board,
+              onCanvasObjectsUpdated: (objects) => setState(() {
+                for (final object in objects) {
+                  board = board.replaceObject(object);
+                }
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    key.currentState!.selectCanvasObject(column.id);
+    await tester.pump();
+    final resize = await tester.startGesture(
+      tester.getCenter(
+        find.byKey(const ValueKey('canvas-column-resize-minimum-column')),
+      ),
+    );
+    await resize.moveBy(const Offset(30, 0));
+    await tester.pump();
+    for (var index = 0; index < 13; index++) {
+      await resize.moveBy(const Offset(-10, 0));
+    }
+    await resize.up();
+    await tester.pumpAndSettle();
+
+    final resizedColumn = board.objectById(column.id)!;
+    final resizedChild = board.objectById(child.id)!;
+    expect(resizedColumn.geometry.width, 240);
+    expect(resizedChild.geometry.width, 216);
+    expect(
+      resizedChild.geometry.x + resizedChild.geometry.width,
+      resizedColumn.geometry.x + resizedColumn.geometry.width - 12,
+    );
+  });
+
   testWidgets(
     'mobile long press enters column and empty pan still moves viewport',
     (tester) async {

@@ -12,6 +12,7 @@
 .swiftpm/
 migrate_working_dir/
 .claude/
+.superpowers/
 .firebase/
 .hermes/
 devtools_options.yaml
@@ -34,6 +35,12 @@ devtools_options.yaml
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
+**/node_modules/
+**/.wrangler/
+**/dist/
+**/*.cpuprofile
+**/worker-configuration.d.ts
+.worktrees/
 /build/
 /dist/
 /coverage/
@@ -62,3 +69,4 @@ app.*.map.json
 *.jks
 key.properties
 
+.devswarm-temp/

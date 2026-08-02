@@ -65,6 +65,9 @@ CalendarDaySummary buildCalendarDaySummary(
   var hasJournalOrReview = false;
 
   for (final node in dayNodes) {
+    if (node.status == NodeStatus.someday || node.status == NodeStatus.inbox) {
+      continue;
+    }
     final isDone = node.isDone || node.status == NodeStatus.done;
     final isTaskLike = _taskLikeTypes.contains(node.type);
     if (isTaskLike) {

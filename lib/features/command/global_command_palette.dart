@@ -17,6 +17,8 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
 import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
@@ -28,7 +30,6 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
-import '../mindmap/presentation/mindmap_canvas.dart';
 import 'domain/command_date_parser.dart';
 import 'domain/command_node_query.dart';
 import 'domain/command_palette_entry.dart';
@@ -86,25 +87,38 @@ Future<void> showGlobalCommandPalette(
   BuildContext context, {
   DateTime? initialDate,
 }) {
+  final viewport = MediaQuery.sizeOf(context);
+  final isMobile = viewport.width <= LayoutConstants.mobileBreakpoint;
   return showDialog<void>(
     context: context,
+    useSafeArea: !isMobile,
     builder: (dialogContext) {
-      return AlertDialog(
+      final palette = GlobalCommandPalette(
+        initialDate: initialDate ?? DateTime.now().dateOnly,
+        onOpenNode: (node) {
+          Navigator.of(dialogContext).pop();
+          if (context.mounted) {
+            goToDay(context, node.day, highlightNodeId: node.id);
+          }
+        },
+        onJumpToDate: (date) {
+          Navigator.of(dialogContext).pop();
+          if (context.mounted) goToDay(context, date);
+        },
+      );
+      if (isMobile) {
+        return Dialog.fullscreen(
+          key: const ValueKey('global-command-mobile-dialog'),
+          child: SafeArea(
+            child: Padding(padding: const EdgeInsets.all(16), child: palette),
+          ),
+        );
+      }
+      return Dialog(
+        key: const ValueKey('global-command-desktop-dialog'),
         insetPadding: const EdgeInsets.all(20),
-        contentPadding: const EdgeInsets.all(14),
-        content: GlobalCommandPalette(
-          initialDate: initialDate ?? DateTime.now().dateOnly,
-          onOpenNode: (node) {
-            Navigator.of(dialogContext).pop();
-            if (context.mounted) {
-              goToDay(context, node.day, highlightNodeId: node.id);
-            }
-          },
-          onJumpToDate: (date) {
-            Navigator.of(dialogContext).pop();
-            if (context.mounted) goToDay(context, date);
-          },
-        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(padding: const EdgeInsets.all(14), child: palette),
       );
     },
   );
@@ -804,7 +818,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
       case CommandPaletteEntryKind.node:
         final node = entry.node!;
         _rememberCommand(
-          icon: nodeIcon(node.type),
+          icon: NodeVisuals.icon(node.type),
           title: node.title,
           subtitle: '${node.type.name} • ${dayKey(node.day)}',
         );
@@ -817,6 +831,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
           subtitle: link,
         );
         final messenger = ScaffoldMessenger.of(context);
+        final semantic = AppSemanticColors.of(context);
         messenger.showSnackBar(
           const SnackBar(
             content: Text('Connecting to room...'),
@@ -827,18 +842,18 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
           messenger.hideCurrentSnackBar();
           if (success) {
             messenger.showSnackBar(
-              const SnackBar(
-                content: Text('Successfully joined room!'),
-                backgroundColor: Colors.green,
+              SnackBar(
+                content: const Text('Successfully joined room!'),
+                backgroundColor: semantic.success,
               ),
             );
           } else {
             messenger.showSnackBar(
-              const SnackBar(
-                content: Text(
+              SnackBar(
+                content: const Text(
                   'Failed to join room. Check internet or platform support.',
                 ),
-                backgroundColor: Colors.redAccent,
+                backgroundColor: semantic.danger,
               ),
             );
           }
@@ -1121,12 +1136,17 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
       _CommandMutatorType.status => node.copyWith(
         status: _statusFromCommandValue(mutator.value!) ?? node.status,
         isDone: mutator.value == NodeStatus.done.name,
-        progress: mutator.value == NodeStatus.done.name ? 1 : node.progress,
+        progress: mutator.value == NodeStatus.done.name
+            ? 1
+            : node.isDone
+            ? 0
+            : node.progress,
         updatedAt: DateTime.now(),
       ),
       _CommandMutatorType.clearStatus => node.copyWith(
         status: NodeStatus.open,
         isDone: false,
+        progress: node.isDone ? 0 : node.progress,
         updatedAt: DateTime.now(),
       ),
       _CommandMutatorType.type => node.copyWith(
@@ -3309,7 +3329,7 @@ class _CommandResultTile extends StatelessWidget {
           width: isActive ? 2.0 : 1.0,
         ),
       ),
-      leading: Icon(_nodeIcon(node.type)),
+      leading: Icon(NodeVisuals.icon(node.type)),
       title: _HighlightedText(value: node.title, query: query),
       subtitle: Text(
         [
@@ -3389,7 +3409,7 @@ class _QuickCreateCommandTile extends StatelessWidget {
           width: isActive ? 2.0 : 1.0,
         ),
       ),
-      leading: Icon(_nodeIcon(command.type)),
+      leading: Icon(NodeVisuals.icon(command.type)),
       title: Text(command.label, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         [
@@ -3420,36 +3440,6 @@ class _QuickCreateCommandTile extends StatelessWidget {
     );
   }
 }
-
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
-};
 
 String _smartViewChipLabel(SmartNodeView view) {
   final label = switch (view.type) {

@@ -124,6 +124,57 @@ void main() {
     expect(find.text('Agenda task'), findsOneWidget);
   });
 
+  testWidgets('CalendarPage day cell opens complete context menu', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 7, 5);
+    final repository = InMemoryMindmapRepository();
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+
+    final cell = find.byKey(const ValueKey('calendar-cell-2026-07-06'));
+    final gesture = await tester.startGesture(
+      tester.getCenter(cell),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('calendar-day-menu-open')),
+        matching: find.text('Open full day'),
+      ),
+      findsOneWidget,
+    );
+    for (final item in <(String, String)>[
+      ('calendar-day-menu-add-node', 'Add node'),
+      ('calendar-day-menu-quick-capture', 'Quick capture'),
+      ('calendar-day-menu-template', 'Apply template'),
+      ('calendar-day-menu-select', 'Select date'),
+      ('calendar-day-menu-copy-date', 'Copy date'),
+    ]) {
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey(item.$1)),
+          matching: find.text(item.$2),
+        ),
+        findsOneWidget,
+      );
+    }
+
+    await tester.tap(find.byKey(const ValueKey('calendar-day-menu-select')));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(tester.element(cell));
+    expect(
+      container.read(calendarRangeSelectionProvider),
+      contains(DateTime(2026, 7, 6)),
+    );
+  });
+
   testWidgets('CalendarPage today cell keeps the Today badge readable', (
     tester,
   ) async {
@@ -141,6 +192,54 @@ void main() {
       dayNumber.style?.color,
       Theme.of(tester.element(find.byType(CalendarPage))).colorScheme.primary,
     );
+  });
+
+  testWidgets('CalendarPage shows Today cockpit only in Today preview', (
+    tester,
+  ) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 7, 5);
+    final tomorrow = DateTime(2026, 7, 6);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        _taskNode(id: 'today-task', title: 'Today task', day: today),
+        _taskNode(id: 'tomorrow-task', title: 'Tomorrow task', day: tomorrow),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+
+    expect(find.byKey(const ValueKey('today-cockpit-panel')), findsOneWidget);
+    expect(find.text('Today cockpit'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-07-06')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('today-cockpit-panel')), findsNothing);
+  });
+
+  testWidgets('CalendarPage Today cockpit opens inbox triage', (tester) async {
+    _setLargeCalendarSurface(tester);
+    final today = DateTime(2026, 7, 5);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'inbox-note',
+          type: NodeType.note,
+          title: 'Inbox note',
+          day: today,
+          data: const {'inbox': true},
+          now: today,
+        ),
+      ],
+    );
+
+    await _pumpCalendar(tester, repository: repository, today: today);
+    await tester.tap(find.byKey(const ValueKey('today-cockpit-inbox')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Inbox Triage'), findsOneWidget);
+    expect(find.text('Inbox note'), findsWidgets);
   });
 
   testWidgets('CalendarPage advanced filters dialog uses roomy sections', (
@@ -230,11 +329,82 @@ void main() {
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
     expect((await repository.getNode('undo-task'))?.day, DateTime(2026, 6, 22));
+    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(snackBar.persist, isFalse);
+    expect(snackBar.showCloseIcon, isTrue);
 
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
 
     expect((await repository.getNode('undo-task'))?.day, today);
+  });
+
+  testWidgets('CalendarPage move undo remains safe after route disposal', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        _taskNode(id: 'route-undo-task', title: 'Route undo task', day: today),
+      ],
+    );
+    final router = GoRouter(
+      initialLocation: '/calendar',
+      routes: [
+        GoRoute(
+          path: '/calendar',
+          builder: (context, state) => const CalendarPage(),
+        ),
+        GoRoute(
+          path: '/calendar/:date',
+          builder: (context, state) =>
+              Scaffold(body: Text('day=${state.pathParameters['date']}')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-move-route-undo-task')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('22'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
+    final undo = snackBar.action!.onPressed;
+    expect(
+      (await repository.getNode('route-undo-task'))?.day,
+      DateTime(2026, 6, 22),
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('calendar-agenda-open-2026-06-22')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('day=2026-06-22'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+
+    undo();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect((await repository.getNode('route-undo-task'))?.day, today);
   });
 
   testWidgets('CalendarPage week drag moves node to target day', (
@@ -339,6 +509,12 @@ void main() {
     final moved = await repository.getNode('month-task');
     expect(moved?.day, DateTime(2026, 6, 24));
     expect(find.text('Moved "Month task" to Jun 24, 2026'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    expect((await repository.getNode('month-task'))?.day, today);
+    expect(find.text('Moved "Month task" to Jun 24, 2026'), findsNothing);
   });
 
   testWidgets('CalendarPage agenda shift arrow moves selected node', (
@@ -757,7 +933,7 @@ void main() {
     expect(find.text('Agenda task'), findsNothing);
 
     await tester.enterText(searchEditable, 'missing');
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.byKey(const ValueKey('calendar-agenda-empty')), findsOneWidget);
     expect(find.text('No matching agenda items'), findsOneWidget);
@@ -1876,16 +2052,8 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('calendar-day-preview-more-actions')),
-      findsOneWidget,
-    );
-    expect(
       find.byKey(const ValueKey('calendar-day-preview-open-day')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(const ValueKey('calendar-day-preview-template')),
-      findsNothing,
+      findsOneWidget,
     );
     expect(find.text('day=2026-06-19'), findsNothing);
   });
@@ -1923,10 +2091,6 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('calendar-cell-2026-06-19')));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('calendar-day-preview-more-actions')),
-    );
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('calendar-day-preview-open-day')),
@@ -2054,7 +2218,7 @@ void main() {
       matching: find.byType(EditableText),
     );
     await tester.enterText(searchEditable, 'missing');
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(
       find.text('Clear search to see all nodes for this day.'),

@@ -6,6 +6,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_design_tokens.dart';
+
 /// An empty state widget with optional animated icon pulse.
 class AnimatedEmptyState extends StatefulWidget {
   const AnimatedEmptyState({
@@ -48,27 +50,41 @@ class _AnimatedEmptyStateState extends State<AnimatedEmptyState>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: AppDesignTokens.astryx.motionMedium,
     );
     _fadeSlide = CurvedAnimation(
       parent: _controller,
-      curve: Curves.easeOutCubic,
+      curve: AppDesignTokens.astryx.motionCurve,
     );
     _pulse = Tween<double>(begin: 1.0, end: 1.08).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOutSine),
     );
     _controller.forward();
-    final isTest = WidgetsBinding.instance.runtimeType.toString().contains(
-      'Test',
-    );
-    if (widget.pulseIcon && !isTest) {
+    if (widget.pulseIcon) {
       _controller.addStatusListener((status) {
+        final media = mounted ? MediaQuery.maybeOf(context) : null;
+        if (!mounted ||
+            (media?.disableAnimations ?? false) ||
+            (media?.accessibleNavigation ?? false)) {
+          return;
+        }
         if (status == AnimationStatus.completed) {
           _controller.reverse();
         } else if (status == AnimationStatus.dismissed) {
           _controller.forward();
         }
       });
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final media = MediaQuery.of(context);
+    if (media.disableAnimations || media.accessibleNavigation) {
+      _controller
+        ..stop()
+        ..value = 1;
     }
   }
 
@@ -81,6 +97,11 @@ class _AnimatedEmptyStateState extends State<AnimatedEmptyState>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens =
+        theme.extension<AppDesignTokens>() ?? AppDesignTokens.standard;
+    final media = MediaQuery.of(context);
+    final disableAnimations =
+        media.disableAnimations || media.accessibleNavigation;
     return FadeTransition(
       opacity: _fadeSlide,
       child: SlideTransition(
@@ -91,82 +112,89 @@ class _AnimatedEmptyStateState extends State<AnimatedEmptyState>
         child: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Icon
-                AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: widget.pulseIcon ? _pulse.value : 1.0,
-                      child: Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer.withValues(
-                            alpha: 0.3,
+            child: Semantics(
+              container: true,
+              label: '${widget.label}. ${widget.subtitle}',
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon
+                  AnimatedBuilder(
+                    animation: _pulse,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: widget.pulseIcon && !disableAnimations
+                            ? _pulse.value
+                            : 1.0,
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer
+                                .withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(
+                              tokens.radiusContainer,
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Icon(
-                          widget.icon,
-                          size: 32,
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.7,
+                          child: Icon(
+                            widget.icon,
+                            size: 32,
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.7,
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-                // Label
-                Text(
-                  widget.label,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                      );
+                    },
                   ),
-                ),
-                const SizedBox(height: 6),
-                // Subtitle
-                Text(
-                  widget.subtitle,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                // Actions
-                if (widget.actionLabel != null ||
-                    widget.secondaryActionLabel != null) ...[
                   const SizedBox(height: 20),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (widget.secondaryActionLabel != null) ...[
-                        OutlinedButton.icon(
-                          key: const ValueKey('empty-state-secondary-action'),
-                          onPressed: widget.onSecondaryAction,
-                          icon: Icon(widget.secondaryActionIcon, size: 16),
-                          label: Text(widget.secondaryActionLabel!),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      if (widget.actionLabel != null)
-                        FilledButton.icon(
-                          key:
-                              widget.actionKey ??
-                              const ValueKey('empty-state-primary-action'),
-                          onPressed: widget.onAction,
-                          icon: const Icon(Icons.add, size: 16),
-                          label: Text(widget.actionLabel!),
-                        ),
-                    ],
+                  // Label
+                  Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
+                  const SizedBox(height: 6),
+                  // Subtitle
+                  Text(
+                    widget.subtitle,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  // Actions
+                  if (widget.actionLabel != null ||
+                      widget.secondaryActionLabel != null) ...[
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.secondaryActionLabel != null) ...[
+                          OutlinedButton.icon(
+                            key: const ValueKey('empty-state-secondary-action'),
+                            onPressed: widget.onSecondaryAction,
+                            icon: Icon(widget.secondaryActionIcon, size: 16),
+                            label: Text(widget.secondaryActionLabel!),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        if (widget.actionLabel != null)
+                          FilledButton.icon(
+                            key:
+                                widget.actionKey ??
+                                const ValueKey('empty-state-primary-action'),
+                            onPressed: widget.onAction,
+                            icon: const Icon(Icons.add, size: 16),
+                            label: Text(widget.actionLabel!),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

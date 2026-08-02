@@ -1,11 +1,390 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function eligible() {
+      return signedIn() && request.auth.token.email is string && request.auth.token.email_verified == true && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function memberPath(roomId, uid) {
+      return /databases/$(database)/documents/rooms/$(roomId)/members/$(uid);
+    }
+
+    function invitePath(roomId, inviteId) {
+      return /databases/$(database)/documents/rooms/$(roomId)/invites/$(inviteId);
+    }
+
+    function boardPath(roomId, boardId) {
+      return /databases/$(database)/documents/rooms/$(roomId)/boards/$(boardId);
+    }
+
+    function member(roomId) {
+      return eligible() && exists(memberPath(roomId, request.auth.uid));
+    }
+
+    function role(roomId) {
+      return get(memberPath(roomId, request.auth.uid)).data.role;
+    }
+
+    function owner(roomId) {
+      return member(roomId) && role(roomId) == 'owner';
+    }
+
+    function editor(roomId) {
+      return member(roomId) && role(roomId) in ['owner', 'editor'];
+    }
+
+    function commenter(roomId) {
+      return member(roomId) && role(roomId) in ['owner', 'editor', 'commenter'];
+    }
+
+    function validMemberKeys() {
+      return request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'joinedAt', 'inviteId']);
+    }
+
+    function validInviteKeys() {
+      return request.resource.data.keys().hasOnly(['inviteId', 'roomId', 'email', 'role', 'status', 'createdAt', 'expiresAt', 'createdByUid', 'redeemedByUid', 'redeemedAt']);
+    }
+
+    function validRoomTarget() {
+      return request.resource.data.targetKind in ['day', 'projectBoard']
+        && request.resource.data.targetId is string
+        && request.resource.data.targetId.size() > 0
+        && request.resource.data.targetId.size() <= 256
+        && request.resource.data.targetLabel is string
+        && request.resource.data.targetLabel.size() > 0
+        && request.resource.data.targetLabel.size() <= 160;
+    }
+
+    function roomDay(roomId) {
+      let room = get(/databases/$(database)/documents/rooms/$(roomId)).data;
+      return room.schemaVersion == 2
+        ? room.dayKey
+        : (room.targetKind == 'day' ? room.targetId : null);
+    }
+
+    function validVotingMetadata(voting) {
+      return voting.keys().hasOnly(['sessionId', 'ballotStorageVersion', 'status', 'isAnonymous', 'resultsRevealed', 'maxVotesPerParticipant'])
+        && voting.sessionId is string
+        && voting.sessionId.size() <= 128
+        && voting.ballotStorageVersion == 1
+        && voting.status in ['inactive', 'active', 'ended']
+        && voting.isAnonymous is bool
+        && voting.resultsRevealed is bool
+        && voting.maxVotesPerParticipant is int
+        && voting.maxVotesPerParticipant >= 1
+        && voting.maxVotesPerParticipant <= 10
+        && (voting.status != 'active' || voting.sessionId.size() > 0);
+    }
+
+    function validBoardVotingMetadata() {
+      return request.resource.data.payload.votingSession is map
+        && validVotingMetadata(request.resource.data.payload.votingSession);
+    }
+
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if signedIn() && request.auth.uid == uid;
 
       match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    match /rooms/{roomId} {
+      allow create: if eligible()
+        && ((request.resource.data.schemaVersion == 2
+            && request.resource.data.keys().hasOnly(['schemaVersion', 'ownerUid', 'dayKey', 'createdAt'])
+            && request.resource.data.dayKey is string)
+          || (request.resource.data.schemaVersion == 3
+            && request.resource.data.keys().hasOnly(['schemaVersion', 'ownerUid', 'targetKind', 'targetId', 'targetLabel', 'createdAt'])
+            && validRoomTarget()
+            && (request.resource.data.targetKind != 'projectBoard'
+              || (existsAfter(boardPath(roomId, request.resource.data.targetId))
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.schemaVersion == 1
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.boardId == request.resource.data.targetId
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.revision == 1
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.payload.id == request.resource.data.targetId
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.payload.kind == 'project'
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.createdByUid == request.auth.uid
+                && getAfter(boardPath(roomId, request.resource.data.targetId)).data.updatedByUid == request.auth.uid))))
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && existsAfter(memberPath(roomId, request.auth.uid))
+        && getAfter(memberPath(roomId, request.auth.uid)).data.uid == request.auth.uid
+        && getAfter(memberPath(roomId, request.auth.uid)).data.email == request.auth.token.email
+        && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'owner';
+      allow read: if member(roomId);
+      allow update: if owner(roomId)
+        && request.resource.data == resource.data;
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if member(roomId);
+        allow create: if eligible() && validMemberKeys()
+          && request.resource.data.uid == uid
+          && request.resource.data.joinedAt == request.time
+          && ((uid == request.auth.uid
+              && request.resource.data.email == request.auth.token.email
+              && request.resource.data.displayName is string
+              && request.resource.data.role == 'owner'
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == uid)
+            || (uid == request.auth.uid
+              && request.resource.data.email == request.auth.token.email
+              && request.resource.data.displayName is string
+              && request.resource.data.role in ['editor', 'commenter', 'viewer']
+              && existsAfter(invitePath(roomId, request.resource.data.inviteId))
+              && getAfter(invitePath(roomId, request.resource.data.inviteId)).data.status == 'redeemed'
+              && getAfter(invitePath(roomId, request.resource.data.inviteId)).data.redeemedByUid == request.auth.uid
+              && getAfter(invitePath(roomId, request.resource.data.inviteId)).data.email == request.resource.data.email
+              && getAfter(invitePath(roomId, request.resource.data.inviteId)).data.role == request.resource.data.role));
+        allow update: if owner(roomId)
+          && uid != get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid
+          && validMemberKeys()
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.displayName == resource.data.displayName
+          && request.resource.data.joinedAt == resource.data.joinedAt
+          && request.resource.data.role in ['editor', 'commenter', 'viewer'];
+        allow delete: if owner(roomId) && uid != get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid;
+      }
+
+      match /invites/{inviteId} {
+        allow get: if eligible() && (owner(roomId) || resource.data.email == request.auth.token.email);
+        allow list: if owner(roomId);
+        allow create: if owner(roomId) && validInviteKeys()
+          && request.resource.data.keys().hasAll(['inviteId', 'roomId', 'email', 'role', 'status', 'createdAt', 'expiresAt', 'createdByUid'])
+          && request.resource.data.inviteId == inviteId
+          && request.resource.data.roomId == roomId
+          && request.resource.data.email is string
+          && request.resource.data.role in ['editor', 'commenter', 'viewer']
+          && request.resource.data.status == 'active'
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.expiresAt <= request.time + duration.value(7, 'd')
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update: if eligible() && validInviteKeys()
+          && request.resource.data.inviteId == resource.data.inviteId
+          && request.resource.data.roomId == resource.data.roomId
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.expiresAt == resource.data.expiresAt
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && ((owner(roomId) && resource.data.status == 'active' && request.resource.data.status == 'revoked'
+              && !request.resource.data.keys().hasAny(['redeemedByUid', 'redeemedAt']))
+            || (resource.data.status == 'active'
+              && resource.data.email == request.auth.token.email
+              && resource.data.expiresAt > request.time
+              && request.resource.data.status == 'redeemed'
+              && request.resource.data.redeemedByUid == request.auth.uid
+              && request.resource.data.redeemedAt == request.time
+              && existsAfter(memberPath(roomId, request.auth.uid))
+              && getAfter(memberPath(roomId, request.auth.uid)).data.uid == request.auth.uid
+              && getAfter(memberPath(roomId, request.auth.uid)).data.email == resource.data.email
+              && getAfter(memberPath(roomId, request.auth.uid)).data.role == resource.data.role));
+        allow delete: if false;
+      }
+
+      match /nodes/{nodeId} {
+        allow read: if member(roomId);
+        allow create: if editor(roomId)
+          && ((request.resource.data.schemaVersion == 1
+              && request.resource.data.keys().hasOnly(['schemaVersion', 'remoteNodeId', 'dayKey', 'revision', 'deleted', 'payload', 'createdByUid', 'updatedByUid', 'updatedAt']))
+            || (request.resource.data.schemaVersion == 2
+              && request.resource.data.keys().hasOnly(['schemaVersion', 'remoteNodeId', 'dayKey', 'revision', 'deleted', 'payload', 'createdByUid', 'updatedByUid', 'updatedAt', 'lastMutationId'])
+              && request.resource.data.lastMutationId is string
+              && request.resource.data.lastMutationId.size() > 0
+              && request.resource.data.lastMutationId.size() <= 128))
+          && request.resource.data.remoteNodeId == nodeId
+          && request.resource.data.dayKey == roomDay(roomId)
+          && request.resource.data.revision == 1
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.updatedAt == request.time
+          && ((request.resource.data.deleted == true && request.resource.data.payload == null)
+            || (request.resource.data.deleted == false && request.resource.data.payload.id == nodeId && request.resource.data.payload.day == request.resource.data.dayKey));
+        allow update: if editor(roomId)
+          && ((request.resource.data.schemaVersion == 1
+              && request.resource.data.keys().hasOnly(['schemaVersion', 'remoteNodeId', 'dayKey', 'revision', 'deleted', 'payload', 'createdByUid', 'updatedByUid', 'updatedAt']))
+            || (request.resource.data.schemaVersion == 2
+              && request.resource.data.keys().hasOnly(['schemaVersion', 'remoteNodeId', 'dayKey', 'revision', 'deleted', 'payload', 'createdByUid', 'updatedByUid', 'updatedAt', 'lastMutationId'])
+              && request.resource.data.lastMutationId is string
+              && request.resource.data.lastMutationId.size() > 0
+              && request.resource.data.lastMutationId.size() <= 128))
+          && request.resource.data.remoteNodeId == resource.data.remoteNodeId
+          && request.resource.data.dayKey == resource.data.dayKey
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.revision == resource.data.revision + 1
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.updatedAt == request.time
+          && ((request.resource.data.deleted == true && request.resource.data.payload == null)
+            || (request.resource.data.deleted == false && request.resource.data.payload.id == nodeId && request.resource.data.payload.day == request.resource.data.dayKey));
+        allow delete: if false;
+
+        match /comments/{commentId} {
+          allow read: if member(roomId);
+          allow create: if commenter(roomId)
+            && exists(/databases/$(database)/documents/rooms/$(roomId)/nodes/$(nodeId))
+            && request.resource.data.keys().hasOnly(['id', 'nodeId', 'roomId', 'body', 'authorUid', 'authorDisplayName', 'createdAt'])
+            && request.resource.data.keys().hasAll(['id', 'nodeId', 'roomId', 'body', 'authorUid', 'authorDisplayName', 'createdAt'])
+            && request.resource.data.id == commentId
+            && request.resource.data.nodeId == nodeId
+            && request.resource.data.roomId == roomId
+            && request.resource.data.authorUid == request.auth.uid
+            && request.resource.data.authorDisplayName is string
+            && request.resource.data.authorDisplayName.size() <= 100
+            && request.resource.data.body is string
+            && request.resource.data.body == request.resource.data.body.trim()
+            && request.resource.data.body.size() >= 1
+            && request.resource.data.body.size() <= 4000
+            && request.resource.data.createdAt == request.time;
+          allow update, delete: if false;
+        }
+      }
+
+      match /boards/{boardId} {
+        allow read: if member(roomId);
+        allow create: if (editor(roomId)
+            || (eligible()
+              && existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.schemaVersion == 3
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == request.auth.uid
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.targetKind == 'projectBoard'
+              && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.targetId == boardId
+              && existsAfter(memberPath(roomId, request.auth.uid))
+              && getAfter(memberPath(roomId, request.auth.uid)).data.role == 'owner'))
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.schemaVersion == 3
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.targetKind == 'projectBoard'
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.targetId == boardId
+          && request.resource.data.keys().hasOnly(['schemaVersion', 'boardId', 'revision', 'payload', 'createdByUid', 'updatedByUid', 'lastMutationId', 'updatedAt'])
+          && request.resource.data.schemaVersion == 1
+          && request.resource.data.boardId == boardId
+          && request.resource.data.revision == 1
+          && request.resource.data.payload.id == boardId
+          && request.resource.data.payload.kind == 'project'
+          && validBoardVotingMetadata()
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.lastMutationId is string
+          && request.resource.data.lastMutationId.size() > 0
+          && request.resource.data.lastMutationId.size() <= 128
+          && request.resource.data.updatedAt == request.time;
+        allow update: if (editor(roomId)
+          && request.resource.data.keys().hasOnly(['schemaVersion', 'boardId', 'revision', 'payload', 'createdByUid', 'updatedByUid', 'lastMutationId', 'updatedAt'])
+          && request.resource.data.schemaVersion == 1
+          && request.resource.data.boardId == resource.data.boardId
+          && request.resource.data.boardId == boardId
+          && request.resource.data.revision == resource.data.revision + 1
+          && request.resource.data.payload.id == boardId
+          && request.resource.data.payload.kind == 'project'
+          && validBoardVotingMetadata()
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.updatedByUid == request.auth.uid
+          && request.resource.data.lastMutationId is string
+          && request.resource.data.lastMutationId.size() > 0
+          && request.resource.data.lastMutationId.size() <= 128
+          && request.resource.data.updatedAt == request.time);
+        allow delete: if false;
+
+        match /ballots/{uid} {
+          allow get: if member(roomId) && request.auth.uid == uid;
+          allow list: if false;
+          allow create, update: if commenter(roomId)
+            && request.auth.uid == uid
+            && request.resource.data.keys().hasOnly(['schemaVersion', 'ownerUid', 'sessionId', 'objectIds', 'updatedAt'])
+            && request.resource.data.schemaVersion == 1
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.sessionId is string
+            && request.resource.data.sessionId.size() > 0
+            && request.resource.data.sessionId.size() <= 128
+            && request.resource.data.objectIds is list
+            && request.resource.data.objectIds.size() <= 10
+            && request.resource.data.updatedAt == request.time
+            && get(/databases/$(database)/documents/rooms/$(roomId)/boards/$(boardId)).data.payload.votingSession.status == 'active'
+            && get(/databases/$(database)/documents/rooms/$(roomId)/boards/$(boardId)).data.payload.votingSession.sessionId == request.resource.data.sessionId
+            && request.resource.data.objectIds.size() <= get(/databases/$(database)/documents/rooms/$(roomId)/boards/$(boardId)).data.payload.votingSession.maxVotesPerParticipant
+            && (!exists(/databases/$(database)/documents/rooms/$(roomId)/boards/$(boardId)/ballots/$(uid)) || resource.data.ownerUid == uid);
+          allow delete: if member(roomId) && request.auth.uid == uid;
+        }
+      }
+
+      match /presence/{uid} {
+        allow read: if member(roomId);
+        allow create, update: if member(roomId)
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['name', 'color', 'cursorX', 'cursorY', 'selectedNodeId', 'isEditing', 'lastActive'])
+          && request.resource.data.keys().hasAll(['name', 'color', 'selectedNodeId', 'isEditing', 'lastActive'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 100
+          && request.resource.data.color is int
+          && request.resource.data.color >= 0
+          && request.resource.data.color <= 4294967295
+          && (!request.resource.data.keys().hasAny(['cursorX', 'cursorY'])
+            || (request.resource.data.keys().hasAll(['cursorX', 'cursorY'])
+              && request.resource.data.cursorX is number
+              && request.resource.data.cursorY is number
+              && request.resource.data.cursorX >= -1000000
+              && request.resource.data.cursorX <= 1000000
+              && request.resource.data.cursorY >= -1000000
+              && request.resource.data.cursorY <= 1000000))
+          && (request.resource.data.selectedNodeId == null
+            || (request.resource.data.selectedNodeId is string
+              && request.resource.data.selectedNodeId.size() <= 256))
+          && request.resource.data.isEditing is bool
+          && request.resource.data.lastActive == request.time;
+        allow delete: if member(roomId) && request.auth.uid == uid;
+      }
+
+      match /pings/{pingId} {
+        allow read: if member(roomId);
+        allow create: if commenter(roomId) && request.resource.data.fromId == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /reactions/{reactionId} {
+        allow read: if member(roomId);
+        allow create: if commenter(roomId)
+          && request.resource.data.keys().hasOnly(['fromId', 'emoji', 't', 'expiresAt'])
+          && request.resource.data.fromId == request.auth.uid
+          && request.resource.data.emoji is string
+          && request.resource.data.emoji.size() > 0
+          && request.resource.data.emoji.size() <= 16
+          && request.resource.data.t is int
+          && request.resource.data.expiresAt is int
+          && request.resource.data.expiresAt > request.resource.data.t
+          && request.resource.data.expiresAt <= request.resource.data.t + 5000;
+        allow update, delete: if false;
+      }
+
+      match /boardComments/{commentId} {
+        allow read: if member(roomId);
+        allow create: if commenter(roomId)
+          && request.resource.data.keys().hasOnly(['id', 'objectId', 'body', 'authorName', 'authorUid', 'createdAt', 'parentId', 'isResolved', 'resolvedByUid'])
+          && request.resource.data.id == commentId
+          && request.resource.data.objectId is string
+          && request.resource.data.objectId.size() > 0
+          && request.resource.data.objectId.size() <= 256
+          && request.resource.data.body is string
+          && request.resource.data.body == request.resource.data.body.trim()
+          && request.resource.data.body.size() > 0
+          && request.resource.data.body.size() <= 4000
+          && request.resource.data.authorName is string
+          && request.resource.data.authorName.size() > 0
+          && request.resource.data.authorName.size() <= 100
+          && request.resource.data.authorUid == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && (request.resource.data.parentId == null || request.resource.data.parentId is string)
+          && request.resource.data.isResolved == false
+          && request.resource.data.resolvedByUid == null;
+        allow update: if commenter(roomId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isResolved', 'resolvedByUid'])
+          && request.resource.data.isResolved is bool
+          && request.resource.data.resolvedByUid == request.auth.uid;
+        allow delete: if false;
       }
     }
 

@@ -1,0 +1,16 @@
+{
+  "name": "var-quote-catalog-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/test/**/*.test.js",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260717.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.112.0"
+  }
+}

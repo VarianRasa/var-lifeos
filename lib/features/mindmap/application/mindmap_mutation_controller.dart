@@ -4,6 +4,9 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../calendar/domain/time_block.dart';
+import '../data/collaboration_mindmap_repository.dart';
+import '../domain/inline_node_workspace_policy.dart';
+import '../domain/mindmap_integrator.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/mindmap_node_data.dart';
 import 'mindmap_providers.dart';
@@ -23,9 +26,31 @@ final class MindmapMutationController {
     MindmapNode node, {
     DateTime? previousDay,
   }) async {
-    final saved = await _ref.read(mindmapRepositoryProvider).saveNode(node);
+    final repository = _ref.read(mindmapRepositoryProvider);
+    final allNodes = await repository.listNodes();
+    final saved = await repository.saveNode(node);
+
+    const integrator = MindmapIntegrator();
+    final sideEffects = integrator.integrateMutations(
+      mutatedNode: saved,
+      allNodes: allNodes,
+    );
+    for (final sideEffect in sideEffects) {
+      await repository.saveNode(sideEffect);
+    }
+
     invalidateMindmapStateFromRef(_ref, day: saved.day, extraDay: previousDay);
     return saved;
+  }
+
+  Future<MindmapNode?> savePatch(
+    String nodeId,
+    InlineNodeDraftPatch patch, {
+    required DateTime now,
+  }) async {
+    final latest = await _ref.read(mindmapRepositoryProvider).getNode(nodeId);
+    if (latest == null) return null;
+    return saveNode(patch.mergeInto(latest, now), previousDay: latest.day);
   }
 
   Future<void> deleteNode(MindmapNode node) async {
@@ -35,6 +60,51 @@ final class MindmapMutationController {
   Future<void> deleteNodeById(String nodeId, {required DateTime day}) async {
     await _ref.read(mindmapRepositoryProvider).deleteNode(nodeId);
     invalidateMindmapStateFromRef(_ref, day: day);
+  }
+
+  Future<MindmapNode> restoreRevision(String revisionId) async {
+    final revisionRepository = _ref.read(mindmapNodeRevisionRepositoryProvider);
+    final revision = await revisionRepository.getRevision(revisionId);
+    if (revision == null) throw StateError('Revision not found: $revisionId');
+    final current = await _ref
+        .read(mindmapRepositoryProvider)
+        .getNode(revision.nodeId);
+    final repository = _ref.read(mindmapRepositoryProvider);
+    final restored = repository is CollaborationMindmapRepository
+        ? await repository.restoreRevision(revisionId, now: DateTime.now())
+        : await revisionRepository.restoreRevision(
+            revisionId,
+            now: DateTime.now(),
+          );
+    invalidateMindmapStateFromRef(
+      _ref,
+      day: restored.day,
+      extraDay: current?.day,
+    );
+    _ref.invalidate(nodeRevisionsProvider(restored.id));
+    return restored;
+  }
+
+  Future<MindmapNode> completeNode(MindmapNode node) async {
+    return saveNode(
+      node.copyWith(
+        isDone: true,
+        status: NodeStatus.done,
+        progress: 1,
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  Future<MindmapNode> archiveNode(MindmapNode node) async {
+    return saveNode(node.copyWith(isArchived: true, updatedAt: DateTime.now()));
+  }
+
+  Future<MindmapNode> rescheduleDueDate(
+    MindmapNode node, {
+    required DateTime dueDate,
+  }) async {
+    return saveNode(node.copyWith(dueDate: dueDate, updatedAt: DateTime.now()));
   }
 
   Future<MindmapNode> scheduleNode(MindmapNode node, TimeBlock block) async {

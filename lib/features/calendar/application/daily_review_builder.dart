@@ -21,7 +21,8 @@ String buildDailyReviewBody(DateTime day, List<MindmapNode> nodes) {
         (node) =>
             node.type == NodeType.task &&
             !node.isDone &&
-            node.status != NodeStatus.done,
+            node.status != NodeStatus.done &&
+            node.status != NodeStatus.next,
       )
       .toList();
   final blocked = activeNodes

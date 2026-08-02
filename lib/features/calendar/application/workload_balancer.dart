@@ -92,6 +92,9 @@ List<MindmapNode> _movableNodesForDay(DateTime day, List<MindmapNode> nodes) {
         (node) =>
             node.day.isSameDay(day) &&
             !node.isDone &&
+            node.status != NodeStatus.done &&
+            node.status != NodeStatus.someday &&
+            node.status != NodeStatus.inbox &&
             node.priority.index <= NodePriority.medium.index,
       )
       .toList(growable: false);

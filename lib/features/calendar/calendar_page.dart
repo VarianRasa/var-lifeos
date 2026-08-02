@@ -11,17 +11,16 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
-import '../../shared/layout/adaptive_scaffold.dart';
 import '../../shared/widgets/animated_empty_state.dart';
-import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/search_field.dart';
 import '../../shared/widgets/skeleton_loader.dart';
 import '../command/domain/quick_create_command_parser.dart';
@@ -47,12 +46,24 @@ import 'application/calendar_view_controller.dart';
 import 'application/calendar_week_summary.dart';
 import 'application/day_templates.dart';
 import 'application/node_filtering.dart';
+import 'application/today_cockpit.dart';
 import 'application/workload_balancer.dart';
 import 'domain/calendar_node_payload.dart';
+import 'presentation/inbox_triage_dialog.dart';
+import 'widgets/today_cockpit_panel.dart';
 
 final calendarSearchQueryProvider = StateProvider<String>((ref) => '');
 
 enum CalendarDensityMode { compact, comfortable, detailed }
+
+enum _CalendarDayAction {
+  open,
+  addNode,
+  quickCapture,
+  applyTemplate,
+  toggleSelection,
+  copyDate,
+}
 
 final calendarTypeFiltersProvider = StateProvider<Set<NodeType>>((ref) => {});
 final calendarDoneFilterProvider = StateProvider<bool>((ref) => false);
@@ -98,8 +109,11 @@ void _showRescheduleSnackBar({
 }) {
   final normalizedPreviousDay = previousDay.dateOnly;
   final normalizedTargetDay = targetDay.dateOnly;
+  final mutationController = ref.read(mindmapMutationControllerProvider);
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
+      persist: false,
+      showCloseIcon: true,
       content: Text(
         'Moved "${node.title}" to ${DateFormat('MMM d, y').format(normalizedTargetDay)}',
       ),
@@ -107,12 +121,10 @@ void _showRescheduleSnackBar({
         label: 'Undo',
         onPressed: () {
           unawaited(
-            ref
-                .read(mindmapMutationControllerProvider)
-                .rescheduleNode(
-                  node.copyWith(day: normalizedTargetDay),
-                  day: normalizedPreviousDay,
-                ),
+            mutationController.rescheduleNode(
+              node.copyWith(day: normalizedTargetDay),
+              day: normalizedPreviousDay,
+            ),
           );
         },
       ),
@@ -240,25 +252,30 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final viewMode = ref.watch(calendarViewModeProvider);
     final typeFilters = ref.watch(calendarTypeFiltersProvider);
     final doneOnly = ref.watch(calendarDoneFilterProvider);
-    final isDesktop =
-        MediaQuery.sizeOf(context).width >= LayoutConstants.desktopBreakpoint;
+    final width = MediaQuery.sizeOf(context).width;
+    final isDesktop = width >= LayoutConstants.desktopBreakpoint;
+    final canShowInlineSearch = width >= LayoutConstants.mobileBreakpoint;
 
     return Scaffold(
       appBar: AppBar(
-        title: const AppRouteChromeTabs(currentRoute: AppRoute.calendar),
+        title: const Text('Calendar'),
         actions: [
-          SearchField(
-            key: const ValueKey('calendar-search-field'),
-            controller: _searchController,
-            focusNode: _searchFocusNode,
-            hintText: 'Search calendar...',
-            onChanged: (value) {
-              ref.read(calendarSearchQueryProvider.notifier).state = value
-                  .trim()
-                  .toLowerCase();
-            },
-          ),
-          const SizedBox(width: 12),
+          if (canShowInlineSearch) ...[
+            SearchField(
+              key: const ValueKey('calendar-search-field'),
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              hintText: 'Search calendar...',
+              onChanged: _updateSearchQuery,
+            ),
+            const SizedBox(width: 12),
+          ] else
+            IconButton(
+              key: const ValueKey('calendar-mobile-search'),
+              tooltip: 'Search calendar',
+              icon: const Icon(Icons.search),
+              onPressed: _showMobileCalendarSearch,
+            ),
           Tooltip(
             message: 'Quick add (Ctrl+N)',
             child: IconButton(
@@ -266,36 +283,47 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               onPressed: () => _showQuickCaptureSheet(_focusedDay),
             ),
           ),
-          const SizedBox(width: 4),
-          Tooltip(
-            message: 'Today',
-            child: OutlinedButton(
-              onPressed: () => _jumpToToday(today),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.onSurface,
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                side: BorderSide(
-                  color: Theme.of(context).colorScheme.outlineVariant,
+          if (isDesktop) ...[
+            const SizedBox(width: 4),
+            Tooltip(
+              message: 'Today',
+              child: OutlinedButton(
+                onPressed: () => _jumpToToday(today),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      AppDesignTokens.of(context).radiusElement,
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 36),
+                  fixedSize: const Size.fromHeight(36),
                 ),
-                shape: const DoodleShapeBorder(radius: 10, wobble: 1.4),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                minimumSize: const Size(0, 36),
-                fixedSize: const Size.fromHeight(36),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PulsingDot(),
-                  SizedBox(width: 6),
-                  Icon(Icons.today, size: 16),
-                  SizedBox(width: 6),
-                  Text('Today'),
-                ],
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PulsingDot(),
+                    SizedBox(width: 6),
+                    Icon(Icons.today, size: 16),
+                    SizedBox(width: 6),
+                    Text('Today'),
+                  ],
+                ),
               ),
             ),
-          ),
+          ] else
+            IconButton(
+              tooltip: 'Today',
+              icon: const Icon(Icons.today),
+              onPressed: () => _jumpToToday(today),
+            ),
           const SizedBox(width: 8),
         ],
       ),
@@ -328,7 +356,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     nextDay = _focusedDay.add(const Duration(days: 7));
                   } else if (event.logicalKey == LogicalKeyboardKey.enter) {
                     try {
-                      context.go('/calendar/${dayKey(_focusedDay)}');
+                      goToDay(context, _focusedDay);
                     } on AssertionError {
                       _openDayPreview(_focusedDay);
                     }
@@ -442,7 +470,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                         child: Stack(
                           children: [
                             AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 300),
+                              duration: AppDesignTokens.of(context)
+                                  .effectiveDuration(
+                                    context,
+                                    AppDesignTokens.astryx.motionMedium,
+                                  ),
                               transitionBuilder:
                                   (Widget child, Animation<double> animation) {
                                     final offset = _slideForward
@@ -477,11 +509,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                                     today: today,
                                     focusedDay: _focusedDay,
                                     onDayPreview: _openDayPreview,
+                                    onDayAction: _handleDayAction,
                                   ),
                                   CalendarViewMode.week => _WeekCalendarView(
                                     focusedDay: _focusedDay,
                                     today: today,
                                     onDayPreview: _openDayPreview,
+                                    onDayAction: _handleDayAction,
                                   ),
                                   CalendarViewMode.agenda =>
                                     _AgendaCalendarView(
@@ -611,6 +645,36 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     });
   }
 
+  void _updateSearchQuery(String value) {
+    ref.read(calendarSearchQueryProvider.notifier).state = value
+        .trim()
+        .toLowerCase();
+  }
+
+  Future<void> _showMobileCalendarSearch() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Search calendar'),
+        content: SearchField(
+          key: const ValueKey('calendar-search-field'),
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          desktopWidth: 360,
+          mobileWidth: 360,
+          hintText: 'Search calendar...',
+          onChanged: _updateSearchQuery,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _jumpToToday(DateTime today) {
     final normalized = today.dateOnly;
     _searchController.clear();
@@ -645,6 +709,32 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
   void _openFullDay(DateTime day, {String? highlightNodeId}) {
     goToDay(context, day, highlightNodeId: highlightNodeId);
+  }
+
+  Future<void> _handleDayAction(DateTime day, _CalendarDayAction action) async {
+    final normalizedDay = day.dateOnly;
+    _showFocusedDay(normalizedDay);
+    switch (action) {
+      case _CalendarDayAction.open:
+        _openFullDay(normalizedDay);
+      case _CalendarDayAction.addNode:
+        await _addNodeForDay(normalizedDay);
+      case _CalendarDayAction.quickCapture:
+        await _showQuickCaptureSheet(normalizedDay);
+      case _CalendarDayAction.applyTemplate:
+        await _showTemplatePicker(normalizedDay);
+      case _CalendarDayAction.toggleSelection:
+        final notifier = ref.read(calendarRangeSelectionProvider.notifier);
+        final next = {...ref.read(calendarRangeSelectionProvider)};
+        if (!next.remove(normalizedDay)) next.add(normalizedDay);
+        notifier.state = next;
+      case _CalendarDayAction.copyDate:
+        await Clipboard.setData(ClipboardData(text: dayKey(normalizedDay)));
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Date copied')));
+    }
   }
 
   Future<void> _addNodeForDay(DateTime day) async {
@@ -1445,7 +1535,9 @@ class _CalendarEmptyBanner extends ConsumerWidget {
     final theme = Theme.of(context);
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 400),
+      duration: AppDesignTokens.of(
+        context,
+      ).effectiveDuration(context, AppDesignTokens.astryx.motionMedium),
       curve: Curves.easeOutCubic,
       builder: (context, value, child) {
         return Opacity(
@@ -1466,14 +1558,15 @@ class _CalendarEmptyBanner extends ConsumerWidget {
               color: theme.colorScheme.surfaceContainerHighest.withValues(
                 alpha: 0.45,
               ),
-              shape: DoodleShapeBorder(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(
+                  AppDesignTokens.of(context).radiusContainer,
+                ),
                 side: BorderSide(
                   color: theme.colorScheme.outlineVariant.withValues(
                     alpha: 0.3,
                   ),
                 ),
-                radius: 10,
-                wobble: 1.4,
               ),
             ),
             child: Row(
@@ -1540,7 +1633,9 @@ class _CollapsedDayPreviewRail extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
-        customBorder: const DoodleShapeBorder(radius: 12, wobble: 1.4),
+        borderRadius: BorderRadius.circular(
+          AppDesignTokens.of(context).radiusContainer,
+        ),
         onTap: onExpand,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1596,10 +1691,11 @@ class _CalendarControlPanel extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: ShapeDecoration(
-                  shape: DoodleShapeBorder(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      AppDesignTokens.of(context).radiusElement,
+                    ),
                     side: BorderSide(color: theme.colorScheme.outlineVariant),
-                    radius: 10,
-                    wobble: 1.4,
                   ),
                 ),
                 child: Icon(
@@ -1691,8 +1787,16 @@ class _CalendarAdvancedTools extends StatelessWidget {
         initiallyExpanded: false,
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        shape: const DoodleShapeBorder(radius: 12, wobble: 1.4),
-        collapsedShape: const DoodleShapeBorder(radius: 12, wobble: 1.4),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
+        ),
+        collapsedShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
+        ),
         title: Text(
           'Planning tools',
           style: theme.textTheme.labelLarge?.copyWith(
@@ -1834,8 +1938,8 @@ class _CalendarFilterStrip extends ConsumerWidget {
       return _CalendarFilterChip(
         chipKey: ValueKey('calendar-filter-${type.name}'),
         label: type.label,
-        icon: _nodeIcon(type),
-        color: _nodeColor(type),
+        icon: NodeVisuals.icon(type),
+        color: NodeVisuals.color(context, type),
         isSelected: isSelected,
         onTap: () {
           final next = {...selectedTypes};
@@ -1917,9 +2021,10 @@ Future<void> _showAdvancedCalendarFilters(
                 color: theme.colorScheme.surfaceContainerHighest.withValues(
                   alpha: 0.22,
                 ),
-                shape: DoodleShapeBorder(
-                  radius: 12,
-                  wobble: 0.8,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(
+                    AppDesignTokens.of(context).radiusContainer,
+                  ),
                   side: BorderSide(
                     color: theme.colorScheme.outlineVariant.withValues(
                       alpha: 0.55,
@@ -2198,7 +2303,7 @@ class _CalendarFilterChip extends StatelessWidget {
   }
 }
 
-enum _DayPreviewAction { template, openDay }
+enum _DayPreviewAction { template }
 
 class _DayPreviewPanel extends ConsumerWidget {
   const _DayPreviewPanel({
@@ -2226,6 +2331,9 @@ class _DayPreviewPanel extends ConsumerWidget {
     final theme = Theme.of(context);
     final normalizedDay = day.dateOnly;
     final nodesAsync = ref.watch(nodesForDayProvider(normalizedDay));
+    final allNodesAsync = normalizedDay.isSameDay(today)
+        ? ref.watch(allMindmapNodesProvider)
+        : null;
     final searchQuery = ref.watch(calendarSearchQueryProvider).trim();
     final normalizedQuery = searchQuery.toLowerCase();
     final typeFilters = ref.watch(calendarTypeFiltersProvider);
@@ -2285,6 +2393,12 @@ class _DayPreviewPanel extends ConsumerWidget {
                   ),
                 ),
                 IconButton(
+                  key: const ValueKey('calendar-quick-inbox-triage-button'),
+                  tooltip: 'Quick Inbox Triage',
+                  icon: const Icon(Icons.all_inbox_outlined),
+                  onPressed: () => showInboxTriageDialog(context),
+                ),
+                IconButton(
                   key: const ValueKey('calendar-day-preview-close'),
                   tooltip: 'Close preview',
                   icon: const Icon(Icons.close),
@@ -2317,8 +2431,7 @@ class _DayPreviewPanel extends ConsumerWidget {
                   visibleNodes,
                 );
                 return Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: ListView(
                     children: [
                       Wrap(
                         spacing: 6,
@@ -2354,6 +2467,20 @@ class _DayPreviewPanel extends ConsumerWidget {
                           ),
                         ),
                       ],
+                      if (allNodesAsync?.valueOrNull case final allNodes?) ...[
+                        const SizedBox(height: 12),
+                        TodayCockpitPanel(
+                          summary: TodayCockpitSummary.fromNodes(
+                            today: today,
+                            now: DateTime.now(),
+                            dayNodes: nodes,
+                            allNodes: allNodes,
+                          ),
+                          onTriageInbox: () => showInboxTriageDialog(context),
+                          onOpenDay: onOpenDay,
+                          onOpenNode: onOpenNode,
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       _CollapsibleDayMindmapMiniMap(
                         nodes: nodes,
@@ -2363,35 +2490,31 @@ class _DayPreviewPanel extends ConsumerWidget {
                         onOpenDay: onOpenDay,
                       ),
                       const SizedBox(height: 12),
-                      Expanded(
-                        child: visibleNodes.isEmpty
-                            ? _DayPreviewEmptyState(
-                                hasQuery: searchQuery.isNotEmpty,
-                                onClearSearch: onClearSearch,
-                              )
-                            : ListView.separated(
-                                itemCount: visibleNodes.length,
-                                separatorBuilder: (_, separatorIndex) =>
-                                    const SizedBox(height: 8),
-                                itemBuilder: (context, index) {
-                                  final node = visibleNodes[index];
-                                  return _DayPreviewNodeTile(
-                                    node: node,
-                                    isSelected: node.id == selectedNodeId,
-                                    onTap: () {
-                                      ref
-                                              .read(
-                                                selectedAgendaNodeIdProvider
-                                                    .notifier,
-                                              )
-                                              .state =
-                                          node.id;
-                                      onOpenNode(node.id);
-                                    },
-                                  );
-                                },
-                              ),
-                      ),
+                      if (visibleNodes.isEmpty)
+                        _DayPreviewEmptyState(
+                          hasQuery: searchQuery.isNotEmpty,
+                          onClearSearch: onClearSearch,
+                        )
+                      else
+                        for (
+                          var index = 0;
+                          index < visibleNodes.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(height: 8),
+                          _DayPreviewNodeTile(
+                            node: visibleNodes[index],
+                            isSelected:
+                                visibleNodes[index].id == selectedNodeId,
+                            onTap: () {
+                              ref
+                                  .read(selectedAgendaNodeIdProvider.notifier)
+                                  .state = visibleNodes[index]
+                                  .id;
+                              onOpenNode(visibleNodes[index].id);
+                            },
+                          ),
+                        ],
                     ],
                   ),
                 );
@@ -2402,15 +2525,19 @@ class _DayPreviewPanel extends ConsumerWidget {
               children: [
                 Expanded(
                   child: FilledButton.tonalIcon(
-                    key: const ValueKey('calendar-day-preview-add-node'),
-                    onPressed: () {
-                      unawaited(onAddNode());
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add node'),
+                    key: const ValueKey('calendar-day-preview-open-day'),
+                    onPressed: onOpenDay,
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Open full day'),
                   ),
                 ),
                 const SizedBox(width: 8),
+                IconButton.outlined(
+                  key: const ValueKey('calendar-day-preview-add-node'),
+                  tooltip: 'Add node',
+                  icon: const Icon(Icons.add),
+                  onPressed: () => unawaited(onAddNode()),
+                ),
                 PopupMenuButton<_DayPreviewAction>(
                   key: const ValueKey('calendar-day-preview-more-actions'),
                   tooltip: 'More day actions',
@@ -2419,8 +2546,6 @@ class _DayPreviewPanel extends ConsumerWidget {
                     switch (action) {
                       case _DayPreviewAction.template:
                         unawaited(onApplyTemplate());
-                      case _DayPreviewAction.openDay:
-                        onOpenDay();
                     }
                   },
                   itemBuilder: (context) => const [
@@ -2430,15 +2555,6 @@ class _DayPreviewPanel extends ConsumerWidget {
                       child: ListTile(
                         leading: Icon(Icons.dashboard_customize_outlined),
                         title: Text('Apply template'),
-                        dense: true,
-                      ),
-                    ),
-                    PopupMenuItem(
-                      key: ValueKey('calendar-day-preview-open-day'),
-                      value: _DayPreviewAction.openDay,
-                      child: ListTile(
-                        leading: Icon(Icons.open_in_new),
-                        title: Text('Open full day'),
                         dense: true,
                       ),
                     ),
@@ -2556,6 +2672,7 @@ class _DayMindmapMiniMap extends StatelessWidget {
                     nodes: activeNodes,
                     visibleNodeIds: visibleNodeIds,
                     colorScheme: theme.colorScheme,
+                    nodeColors: AppSemanticColors.of(context).nodeColors,
                   ),
                 ),
               ),
@@ -2638,11 +2755,13 @@ class _DayMindmapMiniMapPainter extends CustomPainter {
     required this.nodes,
     required this.visibleNodeIds,
     required this.colorScheme,
+    required this.nodeColors,
   });
 
   final List<MindmapNode> nodes;
   final Set<String> visibleNodeIds;
   final ColorScheme colorScheme;
+  final Map<NodeType, Color> nodeColors;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2652,7 +2771,7 @@ class _DayMindmapMiniMapPainter extends CustomPainter {
         end: Alignment.bottomRight,
         colors: [
           colorScheme.surface.withValues(alpha: 0.65),
-          const Color(0xFF070A12).withValues(alpha: 0.82),
+          colorScheme.surfaceContainerLowest.withValues(alpha: 0.82),
         ],
       ).createShader(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, background);
@@ -2714,7 +2833,7 @@ class _DayMindmapMiniMapPainter extends CustomPainter {
     for (final node in nodes) {
       final point = mapNode(node);
       final isMatch = visibleNodeIds.contains(node.id);
-      final color = _nodeColor(node.type);
+      final color = nodeColors[node.type] ?? colorScheme.primary;
       final glowPaint = Paint()
         ..shader = ui.Gradient.radial(point, isMatch ? 18 : 12, [
           color.withValues(alpha: isMatch ? 0.28 : 0.12),
@@ -2741,7 +2860,8 @@ class _DayMindmapMiniMapPainter extends CustomPainter {
   bool shouldRepaint(covariant _DayMindmapMiniMapPainter oldDelegate) {
     return oldDelegate.nodes != nodes ||
         oldDelegate.visibleNodeIds != visibleNodeIds ||
-        oldDelegate.colorScheme != colorScheme;
+        oldDelegate.colorScheme != colorScheme ||
+        oldDelegate.nodeColors != nodeColors;
   }
 }
 
@@ -2793,7 +2913,7 @@ class _DayPreviewNodeTile extends StatelessWidget {
     final theme = Theme.of(context);
     final metadata = _previewNodeMetadata(node);
     return Material(
-      color: _nodeColor(node.type).withValues(alpha: 0.08),
+      color: NodeVisuals.color(context, node.type).withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         key: ValueKey('calendar-day-preview-node-${node.id}'),
@@ -2804,9 +2924,9 @@ class _DayPreviewNodeTile extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                _nodeIcon(node.type),
+                NodeVisuals.icon(node.type),
                 size: 18,
-                color: _nodeColor(node.type),
+                color: NodeVisuals.color(context, node.type),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -3581,11 +3701,13 @@ class _WeekCalendarView extends StatelessWidget {
     required this.focusedDay,
     required this.today,
     required this.onDayPreview,
+    required this.onDayAction,
   });
 
   final DateTime focusedDay;
   final DateTime today;
   final ValueChanged<DateTime> onDayPreview;
+  final Future<void> Function(DateTime, _CalendarDayAction) onDayAction;
 
   @override
   Widget build(BuildContext context) {
@@ -3618,6 +3740,7 @@ class _WeekCalendarView extends StatelessWidget {
                   colIndex: index,
                   totalRows: 1,
                   onPreview: onDayPreview,
+                  onAction: onDayAction,
                 ),
               );
             },
@@ -3651,6 +3774,7 @@ class _WeekCalendarView extends StatelessWidget {
               colIndex: index,
               totalRows: 1,
               onPreview: onDayPreview,
+              onAction: onDayAction,
             );
           },
         );
@@ -3928,7 +4052,7 @@ class _AgendaCalendarView extends ConsumerWidget {
                                                 },
                                               ),
                                               Icon(
-                                                _nodeIcon(node.type),
+                                                NodeVisuals.icon(node.type),
                                                 size: 16,
                                                 color:
                                                     theme.colorScheme.primary,
@@ -4979,22 +5103,23 @@ class _WeekdayHeader extends StatelessWidget {
   }
 }
 
-class _MonthGrid extends ConsumerWidget {
+class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
     required this.visibleMonth,
     required this.today,
     required this.focusedDay,
     required this.onDayPreview,
+    required this.onDayAction,
   });
 
   final DateTime visibleMonth;
   final DateTime today;
   final DateTime focusedDay;
   final ValueChanged<DateTime> onDayPreview;
+  final Future<void> Function(DateTime, _CalendarDayAction) onDayAction;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    _calendarDropRects.clear();
+  Widget build(BuildContext context) {
     final days = visibleDaysForMonth(visibleMonth);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -5008,77 +5133,34 @@ class _MonthGrid extends ConsumerWidget {
             (constraints.maxHeight - (rowCount - 1) * spacing) / rowCount;
         final aspectRatio = cellHeight <= 0 ? 1.2 : cellWidth / cellHeight;
 
-        return Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: (event) {
-            for (final entry in _calendarDragSourceRects.entries) {
-              if (entry.value.contains(event.position)) {
-                _activeCalendarDragNode = entry.key;
-                break;
-              }
-            }
-          },
-
-          onPointerUp: (event) async {
-            final node = _activeCalendarDragNode;
-            _activeCalendarDragNode = null;
-            if (node == null) return;
-            MapEntry<String, Rect>? bestEntry;
-            var bestDistance = double.infinity;
-            for (final entry in _calendarDropRects.entries) {
-              if (!entry.value.contains(event.position)) continue;
-              final distance = (entry.value.center - event.position).distance;
-              if (distance < bestDistance) {
-                bestEntry = entry;
-                bestDistance = distance;
-              }
-            }
-            final targetDay = bestEntry == null
-                ? null
-                : DateTime.tryParse(bestEntry.key);
-            if (targetDay == null || node.day.dateOnly.isSameDay(targetDay)) {
-              return;
-            }
-            await ref
-                .read(mindmapMutationControllerProvider)
-                .rescheduleNode(node, day: targetDay);
-            if (!context.mounted) return;
-            _showRescheduleSnackBar(
-              context: context,
-              ref: ref,
-              node: node,
-              previousDay: node.day,
-              targetDay: targetDay,
+        return GridView.builder(
+          key: const ValueKey('calendar-month-grid'),
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+            childAspectRatio: aspectRatio,
+          ),
+          itemCount: days.length,
+          itemBuilder: (context, index) {
+            final day = days[index];
+            final rowIndex = index ~/ crossAxisCount;
+            final colIndex = index % crossAxisCount;
+            return _DayCell(
+              day: day,
+              isInVisibleMonth:
+                  day.year == visibleMonth.year &&
+                  day.month == visibleMonth.month,
+              isToday: day.isSameDay(today),
+              focusedDay: focusedDay,
+              rowIndex: rowIndex,
+              colIndex: colIndex,
+              totalRows: rowCount,
+              onPreview: onDayPreview,
+              onAction: onDayAction,
             );
           },
-          child: GridView.builder(
-            key: const ValueKey('calendar-month-grid'),
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: crossAxisCount,
-              crossAxisSpacing: spacing,
-              mainAxisSpacing: spacing,
-              childAspectRatio: aspectRatio,
-            ),
-            itemCount: days.length,
-            itemBuilder: (context, index) {
-              final day = days[index];
-              final rowIndex = index ~/ crossAxisCount;
-              final colIndex = index % crossAxisCount;
-              return _DayCell(
-                day: day,
-                isInVisibleMonth:
-                    day.year == visibleMonth.year &&
-                    day.month == visibleMonth.month,
-                isToday: day.isSameDay(today),
-                focusedDay: focusedDay,
-                rowIndex: rowIndex,
-                colIndex: colIndex,
-                totalRows: rowCount,
-                onPreview: onDayPreview,
-              );
-            },
-          ),
         );
       },
     );
@@ -5095,6 +5177,7 @@ class _DayCell extends ConsumerStatefulWidget {
     required this.colIndex,
     required this.totalRows,
     required this.onPreview,
+    required this.onAction,
   });
 
   final DateTime day;
@@ -5105,6 +5188,7 @@ class _DayCell extends ConsumerStatefulWidget {
   final int colIndex;
   final int totalRows;
   final ValueChanged<DateTime> onPreview;
+  final Future<void> Function(DateTime, _CalendarDayAction) onAction;
 
   @override
   ConsumerState<_DayCell> createState() => _DayCellState();
@@ -5284,9 +5368,9 @@ class _DayCellState extends ConsumerState<_DayCell> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      _nodeIcon(n.type),
+                                      NodeVisuals.icon(n.type),
                                       size: 14,
-                                      color: _nodeColor(n.type),
+                                      color: NodeVisuals.color(context, n.type),
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
@@ -5334,6 +5418,79 @@ class _DayCellState extends ConsumerState<_DayCell> {
   void _hideOverlay() {
     _overlayEntry?.remove();
     _overlayEntry = null;
+  }
+
+  Future<void> _showDayMenu(Offset position) async {
+    _hideOverlay();
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final day = widget.day.dateOnly;
+    final isSelected = ref.read(calendarRangeSelectionProvider).contains(day);
+    final action = await showMenu<_CalendarDayAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-open'),
+          value: _CalendarDayAction.open,
+          child: ListTile(
+            leading: Icon(Icons.open_in_new_rounded),
+            title: Text('Open full day'),
+          ),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-add-node'),
+          value: _CalendarDayAction.addNode,
+          child: ListTile(
+            leading: Icon(Icons.add_circle_outline_rounded),
+            title: Text('Add node'),
+          ),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-quick-capture'),
+          value: _CalendarDayAction.quickCapture,
+          child: ListTile(
+            leading: Icon(Icons.bolt_outlined),
+            title: Text('Quick capture'),
+          ),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-template'),
+          value: _CalendarDayAction.applyTemplate,
+          child: ListTile(
+            leading: Icon(Icons.auto_awesome_outlined),
+            title: Text('Apply template'),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          key: const ValueKey('calendar-day-menu-select'),
+          value: _CalendarDayAction.toggleSelection,
+          child: ListTile(
+            leading: Icon(
+              isSelected
+                  ? Icons.check_box_outlined
+                  : Icons.check_box_outline_blank_rounded,
+            ),
+            title: Text(isSelected ? 'Unselect date' : 'Select date'),
+          ),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-copy-date'),
+          value: _CalendarDayAction.copyDate,
+          child: ListTile(
+            leading: Icon(Icons.copy_rounded),
+            title: Text('Copy date'),
+          ),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    await widget.onAction(day, action);
   }
 
   void _onHoverChange(bool isHovered, bool isUpperHalf, bool hasContent) {
@@ -5432,7 +5589,6 @@ class _DayCellState extends ConsumerState<_DayCell> {
       theme.colorScheme.primary.withValues(alpha: _isHovered ? 0.20 : 0.13),
       theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.40),
     );
-    const todayBadgeForeground = Color(0xFF071006);
 
     final container = AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -5443,9 +5599,10 @@ class _DayCellState extends ConsumerState<_DayCell> {
         color: widget.isToday
             ? todayCellColor
             : (_isHovered ? hoveredCellColor : baseCellColor),
-        shape: DoodleShapeBorder(
-          radius: 12,
-          wobble: widget.isToday || isFocused ? 1.8 : 1.2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
           side: BorderSide(
             color: _isHovered
                 ? theme.colorScheme.primary.withValues(
@@ -5557,9 +5714,8 @@ class _DayCellState extends ConsumerState<_DayCell> {
                             ),
                             decoration: ShapeDecoration(
                               color: theme.colorScheme.primary,
-                              shape: DoodleShapeBorder(
-                                radius: 999,
-                                wobble: 0.9,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
                                 side: BorderSide(
                                   color: theme.colorScheme.primary,
                                 ),
@@ -5568,7 +5724,7 @@ class _DayCellState extends ConsumerState<_DayCell> {
                             child: Text(
                               'Today',
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: todayBadgeForeground,
+                                color: theme.colorScheme.onPrimary,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -5665,7 +5821,6 @@ class _DayCellState extends ConsumerState<_DayCell> {
           !details.data.day.dateOnly.isSameDay(widget.day),
       onAcceptWithDetails: (details) async {
         _hideOverlay();
-        _activeCalendarDragNode = null;
         final node = details.data;
         await ref
             .read(mindmapMutationControllerProvider)
@@ -5680,14 +5835,6 @@ class _DayCellState extends ConsumerState<_DayCell> {
         );
       },
       builder: (context, candidateData, rejectedData) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!context.mounted) return;
-          final renderObject = context.findRenderObject();
-          final renderBox = renderObject is RenderBox ? renderObject : null;
-          if (renderBox == null || !renderBox.attached) return;
-          final offset = renderBox.localToGlobal(Offset.zero);
-          _calendarDropRects[dayKey(widget.day)] = offset & renderBox.size;
-        });
         final hasCandidate = candidateData.isNotEmpty;
         final hasRejected = rejectedData.isNotEmpty;
         return AnimatedContainer(
@@ -5720,6 +5867,10 @@ class _DayCellState extends ConsumerState<_DayCell> {
                   _hideOverlay();
                   widget.onPreview(widget.day);
                 },
+                onSecondaryTapDown: (details) =>
+                    _showDayMenu(details.globalPosition),
+                onLongPressStart: (details) =>
+                    _showDayMenu(details.globalPosition),
                 child: cellWidget,
               ),
             ),
@@ -5788,7 +5939,7 @@ class _CellSummary extends StatelessWidget {
                 valueColor: AlwaysStoppedAnimation<Color>(
                   doneRatio >= 1.0
                       ? theme.colorScheme.primary
-                      : _nodeColor(NodeType.task),
+                      : NodeVisuals.color(context, NodeType.task),
                 ),
               ),
             ),
@@ -5842,12 +5993,7 @@ class _CellSummary extends StatelessWidget {
   }
 }
 
-MindmapNode? _activeCalendarDragNode;
-
-final Map<String, Rect> _calendarDropRects = <String, Rect>{};
-final Map<MindmapNode, Rect> _calendarDragSourceRects = <MindmapNode, Rect>{};
-
-class _DraggableCalendarNode extends ConsumerWidget {
+class _DraggableCalendarNode extends StatelessWidget {
   const _DraggableCalendarNode({
     required this.node,
     this.showTitle = false,
@@ -5859,16 +6005,8 @@ class _DraggableCalendarNode extends ConsumerWidget {
   final bool isSelected;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!context.mounted) return;
-      final renderObject = context.findRenderObject();
-      final renderBox = renderObject is RenderBox ? renderObject : null;
-      if (renderBox == null || !renderBox.attached) return;
-      _calendarDragSourceRects[node] =
-          renderBox.localToGlobal(Offset.zero) & renderBox.size;
-    });
-    final accent = _nodeColor(node.type);
+  Widget build(BuildContext context) {
+    final accent = NodeVisuals.color(context, node.type);
     final muted = node.isDone;
     final title = node.title.trim().isEmpty
         ? 'Untitled ${node.type.name}'
@@ -5899,7 +6037,7 @@ class _DraggableCalendarNode extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  _nodeIcon(node.type),
+                  NodeVisuals.icon(node.type),
                   size: 11,
                   color: muted ? accent.withValues(alpha: 0.45) : accent,
                 ),
@@ -5919,7 +6057,7 @@ class _DraggableCalendarNode extends ConsumerWidget {
               ],
             )
           : Icon(
-              _nodeIcon(node.type),
+              NodeVisuals.icon(node.type),
               size: 11,
               color: muted ? accent.withValues(alpha: 0.45) : accent,
             ),
@@ -5977,41 +6115,6 @@ class _SummaryChip extends StatelessWidget {
 
 String _countLabel(int count) => count == 1 ? '1 node' : '$count nodes';
 
-Color _nodeColor(NodeType type) {
-  final palette = AppThemeVariantColors.of(ThemeVariantConfig.active);
-  return palette.nodeColors[type] ?? Colors.grey;
-}
-
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_box_outlined,
-  NodeType.kanban => Icons.view_column_outlined,
-  NodeType.plan => Icons.account_tree_outlined,
-  NodeType.note => Icons.description_outlined,
-  NodeType.journal => Icons.menu_book_outlined,
-  NodeType.habit => Icons.loop_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.circle_outlined,
-};
-
 class _QuickCaptureExampleChip extends StatelessWidget {
   const _QuickCaptureExampleChip({required this.text});
 
@@ -6040,7 +6143,7 @@ class _QuickAddToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nodeTypes = [
+    final primaryNodeTypes = [
       NodeType.task,
       NodeType.note,
       NodeType.habit,
@@ -6073,11 +6176,33 @@ class _QuickAddToolbar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          ...nodeTypes.map(
+          ...primaryNodeTypes.map(
             (type) => _QuickAddTypeButton(
               type: type,
               onTap: () => onAddNode(selectedDay, type),
             ),
+          ),
+          PopupMenuButton<NodeType>(
+            tooltip: 'All node types',
+            icon: const Icon(Icons.more_horiz_rounded, size: 18),
+            onSelected: (type) => onAddNode(selectedDay, type),
+            itemBuilder: (context) => [
+              for (final type in NodeType.values)
+                PopupMenuItem(
+                  value: type,
+                  child: Row(
+                    children: [
+                      Icon(
+                        NodeVisuals.icon(type),
+                        color: NodeVisuals.color(context, type),
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(type.label),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -6123,12 +6248,14 @@ class _QuickAddTypeButtonState extends State<_QuickAddTypeButton>
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: _nodeColor(
+                color: NodeVisuals.color(
+                  context,
                   widget.type,
                 ).withValues(alpha: _isPressed ? 0.2 : 0.12),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _nodeColor(
+                  color: NodeVisuals.color(
+                    context,
                     widget.type,
                   ).withValues(alpha: _isPressed ? 0.6 : 0.3),
                 ),
@@ -6137,15 +6264,15 @@ class _QuickAddTypeButtonState extends State<_QuickAddTypeButton>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    _nodeIcon(widget.type),
+                    NodeVisuals.icon(widget.type),
                     size: 14,
-                    color: _nodeColor(widget.type),
+                    color: NodeVisuals.color(context, widget.type),
                   ),
                   const SizedBox(width: 4),
                   Text(
                     widget.type.label,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: _nodeColor(widget.type),
+                      color: NodeVisuals.color(context, widget.type),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -6266,15 +6393,14 @@ class _StatusLegendPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = _calendarDayStatusColor(theme, status);
+    final color = _calendarDayStatusColor(context, status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: ShapeDecoration(
         color: color.withValues(alpha: 0.1),
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
           side: BorderSide(color: color.withValues(alpha: 0.35)),
-          radius: 999,
-          wobble: 1.2,
         ),
       ),
       child: Row(
@@ -6311,7 +6437,7 @@ class _SelectedDayMissionCard extends ConsumerWidget {
     return nodesAsync.when(
       data: (nodes) {
         final summary = buildCalendarDaySummary(day, nodes);
-        final statusColor = _calendarDayStatusColor(theme, summary.status);
+        final statusColor = _calendarDayStatusColor(context, summary.status);
         return Container(
           margin: const EdgeInsets.only(top: 6),
           padding: const EdgeInsets.all(12),
@@ -6319,10 +6445,11 @@ class _SelectedDayMissionCard extends ConsumerWidget {
             color: theme.colorScheme.surfaceContainerHighest.withValues(
               alpha: 0.24,
             ),
-            shape: DoodleShapeBorder(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(
+                AppDesignTokens.of(context).radiusContainer,
+              ),
               side: BorderSide(color: statusColor.withValues(alpha: 0.28)),
-              radius: 14,
-              wobble: 1.5,
             ),
           ),
           child: Column(
@@ -6334,12 +6461,13 @@ class _SelectedDayMissionCard extends ConsumerWidget {
                     width: 30,
                     height: 30,
                     decoration: ShapeDecoration(
-                      shape: DoodleShapeBorder(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          AppDesignTokens.of(context).radiusElement,
+                        ),
                         side: BorderSide(
                           color: statusColor.withValues(alpha: 0.38),
                         ),
-                        radius: 10,
-                        wobble: 1.3,
                       ),
                     ),
                     child: Icon(
@@ -6442,12 +6570,13 @@ class _MissionMiniMetric extends StatelessWidget {
   }
 }
 
-Color _calendarDayStatusColor(ThemeData theme, CalendarDayStatus status) {
+Color _calendarDayStatusColor(BuildContext context, CalendarDayStatus status) {
+  final semantic = AppSemanticColors.of(context);
   return switch (status) {
-    CalendarDayStatus.clear => theme.colorScheme.primary,
-    CalendarDayStatus.busy => Colors.amber,
-    CalendarDayStatus.critical => theme.colorScheme.error,
-    CalendarDayStatus.complete => theme.colorScheme.tertiary,
+    CalendarDayStatus.clear => semantic.info,
+    CalendarDayStatus.busy => semantic.warning,
+    CalendarDayStatus.critical => semantic.danger,
+    CalendarDayStatus.complete => semantic.success,
   };
 }
 
@@ -6620,7 +6749,7 @@ class _WeeklySummaryStrip extends ConsumerWidget {
                       if (completed == total) {
                         dotColor = theme.colorScheme.primary; // fully completed
                       } else if (completed > 0) {
-                        dotColor = Colors.amber; // partially completed
+                        dotColor = AppSemanticColors.of(context).warning;
                       } else {
                         dotColor =
                             theme.colorScheme.secondary; // planned/pending

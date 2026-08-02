@@ -231,12 +231,18 @@ void main() {
     await tester.tap(find.text('Projects').last);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('workspace-active-filter-chips')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('workspace-active-filter-chips')),
+      findsOneWidget,
+    );
     expect(find.text('Type: Project'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.close).first);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('workspace-active-filter-chips')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('workspace-active-filter-chips')),
+      findsNothing,
+    );
 
     await tester.tap(find.byKey(const ValueKey('workspace-filter-toggle')));
     await tester.pumpAndSettle();

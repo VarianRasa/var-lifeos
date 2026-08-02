@@ -46,16 +46,24 @@ final class SembastSyncRestorePointStore implements SyncRestorePointStore {
   }
 
   @override
-  Future<void> prune({required int keepLatest}) async {
+  Future<void> prune({required int keepLatest, String? accountEmail}) async {
     if (keepLatest < 0) {
       throw ArgumentError.value(keepLatest, 'keepLatest');
     }
 
     final db = await _db;
     final records = await _store.find(db);
+    final normalizedAccount = accountEmail?.trim().toLowerCase();
     final points = [
-      for (final record in records) SyncRestorePoint.fromJson(record.value),
-    ]..sort(_compareNewestFirst);
+      for (final record in records)
+        () {
+          final point = SyncRestorePoint.fromJson(record.value);
+          return normalizedAccount == null ||
+                  point.accountEmail.toLowerCase() == normalizedAccount
+              ? point
+              : null;
+        }(),
+    ].whereType<SyncRestorePoint>().toList()..sort(_compareNewestFirst);
     final retainedIds = points
         .take(keepLatest)
         .map((point) => point.id)
@@ -77,12 +85,23 @@ final class SembastSyncRestorePointStore implements SyncRestorePointStore {
   }
 
   @override
-  Future<List<SyncRestorePoint>> recent({int limit = 5}) async {
+  Future<List<SyncRestorePoint>> recent({
+    int limit = 5,
+    String? accountEmail,
+  }) async {
     final db = await _db;
     final records = await _store.find(db);
+    final normalizedAccount = accountEmail?.trim().toLowerCase();
     final points = [
-      for (final record in records) SyncRestorePoint.fromJson(record.value),
-    ]..sort(_compareNewestFirst);
+      for (final record in records)
+        () {
+          final point = SyncRestorePoint.fromJson(record.value);
+          return normalizedAccount == null ||
+                  point.accountEmail.toLowerCase() == normalizedAccount
+              ? point
+              : null;
+        }(),
+    ].whereType<SyncRestorePoint>().toList()..sort(_compareNewestFirst);
     return List.unmodifiable(points.take(limit));
   }
 }

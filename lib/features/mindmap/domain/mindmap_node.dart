@@ -1,6 +1,8 @@
 /// Domain model for anything placed on a day's mindmap.
 library;
 
+import 'dart:convert';
+
 import 'package:collection/collection.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -8,10 +10,13 @@ import '../../../core/utils/date_utils.dart';
 import 'canvas_position.dart';
 
 enum NodeStatus {
+  inbox('Inbox'),
   open('Open'),
+  next('Next'),
   planned('Planned'),
   doing('Doing'),
   waiting('Waiting'),
+  someday('Someday'),
   done('Done');
 
   const NodeStatus(this.label);
@@ -125,7 +130,7 @@ final class TaskChecklistItem {
 }
 
 final class MindmapNode {
-  const MindmapNode({
+  MindmapNode({
     required this.id,
     required this.type,
     required this.title,
@@ -141,16 +146,23 @@ final class MindmapNode {
     this.reviewState = NodeReviewState.none,
     this.project = '',
     this.area = '',
-    this.tags = const [],
-    this.contextTags = const [],
+    List<String> tags = const [],
+    List<String> contextTags = const [],
     this.dueDate,
     this.progress = 0,
     this.isPinned = false,
     this.isArchived = false,
-    this.checklist = const [],
-    this.relatedNodeIds = const [],
-    this.data = const {},
-  });
+    List<TaskChecklistItem> checklist = const [],
+    List<String> relatedNodeIds = const [],
+    Map<String, Object?> data = const {},
+  }) : tags = List<String>.unmodifiable(tags),
+       contextTags = List<String>.unmodifiable(contextTags),
+       checklist = List<TaskChecklistItem>.unmodifiable(checklist),
+       relatedNodeIds = List<String>.unmodifiable(relatedNodeIds) {
+    this.data = _freezeData(data);
+    presentationDataKey = _presentationDataKey(type, this.data, this.checklist);
+    presentationDataRevision = presentationDataKey.hashCode;
+  }
 
   factory MindmapNode.create({
     required String id,
@@ -261,7 +273,9 @@ final class MindmapNode {
   final bool isArchived;
   final List<TaskChecklistItem> checklist;
   final List<String> relatedNodeIds;
-  final Map<String, Object?> data;
+  late final Map<String, Object?> data;
+  late final String presentationDataKey;
+  late final int presentationDataRevision;
 
   int get completedChecklistCount {
     return checklist.where((item) => item.isDone).length;
@@ -325,9 +339,12 @@ final class MindmapNode {
     };
     score += switch (status) {
       NodeStatus.doing => 20,
+      NodeStatus.next => 16,
       NodeStatus.planned => 14,
       NodeStatus.open => 8,
+      NodeStatus.inbox => -10,
       NodeStatus.waiting => -20,
+      NodeStatus.someday => -40,
       NodeStatus.done => -100,
     };
     score += switch (effort) {
@@ -514,6 +531,94 @@ final class MindmapNode {
 Map<String, Object?> _dataFromJson(Object? value) {
   if (value is Map) return value.cast<String, Object?>();
   return const {};
+}
+
+Map<String, Object?> _freezeData(Map<String, Object?> source) =>
+    UnmodifiableMapView<String, Object?>({
+      for (final entry in source.entries)
+        entry.key: _freezeDataValue(entry.value),
+    });
+
+Object? _freezeDataValue(Object? value) {
+  if (value is Map) {
+    if (value.keys.every((key) => key is String)) {
+      return UnmodifiableMapView<String, Object?>({
+        for (final entry in value.entries)
+          entry.key as String: _freezeDataValue(entry.value),
+      });
+    }
+    return UnmodifiableMapView<Object?, Object?>({
+      for (final entry in value.entries)
+        entry.key: _freezeDataValue(entry.value),
+    });
+  }
+  if (value is List) {
+    final frozen = [for (final item in value) _freezeDataValue(item)];
+    if (frozen.every((item) => item is String)) {
+      return List<String>.unmodifiable(frozen.cast<String>());
+    }
+    if (frozen.every((item) => item is int)) {
+      return List<int>.unmodifiable(frozen.cast<int>());
+    }
+    if (frozen.every((item) => item is num)) {
+      return List<num>.unmodifiable(frozen.cast<num>());
+    }
+    if (frozen.every((item) => item is bool)) {
+      return List<bool>.unmodifiable(frozen.cast<bool>());
+    }
+    if (frozen.every((item) => item is Map<String, Object?>)) {
+      return List<Map<String, Object?>>.unmodifiable(
+        frozen.cast<Map<String, Object?>>(),
+      );
+    }
+    return List<Object?>.unmodifiable(frozen);
+  }
+  if (value is Set) {
+    return Set<Object?>.unmodifiable(value.map(_freezeDataValue));
+  }
+  return value;
+}
+
+String _presentationDataKey(
+  NodeType type,
+  Map<String, Object?> data,
+  List<TaskChecklistItem> checklist,
+) =>
+    '${type.name}|${_canonicalValue(data)}|${_canonicalValue([for (final item in checklist) item.toJson()])}';
+
+String _canonicalValue(Object? value) {
+  if (value == null) return 'n';
+  if (value is String) return 's${jsonEncode(value)}';
+  if (value is bool) return value ? 'b1' : 'b0';
+  if (value is int) return 'i$value';
+  if (value is double) {
+    if (value.isNaN) return 'dNaN';
+    if (value == double.infinity) return 'dInfinity';
+    if (value == double.negativeInfinity) return 'd-Infinity';
+    return 'd${value.toString()}';
+  }
+  if (value is num) return 'q${value.toString()}';
+  if (value is DateTime) return 't${value.toIso8601String()}';
+  if (value is Enum) return 'e${value.runtimeType}:${value.name}';
+  if (value is Map) {
+    final entries =
+        [
+          for (final entry in value.entries)
+            (_canonicalValue(entry.key), _canonicalValue(entry.value)),
+        ]..sort((left, right) {
+          final keyOrder = left.$1.compareTo(right.$1);
+          return keyOrder != 0 ? keyOrder : left.$2.compareTo(right.$2);
+        });
+    return 'm${entries.map((entry) => '${entry.$1}:${entry.$2}').join('|')}';
+  }
+  if (value is Set) {
+    final items = value.map(_canonicalValue).toList()..sort();
+    return 'u${items.join('|')}';
+  }
+  if (value is Iterable) {
+    return 'l${value.map(_canonicalValue).join('|')}';
+  }
+  return 'o${value.runtimeType}:${jsonEncode(value.toString())}';
 }
 
 String _contextNameFromJson(Object? value) {

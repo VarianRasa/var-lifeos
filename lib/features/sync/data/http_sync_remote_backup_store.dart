@@ -34,6 +34,8 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
     required Uri endpoint,
     http.Client? client,
     FutureOr<String?> Function()? tokenProvider,
+    this.requestTimeout = const Duration(seconds: 20),
+    this.maxPayloadBytes = 10 * 1024 * 1024,
   }) : _endpoint = _normalizeEndpoint(endpoint),
        _client = client ?? http.Client(),
        _tokenProvider = tokenProvider;
@@ -41,6 +43,8 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
   final Uri _endpoint;
   final http.Client _client;
   final FutureOr<String?> Function()? _tokenProvider;
+  final Duration requestTimeout;
+  final int maxPayloadBytes;
 
   @override
   Future<MindmapBackupDocument?> fetchLatestBackup(SyncUser user) async {
@@ -51,7 +55,8 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
       return null;
     }
     _requireSuccess(response, accepted: const {200});
-    return _decodeDocument(response.body);
+    _requirePayloadSize(response.bodyBytes.length);
+    return _decodeDocument(response.body, expectedUser: user);
   }
 
   @override
@@ -59,11 +64,18 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
     SyncUser user,
     MindmapBackupDocument document,
   ) async {
+    if (document.attachments.isNotEmpty) {
+      throw const SyncRemoteStoreException(
+        'Remote backup cannot contain attachment payloads.',
+      );
+    }
+    final body = jsonEncode(document.toJson());
+    _requirePayloadSize(utf8.encode(body).length);
     final response = await _send(
       () async => _client.put(
         _backupUri(user),
         headers: await _headers(hasBody: true),
-        body: jsonEncode(document.toJson()),
+        body: body,
       ),
     );
     _requireSuccess(response, accepted: const {200, 201, 204});
@@ -90,7 +102,7 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {
     try {
-      return await request();
+      return await request().timeout(requestTimeout);
     } on SyncRemoteStoreException {
       rethrow;
     } on Object catch (error) {
@@ -99,6 +111,14 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
         cause: error,
       );
     }
+  }
+
+  void _requirePayloadSize(int bytes) {
+    if (bytes <= maxPayloadBytes) return;
+    throw SyncRemoteStoreException(
+      'Remote backup payload is too large.',
+      body: '$bytes bytes',
+    );
   }
 
   void _requireSuccess(http.Response response, {required Set<int> accepted}) {
@@ -113,12 +133,24 @@ final class HttpSyncRemoteBackupStore implements SyncRemoteBackupStore {
     );
   }
 
-  MindmapBackupDocument _decodeDocument(String body) {
+  MindmapBackupDocument _decodeDocument(
+    String body, {
+    required SyncUser expectedUser,
+  }) {
     try {
       final decoded = jsonDecode(body);
       final Object? payload;
       if (decoded is Map<Object?, Object?> &&
           decoded['backup'] is Map<Object?, Object?>) {
+        final responseUserId = decoded['userId'];
+        if (responseUserId != null && responseUserId is! String) {
+          throw const FormatException('Backup response userId is invalid.');
+        }
+        if (responseUserId is String && responseUserId != expectedUser.id) {
+          throw const FormatException(
+            'Backup response belongs to another user.',
+          );
+        }
         payload = decoded['backup'];
       } else {
         payload = decoded;

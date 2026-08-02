@@ -54,11 +54,7 @@ flutter pub get
 flutter run
 ```
 
-Enable optional HTTP sync by passing a runtime endpoint:
-
-```bash
-flutter run --dart-define=VAR_SYNC_ENDPOINT=https://sync.example.test
-```
+Sync uses Firebase Auth, Firestore, and Storage by default. Signed-out use remains local-first.
 
 Enable demo seed data explicitly for development:
 
@@ -66,8 +62,8 @@ Enable demo seed data explicitly for development:
 flutter run --dart-define=VAR_DEMO_SEED=true
 ```
 
-Without these flags, the app uses local/offline fallbacks and starts without
-seeding demo nodes into a fresh database.
+Without this flag, the app starts without seeding demo nodes into a fresh
+database. Signed-out use remains local-first.
 
 This project is a multi-platform Flutter application (Android, iOS, macOS,
 Windows, Linux, Web).
@@ -79,15 +75,15 @@ Contributors need their own Firebase project and generated platform config.
 
 Before sharing a beta build, run the automated preflight and manual smoke flow in
 [docs/release/beta_release_checklist.md](docs/release/beta_release_checklist.md).
-The checklist covers the local-only default path first, then optional demo seed
-and sync endpoint paths.
+The checklist covers signed-out local-first use, optional demo seed, and Firebase
+sync paths.
 
 ## Tech
 
 - **Flutter** + **Dart**
 - **Riverpod** (state), **go_router** (routing)
 - **Sembast** (local-first DB), **shared_preferences** (prefs/bootstrap)
-- **HTTP sync adapters** behind `VAR_SYNC_ENDPOINT`; local fallbacks otherwise
+- **Firebase Auth, Firestore, and Storage** for sync; signed-out use stays local-first
 - Custom mindmap canvas (`InteractiveViewer`)
 
 ## License

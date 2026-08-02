@@ -48,6 +48,45 @@ void main() {
     },
   );
 
+  test('rejects attachment payloads in cloud backup documents', () async {
+    final store = HttpSyncRemoteBackupStore(
+      endpoint: Uri.parse('https://api.var.app/sync'),
+      client: MockClient((request) async => http.Response('', 204)),
+    );
+    final document = MindmapBackupDocument.fromJson({
+      ...MindmapBackupDocument.create(
+        sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+        exportedAt: DateTime(2026, 6, 19, 9),
+        nodes: const [],
+      ).toJson(),
+      'attachments': [
+        {
+          'version': 1,
+          'attachment': {
+            'id': '00000000-0000-4000-8000-000000000001',
+            'fileName': 'photo.png',
+            'mimeType': 'image/png',
+            'byteLength': 1,
+            'checksum': '00',
+            'createdAt': DateTime(2026, 6, 19, 9).toIso8601String(),
+          },
+          'payload': 'AA==',
+        },
+      ],
+    });
+
+    await expectLater(
+      store.uploadBackup(_user, document),
+      throwsA(
+        isA<SyncRemoteStoreException>().having(
+          (error) => error.message,
+          'message',
+          'Remote backup cannot contain attachment payloads.',
+        ),
+      ),
+    );
+  });
+
   test(
     'fetches the latest backup document and treats 404 as no backup',
     () async {
@@ -81,6 +120,54 @@ void main() {
     },
   );
 
+  test('rejects backup envelopes for another account', () async {
+    final document = MindmapBackupDocument.create(
+      sourceDevice: const SyncDeviceIdentity(id: 'phone', label: 'Phone'),
+      exportedAt: DateTime(2026, 6, 19, 10),
+      nodes: const [],
+    );
+    final store = HttpSyncRemoteBackupStore(
+      endpoint: Uri.parse('https://api.var.app/sync'),
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({'userId': 'other-user', 'backup': document.toJson()}),
+          200,
+        ),
+      ),
+    );
+
+    expect(
+      () => store.fetchLatestBackup(_user),
+      throwsA(
+        isA<SyncRemoteStoreException>().having(
+          (error) => error.message,
+          'message',
+          'Remote backup response is invalid.',
+        ),
+      ),
+    );
+  });
+
+  test('rejects oversized remote backup payloads', () async {
+    final store = HttpSyncRemoteBackupStore(
+      endpoint: Uri.parse('https://api.var.app/sync'),
+      maxPayloadBytes: 8,
+      client: MockClient(
+        (request) async => http.Response('{"backup":{}}', 200),
+      ),
+    );
+
+    expect(
+      () => store.fetchLatestBackup(_user),
+      throwsA(
+        isA<SyncRemoteStoreException>().having(
+          (error) => error.message,
+          'message',
+          'Remote backup payload is too large.',
+        ),
+      ),
+    );
+  });
   test(
     'throws a typed exception when the remote server rejects the request',
     () async {

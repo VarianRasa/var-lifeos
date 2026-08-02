@@ -24,7 +24,6 @@ flutter pub get
 flutter run
 flutter run -d chrome
 flutter run -d chrome --dart-define=VAR_DEMO_SEED=false
-flutter run --dart-define=VAR_SYNC_ENDPOINT=https://sync.example.test
 
 dart format --set-exit-if-changed .
 flutter analyze
@@ -45,7 +44,6 @@ Use build_runner only when adding/changing Riverpod generated annotations.
 
 Defined in `lib/core/config/runtime_config.dart`:
 
-- `VAR_SYNC_ENDPOINT`: enables HTTP sync adapters; absent means local/in-memory fallback.
 - `VAR_DEMO_SEED`: truthy values are `1`, `true`, `yes`, `on`; absent/false means no demo nodes in fresh DB.
 
 ## Architecture rules
@@ -67,7 +65,7 @@ Mindmap gotchas:
 Sync gotchas:
 
 - Sync domain/planning lives in `lib/features/sync/domain/`.
-- `sync_providers.dart` chooses HTTP adapters only when `VAR_SYNC_ENDPOINT` exists.
+- `sync_providers.dart` uses Firebase Auth, Firestore, and eligible Firebase Storage by default; signed-out use stays local-first.
 - Portable backups use `cryptography`; avoid data-loss changes without tests.
 
 ## Style and tests

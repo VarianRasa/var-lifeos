@@ -5,11 +5,11 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
 import '../application/collaboration_controller.dart';
@@ -21,9 +21,12 @@ import '../domain/kanban_board.dart';
 import '../domain/markdown_checklist_parser.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/node_knowledge_index.dart';
+import '../domain/node_presentation.dart';
 import '../domain/node_template.dart';
 import '../domain/recurring_routine.dart';
-import 'mindmap_canvas.dart'; // for nodeIcon, nodeColor
+import 'inline_node_workspace.dart';
+import 'mindmap_canvas.dart' show compatibleNodeTypeLabel, compatibleNodeTypes;
+import 'node_type_inline_editor.dart';
 
 const String _defaultRelationLabel = 'relates to';
 const int _defaultBodyMaxWords = 1200;
@@ -46,6 +49,7 @@ class NodeEditorPanel extends ConsumerStatefulWidget {
     required this.onDelete,
     this.onCollapse,
     this.onOpenNode,
+    this.initialTab = 0,
   });
 
   final MindmapNode node;
@@ -54,6 +58,7 @@ class NodeEditorPanel extends ConsumerStatefulWidget {
   final VoidCallback onDelete;
   final VoidCallback? onCollapse;
   final ValueChanged<MindmapNode>? onOpenNode;
+  final int initialTab;
 
   @override
   ConsumerState<NodeEditorPanel> createState() => _NodeEditorPanelState();
@@ -148,6 +153,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   String? _autocompleteQuery;
   String? _slashCommandQuery;
   bool _hasUnsavedChanges = false;
+  late _EditorPanelTab _panelTab;
   bool _isHydratingDraft = false;
   bool _isEnforcingBodyLimit = false;
   bool _isSaving = false;
@@ -171,6 +177,11 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   @override
   void initState() {
     super.initState();
+    final initialTabIndex = widget.initialTab.clamp(
+      0,
+      _EditorPanelTab.values.length - 1,
+    );
+    _panelTab = _EditorPanelTab.values[initialTabIndex];
     _initDraft(widget.node);
     for (final controller in _dirtyControllers) {
       controller.addListener(_markDirty);
@@ -676,17 +687,6 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     _onBodyChanged();
   }
 
-  void _addQuickChecklistItem() {
-    final item = _quickChecklistItemController.text.trim();
-    if (item.isEmpty) return;
-    final existing = _checklistController.text.trimRight();
-    _checklistController.text = existing.isEmpty ? item : '$existing\n$item';
-    _checklistController.selection = TextSelection.collapsed(
-      offset: _checklistController.text.length,
-    );
-    _quickChecklistItemController.clear();
-  }
-
   List<String> _bodyActionLines() {
     return _bodyController.text
         .split('\n')
@@ -729,15 +729,6 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       ].join('\n');
       _hasUnsavedChanges = true;
     });
-  }
-
-  void _addTag(String tag) {
-    final tags = _parseLines(_tagsController.text.replaceAll(',', '\n'));
-    if (tags.any((existing) => existing.toLowerCase() == tag.toLowerCase())) {
-      return;
-    }
-    tags.add(tag);
-    _tagsController.text = tags.join(', ');
   }
 
   void _applyTemplate(_NodeEditorTemplate template) {
@@ -833,7 +824,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
           _fillEmpty(_bodyController, '## Checklist');
           _fillEmpty(_checklistController, 'Task 1\nTask 2\nTask 3');
         case NodeType.canvas:
-          _fillEmpty(_bodyController, '## Sketchpad\n\nDrawings & doodles.');
+          _fillEmpty(_bodyController, '## Sketchpad\n\nDrawings & sketches.');
         case NodeType.weather:
           _fillEmpty(_bodyController, 'Mood impact: ');
           _fillEmpty(_weatherTempController, '25°C');
@@ -1145,9 +1136,9 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                   dense: true,
                   visualDensity: VisualDensity.compact,
                   leading: Icon(
-                    nodeIcon(node.type),
+                    NodeVisuals.icon(node.type),
                     size: 18,
-                    color: nodeColor(node.type),
+                    color: NodeVisuals.color(context, node.type),
                   ),
                   title: Text(node.title),
                   subtitle: node.project.isNotEmpty || node.area.isNotEmpty
@@ -1701,7 +1692,11 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         .where((tag) => tag.isNotEmpty)
         .toList();
     final properties = <({IconData icon, String label, String value})>[
-      (icon: nodeIcon(_draft.type), label: 'Type', value: _draft.type.label),
+      (
+        icon: NodeVisuals.icon(_draft.type),
+        label: 'Type',
+        value: _draft.type.label,
+      ),
       (icon: Icons.flag_outlined, label: 'Status', value: _draft.status.label),
       (
         icon: Icons.priority_high_rounded,
@@ -1802,329 +1797,6 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     ).showSnackBar(SnackBar(content: Text('Copied [[$title]]')));
   }
 
-  IconData _weatherIconFor(String condition) {
-    final value = condition.toLowerCase();
-    if (value.contains('storm') || value.contains('thunder')) {
-      return Icons.thunderstorm_outlined;
-    }
-    if (value.contains('rain') || value.contains('drizzle')) {
-      return Icons.grain_outlined;
-    }
-    if (value.contains('snow')) return Icons.ac_unit_outlined;
-    if (value.contains('wind')) return Icons.air_outlined;
-    if (value.contains('cloud') || value.contains('overcast')) {
-      return Icons.cloud_outlined;
-    }
-    if (value.contains('fog') || value.contains('mist')) return Icons.foggy;
-    return Icons.wb_sunny_outlined;
-  }
-
-  Widget _buildStructuredTypeSection() {
-    final type = _draft.type;
-    final theme = Theme.of(context);
-    if (!{
-      NodeType.contact,
-      NodeType.metric,
-      NodeType.expense,
-      NodeType.resource,
-      NodeType.bookmark,
-      NodeType.quote,
-      NodeType.timer,
-      NodeType.audio,
-      NodeType.weather,
-      NodeType.fit,
-      NodeType.mood,
-    }.contains(type)) {
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: _buildFeatureField(
-        title: '${type.label} Details',
-        child: switch (type) {
-          NodeType.contact => Column(
-            children: [
-              _editorRow(
-                TextField(
-                  controller: _contactRoleController,
-                  decoration: const InputDecoration(labelText: 'Role'),
-                ),
-                TextField(
-                  controller: _contactCompanyController,
-                  decoration: const InputDecoration(labelText: 'Company'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _editorRow(
-                TextField(
-                  controller: _contactEmailController,
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
-                ),
-                TextField(
-                  controller: _contactPhoneController,
-                  decoration: const InputDecoration(labelText: 'Phone'),
-                  keyboardType: TextInputType.phone,
-                ),
-              ),
-            ],
-          ),
-          NodeType.metric => Column(
-            children: [
-              _editorRow(
-                TextField(
-                  controller: _metricValueController,
-                  decoration: const InputDecoration(labelText: 'Value'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: _metricUnitController,
-                  decoration: const InputDecoration(labelText: 'Unit'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _editorRow(
-                TextField(
-                  controller: _metricTrendController,
-                  decoration: const InputDecoration(labelText: 'Trend'),
-                ),
-                TextField(
-                  controller: _metricTargetController,
-                  decoration: const InputDecoration(labelText: 'Target'),
-                ),
-              ),
-            ],
-          ),
-          NodeType.expense => Column(
-            children: [
-              _editorRow(
-                TextField(
-                  controller: _expenseAmountController,
-                  decoration: const InputDecoration(labelText: 'Amount'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: _expenseCategoryController,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _editorRow(
-                TextField(
-                  controller: _expenseMerchantController,
-                  decoration: const InputDecoration(labelText: 'Merchant'),
-                ),
-                TextField(
-                  controller: _expensePaymentController,
-                  decoration: const InputDecoration(labelText: 'Payment'),
-                ),
-              ),
-            ],
-          ),
-          NodeType.resource => TextField(
-            controller: _noteSourceController,
-            decoration: const InputDecoration(
-              labelText: 'Source',
-              hintText: 'URL, book, paper, file, doc, etc.',
-            ),
-          ),
-          NodeType.bookmark => TextField(
-            controller: _noteSourceController,
-            decoration: const InputDecoration(
-              labelText: 'URL',
-              hintText: 'https://...',
-            ),
-            keyboardType: TextInputType.url,
-          ),
-          NodeType.quote => TextField(
-            controller: _quoteAuthorController,
-            decoration: const InputDecoration(
-              labelText: 'Quote Author',
-              hintText: 'e.g. Marcus Aurelius',
-            ),
-          ),
-          NodeType.mood => Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Mood Emoji', style: theme.textTheme.labelMedium),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: ['😢', '😔', '😐', '😊', '😁', '🔥'].map((emoji) {
-                  final isSelected = emoji == _moodEmoji;
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _moodEmoji = emoji;
-                        _hasUnsavedChanges = true;
-                      });
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 120),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? theme.colorScheme.primaryContainer
-                            : Colors.transparent,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected
-                              ? theme.colorScheme.primary
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      child: Text(emoji, style: const TextStyle(fontSize: 22)),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Text(
-                    'Energy: ${_moodEnergy.round()}/5',
-                    style: theme.textTheme.labelMedium,
-                  ),
-                  Expanded(
-                    child: Slider(
-                      min: 1,
-                      max: 5,
-                      divisions: 4,
-                      activeColor: theme.colorScheme.primary,
-                      value: _moodEnergy.clamp(1.0, 5.0),
-                      onChanged: (val) {
-                        setState(() {
-                          _moodEnergy = val;
-                          _hasUnsavedChanges = true;
-                        });
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          NodeType.timer => TextField(
-            controller: _timerSecondsController,
-            decoration: const InputDecoration(
-              labelText: 'Timer Duration (seconds)',
-              hintText: 'e.g. 1500 for 25 minutes',
-            ),
-            keyboardType: TextInputType.number,
-          ),
-          NodeType.audio => Column(
-            children: [
-              TextField(
-                controller: _audioPathController,
-                decoration: const InputDecoration(
-                  labelText: 'Audio File Path',
-                  hintText: 'e.g. /path/to/voice_note.mp3',
-                ),
-              ),
-              const SizedBox(height: 8),
-              _editorRow(
-                TextField(
-                  controller: _audioDurationController,
-                  decoration: const InputDecoration(labelText: 'Duration'),
-                ),
-                TextField(
-                  controller: _audioTranscriptController,
-                  decoration: const InputDecoration(
-                    labelText: 'Transcript / Notes',
-                  ),
-                  maxLines: 1,
-                ),
-              ),
-            ],
-          ),
-          NodeType.weather => Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _editorRow(
-                TextField(
-                  controller: _weatherTempController,
-                  decoration: const InputDecoration(
-                    labelText: 'Temperature (e.g. 29°C)',
-                  ),
-                ),
-                TextField(
-                  controller: _weatherConditionController,
-                  decoration: const InputDecoration(labelText: 'Condition'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children:
-                    [
-                      'Sunny',
-                      'Cloudy',
-                      'Rainy',
-                      'Stormy',
-                      'Windy',
-                      'Snowy',
-                    ].map((condition) {
-                      return ActionChip(
-                        label: Text(condition),
-                        avatar: Icon(_weatherIconFor(condition), size: 16),
-                        onPressed: () {
-                          setState(() {
-                            _weatherConditionController.text = condition;
-                            _hasUnsavedChanges = true;
-                          });
-                        },
-                      );
-                    }).toList(),
-              ),
-            ],
-          ),
-          NodeType.fit => Column(
-            children: [
-              _editorRow(
-                TextField(
-                  controller: _fitStepsController,
-                  decoration: const InputDecoration(labelText: 'Steps Count'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: _fitWaterController,
-                  decoration: const InputDecoration(
-                    labelText: 'Water Intake (cups)',
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-              ),
-              const SizedBox(height: 8),
-              _editorRow(
-                TextField(
-                  controller: _fitStepTargetController,
-                  decoration: const InputDecoration(labelText: 'Step Target'),
-                  keyboardType: TextInputType.number,
-                ),
-                TextField(
-                  controller: _fitWaterTargetController,
-                  decoration: const InputDecoration(labelText: 'Water Target'),
-                  keyboardType: TextInputType.number,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _fitWorkoutController,
-                decoration: const InputDecoration(
-                  labelText: 'Workout Name/Activity',
-                ),
-              ),
-            ],
-          ),
-          _ => const SizedBox.shrink(),
-        },
-      ),
-    );
-  }
-
   Widget _buildBacklinksSection() {
     final theme = Theme.of(context);
     final allNodes = ref.watch(allMindmapNodesProvider).valueOrNull ?? [];
@@ -2177,8 +1849,8 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                   ActionChip(
                     key: ValueKey('backlink-preview-${backlink.node.id}'),
                     avatar: Icon(
-                      nodeIcon(backlink.node.type),
-                      color: nodeColor(backlink.node.type),
+                      NodeVisuals.icon(backlink.node.type),
+                      color: NodeVisuals.color(context, backlink.node.type),
                       size: 14,
                     ),
                     label: Text(
@@ -2213,8 +1885,8 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                 for (final node in unlinkedMentions)
                   ActionChip(
                     avatar: Icon(
-                      nodeIcon(node.type),
-                      color: nodeColor(node.type),
+                      NodeVisuals.icon(node.type),
+                      color: NodeVisuals.color(context, node.type),
                       size: 14,
                     ),
                     label: Text('Link ${node.title}'),
@@ -2236,7 +1908,10 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(nodeIcon(node.type), color: nodeColor(node.type)),
+            Icon(
+              NodeVisuals.icon(node.type),
+              color: NodeVisuals.color(context, node.type),
+            ),
             const SizedBox(width: 8),
             Expanded(child: Text(node.title)),
           ],
@@ -2950,7 +2625,11 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.hub_outlined, color: nodeColor(_draft.type), size: 18),
+              Icon(
+                Icons.hub_outlined,
+                color: NodeVisuals.color(context, _draft.type),
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text('Connections', style: theme.textTheme.titleSmall),
@@ -2981,8 +2660,8 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                 Chip(
                   visualDensity: VisualDensity.compact,
                   avatar: Icon(
-                    nodeIcon(type),
-                    color: nodeColor(type),
+                    NodeVisuals.icon(type),
+                    color: NodeVisuals.color(context, type),
                     size: 14,
                   ),
                   label: Text(type.label),
@@ -3050,8 +2729,8 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                 for (final node in suggestedNodes)
                   ActionChip(
                     avatar: Icon(
-                      nodeIcon(node.type),
-                      color: nodeColor(node.type),
+                      NodeVisuals.icon(node.type),
+                      color: NodeVisuals.color(context, node.type),
                       size: 14,
                     ),
                     label: Text(node.title),
@@ -3348,147 +3027,6 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     invalidateMindmapState(ref, day: _draft.day);
   }
 
-  Widget _editorRow(Widget left, Widget right) {
-    return Row(
-      children: [
-        Expanded(child: left),
-        const SizedBox(width: 8),
-        Expanded(child: right),
-      ],
-    );
-  }
-
-  Widget _buildFeatureField({
-    required String title,
-    required Widget child,
-    VoidCallback? onRemove,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(
-          context,
-        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleSmall),
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                visualDensity: VisualDensity.compact,
-                onPressed: onRemove,
-                tooltip: 'Remove $title',
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showNodeToolsSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final theme = Theme.of(context);
-        return DraggableScrollableSheet(
-          initialChildSize: 0.78,
-          minChildSize: 0.38,
-          maxChildSize: 0.92,
-          builder: (context, scrollController) {
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.28),
-                    blurRadius: 28,
-                    offset: const Offset(0, -8),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          margin: const EdgeInsets.only(bottom: 14),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.outlineVariant,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.tune_rounded,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Node tools',
-                              style: theme.textTheme.titleMedium,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: 'Close tools',
-                            icon: const Icon(Icons.close),
-                            onPressed: () => Navigator.of(context).pop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _buildTemplateButton(),
-                      const SizedBox(height: 12),
-                      _buildSmartActionsSection(),
-                      const SizedBox(height: 12),
-                      _buildReviewNudgesSection(),
-                      const SizedBox(height: 12),
-                      _buildActivityLogSection(),
-                      const SizedBox(height: 12),
-                      _buildConnectionSection(),
-                      const SizedBox(height: 12),
-                      _buildBacklinksSection(),
-                      const SizedBox(height: 12),
-                      _buildAttachmentsSection(),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Widget _buildReviewNudgesSection() {
     final nudges = _draft.reviewNudges(DateTime.now());
     if (nudges.isEmpty) return const SizedBox.shrink();
@@ -3587,866 +3125,425 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
     );
   }
 
-  Widget _buildCalendarPayloadSection() {
-    final payloadKind = _calendarKind ?? CalendarNodeKind.event;
-    return _buildFeatureField(
-      title: 'Calendar: ${payloadKind.label}',
-      onRemove: () => setState(() {
-        _hasCalendarPayload = false;
-        _calendarKind = null;
-      }),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          DropdownButtonFormField<CalendarNodeKind>(
-            initialValue: payloadKind,
-            decoration: const InputDecoration(labelText: 'Kind'),
-            items: CalendarNodeKind.values.map((k) {
-              return DropdownMenuItem(value: k, child: Text(k.label));
-            }).toList(),
-            onChanged: (v) {
-              if (v != null) setState(() => _calendarKind = v);
-            },
-          ),
-          const SizedBox(height: 8),
-          if (payloadKind == CalendarNodeKind.metric) ...[
-            TextField(
-              controller: _calValueController,
-              decoration: const InputDecoration(labelText: 'Value'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calUnitController,
-              decoration: const InputDecoration(
-                labelText: 'Unit',
-                hintText: 'e.g. h, kg',
-              ),
-            ),
-          ],
-          if (payloadKind == CalendarNodeKind.event) ...[
-            TextField(
-              controller: _calValueController,
-              decoration: const InputDecoration(labelText: 'Description'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calLocationController,
-              decoration: const InputDecoration(labelText: 'Location'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calParticipantsController,
-              decoration: const InputDecoration(labelText: 'Participants'),
-              minLines: 2,
-              maxLines: 4,
-            ),
-          ],
-          if (payloadKind == CalendarNodeKind.reminder) ...[
-            TextField(
-              controller: _calRemindAtController,
-              decoration: const InputDecoration(
-                labelText: 'Remind At',
-                hintText: 'e.g. 14:00 or tomorrow 09:00',
-              ),
-            ),
-          ],
-          if (payloadKind == CalendarNodeKind.meeting) ...[
-            TextField(
-              controller: _calAgendaController,
-              decoration: const InputDecoration(labelText: 'Agenda'),
-              minLines: 2,
-              maxLines: 5,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calAttendeesController,
-              decoration: const InputDecoration(
-                labelText: 'Attendees (one per line)',
-              ),
-              minLines: 2,
-              maxLines: 5,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calDecisionsController,
-              decoration: const InputDecoration(labelText: 'Decisions'),
-              minLines: 2,
-              maxLines: 5,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calActionsController,
-              decoration: const InputDecoration(labelText: 'Action Items'),
-              minLines: 2,
-              maxLines: 5,
-            ),
-          ],
-          if (payloadKind == CalendarNodeKind.decision) ...[
-            TextField(
-              controller: _calOptionsController,
-              decoration: const InputDecoration(
-                labelText: 'Options (one per line)',
-              ),
-              minLines: 2,
-              maxLines: 5,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calSelectedOptionController,
-              decoration: const InputDecoration(labelText: 'Selected Option'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _calReasonController,
-              decoration: const InputDecoration(labelText: 'Reason'),
-              minLines: 2,
-              maxLines: 5,
-            ),
-          ],
-        ],
-      ),
-    );
+  NodeEditContext _sharedTypeEditContext() => NodeEditContext(
+    node: _draft,
+    typedDraft: nodeTypeInlineDraftFor(_draft),
+    effectivePreset: NodePresentationSpec.forType(_draft.type).defaultPreset,
+    validationErrors: <String>[?_titleError, ?_dateError, ?_progressError],
+    onTitleChanged: (String value) {
+      _titleController.text = value;
+      setState(() {
+        _draft = _draft.copyWith(title: value);
+        _hasUnsavedChanges = true;
+      });
+    },
+    onBodyChanged: (String value) {
+      _bodyController.text = value;
+      setState(() {
+        _draft = _draft.copyWith(body: value);
+        _hasUnsavedChanges = true;
+      });
+    },
+    onDraftChanged: _applySharedTypeDraft,
+    onNodeDraftChanged: _applySharedNodeDraft,
+  );
+
+  void _applySharedTypeDraft(Object value) {
+    _applySharedNodeDraft(applyNodeTypeInlineDraft(_draft, value));
+  }
+
+  void _applySharedNodeDraft(MindmapNode value) {
+    setState(() {
+      _draft = value;
+      if (_titleController.text != value.title) {
+        _titleController.text = value.title;
+      }
+      if (_bodyController.text != value.body) {
+        _bodyController.text = value.body;
+      }
+      _loadTypeSpecificData(value.data);
+      _loadStructuredTypeFields(value);
+      _hasUnsavedChanges = true;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
-          child: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: ShapeDecoration(
-                  color: nodeColor(_draft.type).withValues(alpha: 0.16),
-                  shape: CircleBorder(
-                    side: BorderSide(
-                      color: nodeColor(_draft.type).withValues(alpha: 0.55),
-                    ),
-                  ),
-                ),
-                child: Icon(
-                  nodeIcon(_draft.type),
-                  size: 18,
-                  color: nodeColor(_draft.type),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Edit Node', style: theme.textTheme.titleMedium),
-                    Text(
-                      _draft.type.label,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _buildFeatureMenu(),
-              PopupMenuButton<VoidCallback>(
-                key: const ValueKey('node-editor-overflow-menu'),
-                tooltip: 'More node actions',
-                icon: const Icon(Icons.more_horiz_rounded),
-                onSelected: (action) => action(),
-                itemBuilder: (context) => [
-                  _headerActionItem(
-                    icon: Icons.open_in_full_rounded,
-                    label: 'Open node page',
-                    onPressed: () => context.go(
-                      '/calendar/${dayKey(_draft.day)}/node/${_draft.id}',
-                    ),
-                  ),
-                  _headerActionItem(
-                    icon: Icons.build_circle_outlined,
-                    label: 'Node tools',
-                    onPressed: () => unawaited(_showNodeToolsSheet()),
-                  ),
-                  _headerActionItem(
-                    icon: Icons.delete_outline,
-                    label: 'Delete node',
-                    color: theme.colorScheme.error,
-                    onPressed: widget.onDelete,
-                  ),
-                ],
-              ),
-              if (widget.onCollapse != null)
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  tooltip: 'Collapse',
-                  onPressed: widget.onCollapse,
-                ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Close',
-                onPressed: widget.onClose,
-              ),
-            ],
-          ),
-        ),
-        Divider(height: 1, color: theme.colorScheme.outlineVariant),
-        // Body
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    return InlineNodeWorkspaceSurface(
+      header: Column(
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+            child: Row(
               children: [
-                DropdownButtonFormField<NodeType>(
-                  key: const ValueKey('node-editor-type-dropdown'),
-                  initialValue: _draft.type,
-                  decoration: const InputDecoration(labelText: 'Type'),
-                  items: NodeType.values.map((t) {
-                    return DropdownMenuItem(value: t, child: Text(t.label));
-                  }).toList(),
-                  onChanged: (v) {
-                    if (v != null) {
-                      setState(() {
-                        _draft = MindmapNode(
-                          id: _draft.id,
-                          type: v,
-                          title: _draft.title,
-                          day: _draft.day,
-                          createdAt: _draft.createdAt,
-                          updatedAt: _draft.updatedAt,
-                          body: _draft.body,
-                          position: _draft.position,
-                          isDone: _draft.isDone,
-                          status: _draft.status,
-                          priority: _draft.priority,
-                          effort: _draft.effort,
-                          reviewState: _draft.reviewState,
-                          project: _draft.project,
-                          area: _draft.area,
-                          tags: _draft.tags,
-                          contextTags: _draft.contextTags,
-                          dueDate: _draft.dueDate,
-                          progress: _draft.progress,
-                          isPinned: _draft.isPinned,
-                          isArchived: _draft.isArchived,
-                          checklist: _draft.checklist,
-                          relatedNodeIds: _draft.relatedNodeIds,
-                          data: _draft.data,
-                        );
-                        _applyTypeDefaults(v);
-                        _hasUnsavedChanges = true;
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const ValueKey('node-editor-title-field'),
-                  controller: _titleController,
-                  decoration: InputDecoration(
-                    labelText: 'Title',
-                    errorText: _titleError,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _buildObjectPropertiesPanel(),
-                const SizedBox(height: 16),
-                const _EditorSectionHeader(title: 'Core'),
-                const SizedBox(height: 8),
-                TextField(
-                  key: const ValueKey('node-editor-body-field'),
-                  controller: _bodyController,
-                  decoration: InputDecoration(
-                    labelText: 'Rich description',
-                    helperText:
-                        'Markdown supported: headings, bold, italic, quotes, lists, links.',
-                    counterText: _bodyWordCountLabel(),
-                  ),
-                  minLines: 6,
-                  maxLines: 14,
-                ),
-                _buildBodyToolbar(),
-                _buildSlashCommandSuggestions(),
-                const SizedBox(height: 8),
-                _buildAutocompleteSuggestions(),
-                const SizedBox(height: 16),
-                _buildConnectionSection(),
-                const SizedBox(height: 12),
-                _buildBacklinksSection(),
-                const SizedBox(height: 16),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<NodeStatus>(
-                        key: const ValueKey('node-editor-status-dropdown'),
-                        initialValue: _draft.status,
-                        decoration: const InputDecoration(labelText: 'Status'),
-                        items: NodeStatus.values
-                            .map(
-                              (s) => DropdownMenuItem(
-                                value: s,
-                                child: Text(s.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _draft = MindmapNode(
-                                id: _draft.id,
-                                type: _draft.type,
-                                title: _draft.title,
-                                day: _draft.day,
-                                createdAt: _draft.createdAt,
-                                updatedAt: _draft.updatedAt,
-                                body: _draft.body,
-                                position: _draft.position,
-                                isDone: _draft.isDone,
-                                status: v,
-                                priority: _draft.priority,
-                                effort: _draft.effort,
-                                reviewState: _draft.reviewState,
-                                project: _draft.project,
-                                area: _draft.area,
-                                tags: _draft.tags,
-                                contextTags: _draft.contextTags,
-                                dueDate: _draft.dueDate,
-                                progress: _draft.progress,
-                                isPinned: _draft.isPinned,
-                                isArchived: _draft.isArchived,
-                                checklist: _draft.checklist,
-                                relatedNodeIds: _draft.relatedNodeIds,
-                                data: _draft.data,
-                              ),
-                            );
-                          }
-                        },
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: ShapeDecoration(
+                    color: NodeVisuals.color(
+                      context,
+                      _draft.type,
+                    ).withValues(alpha: 0.16),
+                    shape: CircleBorder(
+                      side: BorderSide(
+                        color: NodeVisuals.color(
+                          context,
+                          _draft.type,
+                        ).withValues(alpha: 0.55),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<NodePriority>(
-                        key: const ValueKey('node-editor-priority-dropdown'),
-                        initialValue: _draft.priority,
-                        decoration: const InputDecoration(
-                          labelText: 'Priority',
+                  ),
+                  child: Icon(
+                    NodeVisuals.icon(_draft.type),
+                    size: 18,
+                    color: NodeVisuals.color(context, _draft.type),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Edit Node', style: theme.textTheme.titleMedium),
+                      Text(
+                        _draft.type.label,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        items: NodePriority.values
-                            .map(
-                              (p) => DropdownMenuItem(
-                                value: p,
-                                child: Text(p.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _draft = MindmapNode(
-                                id: _draft.id,
-                                type: _draft.type,
-                                title: _draft.title,
-                                day: _draft.day,
-                                createdAt: _draft.createdAt,
-                                updatedAt: _draft.updatedAt,
-                                body: _draft.body,
-                                position: _draft.position,
-                                isDone: _draft.isDone,
-                                status: _draft.status,
-                                priority: v,
-                                effort: _draft.effort,
-                                reviewState: _draft.reviewState,
-                                project: _draft.project,
-                                area: _draft.area,
-                                tags: _draft.tags,
-                                contextTags: _draft.contextTags,
-                                dueDate: _draft.dueDate,
-                                progress: _draft.progress,
-                                isPinned: _draft.isPinned,
-                                isArchived: _draft.isArchived,
-                                checklist: _draft.checklist,
-                                relatedNodeIds: _draft.relatedNodeIds,
-                                data: _draft.data,
-                              ),
-                            );
-                          }
-                        },
                       ),
+                    ],
+                  ),
+                ),
+                _buildFeatureMenu(),
+                PopupMenuButton<VoidCallback>(
+                  key: const ValueKey('node-editor-overflow-menu'),
+                  tooltip: 'More node actions',
+                  icon: const Icon(Icons.more_horiz_rounded),
+                  onSelected: (action) => action(),
+                  itemBuilder: (context) => [
+                    _headerActionItem(
+                      icon: Icons.delete_outline,
+                      label: 'Delete node',
+                      color: theme.colorScheme.error,
+                      onPressed: widget.onDelete,
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<NodeEffort>(
-                        key: const ValueKey('node-editor-effort-dropdown'),
-                        initialValue: _draft.effort,
-                        isExpanded: true,
-                        decoration: const InputDecoration(labelText: 'Effort'),
-                        items: NodeEffort.values
-                            .map(
-                              (e) => DropdownMenuItem(
-                                value: e,
-                                child: Text(e.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _draft = _draft.copyWith(effort: v));
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<NodeReviewState>(
-                        key: const ValueKey(
-                          'node-editor-review-state-dropdown',
-                        ),
-                        initialValue: _draft.reviewState,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Review state',
-                        ),
-                        items: NodeReviewState.values
-                            .map(
-                              (state) => DropdownMenuItem(
-                                value: state,
-                                child: Text(state.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _draft = _draft.copyWith(reviewState: v),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                  ],
+                if (widget.onCollapse != null)
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    tooltip: 'Collapse',
+                    onPressed: widget.onCollapse,
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Close',
+                  onPressed: widget.onClose,
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const ValueKey('node-editor-context-tags-field'),
-                  controller: _contextTagsController,
-                  decoration: const InputDecoration(
-                    labelText: 'Context tags',
-                    hintText: 'deep work, quick win, offline, waiting',
-                    prefixIcon: Icon(Icons.psychology_outlined),
-                  ),
-                  textInputAction: TextInputAction.next,
-                  onChanged: (_) => setState(() => _hasTags = true),
-                ),
-                const SizedBox(height: 24),
-
-                _buildStructuredTypeSection(),
-
-                if (_hasChecklist ||
-                    _hasDueDate ||
-                    _hasTags ||
-                    _hasContext ||
-                    _hasProgress ||
-                    _hasKanban ||
-                    _hasHabit ||
-                    _hasGoal ||
-                    _hasPlan ||
-                    _hasJournal ||
-                    _hasNote ||
-                    _hasLink ||
-                    _hasTimeBlock ||
-                    _hasCalendarPayload) ...[
-                  Text('Active Features', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 12),
-                ],
-
-                if (_hasChecklist)
-                  _buildFeatureField(
-                    title: 'Checklist',
-                    onRemove: () => setState(() => _hasChecklist = false),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _quickChecklistItemController,
-                                decoration: const InputDecoration(
-                                  hintText: 'Quick add item',
-                                  isDense: true,
-                                ),
-                                onSubmitted: (_) => _addQuickChecklistItem(),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton.filledTonal(
-                              icon: const Icon(Icons.add),
-                              tooltip: 'Add checklist item',
-                              onPressed: _addQuickChecklistItem,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          key: const ValueKey('node-editor-checklist-field'),
-                          controller: _checklistController,
-                          decoration: const InputDecoration(
-                            hintText: 'One item per line',
-                          ),
-                          minLines: 2,
-                          maxLines: 5,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if (_hasDueDate)
-                  _buildFeatureField(
-                    title: 'Due Date',
-                    onRemove: () => setState(() => _hasDueDate = false),
-                    child: TextField(
-                      key: const ValueKey('node-editor-due-date-field'),
-                      controller: _dueDateController,
-                      decoration: InputDecoration(
-                        hintText: 'YYYY-MM-DD',
-                        errorText: _dateError,
-                      ),
-                    ),
-                  ),
-
-                if (_hasTags)
-                  _buildFeatureField(
-                    title: 'Tags',
-                    onRemove: () => setState(() => _hasTags = false),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TextField(
-                          key: const ValueKey('node-editor-tags-field'),
-                          controller: _tagsController,
-                          decoration: const InputDecoration(
-                            hintText: 'Comma separated',
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            for (final tag in [
-                              'work',
-                              'personal',
-                              'urgent',
-                              'idea',
-                              'follow-up',
-                            ])
-                              ActionChip(
-                                label: Text(tag),
-                                onPressed: () => _addTag(tag),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if (_hasContext)
-                  _buildFeatureField(
-                    title: 'Project / Area',
-                    onRemove: () => setState(() => _hasContext = false),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            key: const ValueKey('node-editor-project-field'),
-                            controller: _projectController,
-                            decoration: const InputDecoration(
-                              labelText: 'Project',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            key: const ValueKey('node-editor-area-field'),
-                            controller: _areaController,
-                            decoration: const InputDecoration(
-                              labelText: 'Area',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if (_hasProgress)
-                  _buildFeatureField(
-                    title: 'Progress (%)',
-                    onRemove: () => setState(() => _hasProgress = false),
-                    child: TextField(
-                      key: const ValueKey('node-editor-progress-field'),
-                      controller: _progressController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        hintText: '0-100',
-                        errorText: _progressError,
-                      ),
-                    ),
-                  ),
-
-                if (_hasKanban)
-                  _buildFeatureField(
-                    title: 'Kanban Board',
-                    onRemove: () => setState(() => _hasKanban = false),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _KanbanWipSummary(controller: _kanbanCardsController),
-                        const SizedBox(height: 8),
-                        TextField(
-                          key: const ValueKey('node-editor-kanban-cards-field'),
-                          controller: _kanbanCardsController,
-                          decoration: const InputDecoration(
-                            hintText: 'todo: Scope\ndoing: Build\ndone: Review',
-                            helperText:
-                                'Use todo:/doing:/done: prefixes. Delete a line to delete a card.',
-                          ),
-                          minLines: 3,
-                          maxLines: 6,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if (_hasHabit)
-                  _buildFeatureField(
-                    title: 'Habit Tracker',
-                    onRemove: () => setState(() => _hasHabit = false),
-                    child: Column(
-                      children: [
-                        DropdownButtonFormField<String>(
-                          initialValue: _habitRecurrence,
-                          decoration: const InputDecoration(
-                            labelText: 'Recurrence',
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'daily',
-                              child: Text('Daily'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'weekly',
-                              child: Text('Weekly'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'monthly',
-                              child: Text('Monthly'),
-                            ),
-                          ],
-                          onChanged: (v) =>
-                              setState(() => _habitRecurrence = v ?? 'daily'),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _habitTargetController,
-                          decoration: const InputDecoration(
-                            labelText: 'Target (e.g. 30 mins)',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if (_hasGoal)
-                  _buildFeatureField(
-                    title: 'Goal Milestones',
-                    onRemove: () => setState(() => _hasGoal = false),
-                    child: TextField(
-                      key: const ValueKey('node-editor-goal-milestones-field'),
-                      controller: _goalMilestonesController,
-                      decoration: const InputDecoration(
-                        hintText: 'One milestone per line',
-                      ),
-                      minLines: 2,
-                      maxLines: 4,
-                    ),
-                  ),
-
-                if (_hasPlan)
-                  _buildFeatureField(
-                    title: 'Plan Steps',
-                    onRemove: () => setState(() => _hasPlan = false),
-                    child: TextField(
-                      key: const ValueKey('node-editor-plan-steps-field'),
-                      controller: _planStepsController,
-                      decoration: const InputDecoration(
-                        hintText: 'One step per line',
-                      ),
-                      minLines: 2,
-                      maxLines: 4,
-                    ),
-                  ),
-
-                if (_hasJournal)
-                  _buildFeatureField(
-                    title: 'Journal Entry',
-                    onRemove: () => setState(() => _hasJournal = false),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _journalMoodController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Mood (1-10)',
-                                ),
-                                keyboardType: TextInputType.number,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: _journalEnergyController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Energy (1-10)',
-                                ),
-                                keyboardType: TextInputType.number,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _journalPromptController,
-                          decoration: const InputDecoration(
-                            labelText: 'Prompt',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                if ((_hasNote || _hasLink) &&
-                    _draft.type != NodeType.resource &&
-                    _draft.type != NodeType.bookmark)
-                  _buildFeatureField(
-                    title: _hasLink
-                        ? _draft.type == NodeType.bookmark
-                              ? 'Bookmark URL'
-                              : 'Link URL'
-                        : _draft.type == NodeType.resource
-                        ? 'Resource Source'
-                        : 'Source',
-                    onRemove: () => setState(() {
-                      _hasNote = false;
-                      _hasLink = false;
-                    }),
-                    child: TextField(
-                      controller: _noteSourceController,
-                      decoration: InputDecoration(
-                        hintText: _hasLink
-                            ? 'https://...'
-                            : _draft.type == NodeType.resource
-                            ? 'URL, book, paper, file, doc, etc.'
-                            : 'Book, Video, etc.',
-                      ),
-                    ),
-                  ),
-
-                if (_hasCalendarPayload) _buildCalendarPayloadSection(),
-
-                if (_hasTimeBlock)
-                  _buildFeatureField(
-                    title: 'Time Block',
-                    onRemove: () => setState(() => _hasTimeBlock = false),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () async {
-                              final time = await showTimePicker(
-                                context: context,
-                                initialTime: const TimeOfDay(
-                                  hour: 9,
-                                  minute: 0,
-                                ),
-                              );
-                              if (time != null) {
-                                final hh = time.hour.toString().padLeft(2, '0');
-                                final mm = time.minute.toString().padLeft(
-                                  2,
-                                  '0',
-                                );
-                                _timeBlockStartController.text = '$hh:$mm';
-                              }
-                            },
-                            child: IgnorePointer(
-                              child: TextField(
-                                controller: _timeBlockStartController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Start Time',
-                                  hintText: 'e.g. 09:00',
-                                  prefixIcon: Icon(Icons.access_time),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () async {
-                              final time = await showTimePicker(
-                                context: context,
-                                initialTime: const TimeOfDay(
-                                  hour: 10,
-                                  minute: 0,
-                                ),
-                              );
-                              if (time != null) {
-                                final hh = time.hour.toString().padLeft(2, '0');
-                                final mm = time.minute.toString().padLeft(
-                                  2,
-                                  '0',
-                                );
-                                _timeBlockEndController.text = '$hh:$mm';
-                              }
-                            },
-                            child: IgnorePointer(
-                              child: TextField(
-                                controller: _timeBlockEndController,
-                                decoration: const InputDecoration(
-                                  labelText: 'End Time',
-                                  hintText: 'e.g. 10:00',
-                                  prefixIcon: Icon(Icons.access_time),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
               ],
             ),
           ),
-        ),
-        // Footer (Save button)
-        Container(
+          Divider(height: 1, color: theme.colorScheme.outlineVariant),
+          _EditorPanelTabs(
+            selected: _panelTab,
+            onSelected: (tab) => setState(() => _panelTab = tab),
+          ),
+        ],
+      ),
+      bodyPadding: const EdgeInsets.all(16),
+      bodyOwnsScroll: _panelTab == _EditorPanelTab.type,
+      body: _panelTab == _EditorPanelTab.type
+          ? buildNodeTypeInlineEditor(_sharedTypeEditContext())
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_panelTab == _EditorPanelTab.edit) ...[
+                  DropdownButtonFormField<NodeType>(
+                    key: const ValueKey('node-editor-type-dropdown'),
+                    initialValue: _draft.type,
+                    decoration: const InputDecoration(labelText: 'Type'),
+                    items: NodeType.values.map((t) {
+                      return DropdownMenuItem(value: t, child: Text(t.label));
+                    }).toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _draft = MindmapNode(
+                            id: _draft.id,
+                            type: v,
+                            title: _draft.title,
+                            day: _draft.day,
+                            createdAt: _draft.createdAt,
+                            updatedAt: _draft.updatedAt,
+                            body: _draft.body,
+                            position: _draft.position,
+                            isDone: _draft.isDone,
+                            status: _draft.status,
+                            priority: _draft.priority,
+                            effort: _draft.effort,
+                            reviewState: _draft.reviewState,
+                            project: _draft.project,
+                            area: _draft.area,
+                            tags: _draft.tags,
+                            contextTags: _draft.contextTags,
+                            dueDate: _draft.dueDate,
+                            progress: _draft.progress,
+                            isPinned: _draft.isPinned,
+                            isArchived: _draft.isArchived,
+                            checklist: _draft.checklist,
+                            relatedNodeIds: _draft.relatedNodeIds,
+                            data: _draft.data,
+                          );
+                          _applyTypeDefaults(v);
+                          _hasUnsavedChanges = true;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('node-editor-title-field'),
+                    controller: _titleController,
+                    decoration: InputDecoration(
+                      labelText: 'Title',
+                      errorText: _titleError,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildObjectPropertiesPanel(),
+                  const SizedBox(height: 16),
+                  const _EditorSectionHeader(title: 'Core'),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const ValueKey('node-editor-body-field'),
+                    controller: _bodyController,
+                    decoration: InputDecoration(
+                      labelText: 'Rich description',
+                      helperText:
+                          'Markdown supported: headings, bold, italic, quotes, lists, links.',
+                      counterText: _bodyWordCountLabel(),
+                    ),
+                    minLines: 6,
+                    maxLines: 14,
+                  ),
+                  _buildBodyToolbar(),
+                  _buildSlashCommandSuggestions(),
+                  const SizedBox(height: 8),
+                  _buildAutocompleteSuggestions(),
+                  const SizedBox(height: 16),
+                  _buildTemplateButton(),
+                  const SizedBox(height: 12),
+                  _buildSmartActionsSection(),
+                  const SizedBox(height: 12),
+                  _buildReviewNudgesSection(),
+                  const SizedBox(height: 12),
+                  _buildActivityLogSection(),
+                  const SizedBox(height: 12),
+                  _buildAttachmentsSection(),
+                ],
+                if (_panelTab == _EditorPanelTab.links) ...[
+                  _buildConnectionSection(),
+                  const SizedBox(height: 12),
+                  _buildBacklinksSection(),
+                ],
+                if (_panelTab == _EditorPanelTab.edit) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<NodeStatus>(
+                          key: const ValueKey('node-editor-status-dropdown'),
+                          initialValue: _draft.status,
+                          decoration: const InputDecoration(
+                            labelText: 'Status',
+                          ),
+                          items: NodeStatus.values
+                              .map(
+                                (s) => DropdownMenuItem(
+                                  value: s,
+                                  child: Text(s.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(
+                                () => _draft = MindmapNode(
+                                  id: _draft.id,
+                                  type: _draft.type,
+                                  title: _draft.title,
+                                  day: _draft.day,
+                                  createdAt: _draft.createdAt,
+                                  updatedAt: _draft.updatedAt,
+                                  body: _draft.body,
+                                  position: _draft.position,
+                                  isDone: _draft.isDone,
+                                  status: v,
+                                  priority: _draft.priority,
+                                  effort: _draft.effort,
+                                  reviewState: _draft.reviewState,
+                                  project: _draft.project,
+                                  area: _draft.area,
+                                  tags: _draft.tags,
+                                  contextTags: _draft.contextTags,
+                                  dueDate: _draft.dueDate,
+                                  progress: _draft.progress,
+                                  isPinned: _draft.isPinned,
+                                  isArchived: _draft.isArchived,
+                                  checklist: _draft.checklist,
+                                  relatedNodeIds: _draft.relatedNodeIds,
+                                  data: _draft.data,
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<NodePriority>(
+                          key: const ValueKey('node-editor-priority-dropdown'),
+                          initialValue: _draft.priority,
+                          decoration: const InputDecoration(
+                            labelText: 'Priority',
+                          ),
+                          items: NodePriority.values
+                              .map(
+                                (p) => DropdownMenuItem(
+                                  value: p,
+                                  child: Text(p.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(
+                                () => _draft = MindmapNode(
+                                  id: _draft.id,
+                                  type: _draft.type,
+                                  title: _draft.title,
+                                  day: _draft.day,
+                                  createdAt: _draft.createdAt,
+                                  updatedAt: _draft.updatedAt,
+                                  body: _draft.body,
+                                  position: _draft.position,
+                                  isDone: _draft.isDone,
+                                  status: _draft.status,
+                                  priority: v,
+                                  effort: _draft.effort,
+                                  reviewState: _draft.reviewState,
+                                  project: _draft.project,
+                                  area: _draft.area,
+                                  tags: _draft.tags,
+                                  contextTags: _draft.contextTags,
+                                  dueDate: _draft.dueDate,
+                                  progress: _draft.progress,
+                                  isPinned: _draft.isPinned,
+                                  isArchived: _draft.isArchived,
+                                  checklist: _draft.checklist,
+                                  relatedNodeIds: _draft.relatedNodeIds,
+                                  data: _draft.data,
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<NodeEffort>(
+                          key: const ValueKey('node-editor-effort-dropdown'),
+                          initialValue: _draft.effort,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Effort',
+                          ),
+                          items: NodeEffort.values
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(
+                                () => _draft = _draft.copyWith(effort: v),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<NodeReviewState>(
+                          key: const ValueKey(
+                            'node-editor-review-state-dropdown',
+                          ),
+                          initialValue: _draft.reviewState,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Review state',
+                          ),
+                          items: NodeReviewState.values
+                              .map(
+                                (state) => DropdownMenuItem(
+                                  value: state,
+                                  child: Text(state.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(
+                                () => _draft = _draft.copyWith(reviewState: v),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('node-editor-context-tags-field'),
+                    controller: _contextTagsController,
+                    decoration: const InputDecoration(
+                      labelText: 'Context tags',
+                      hintText: 'deep work, quick win, offline, waiting',
+                      prefixIcon: Icon(Icons.psychology_outlined),
+                    ),
+                    textInputAction: TextInputAction.next,
+                    onChanged: (_) => setState(() => _hasTags = true),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ],
+            ),
+      // Fixed footer: intentionally outside the scrollable editor body.
+      footer: SafeArea(
+        top: false,
+        child: Container(
+          key: const ValueKey('node-editor-fixed-footer'),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surface.withValues(alpha: 0.96),
+            color: theme.colorScheme.surface,
             border: Border(
               top: BorderSide(color: theme.colorScheme.outlineVariant),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+                blurRadius: 10,
+                offset: const Offset(0, -3),
+              ),
+            ],
           ),
           child: Row(
             children: [
@@ -4481,7 +3578,7 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -4506,6 +3603,63 @@ class _NodeConversion {
   final NodeEffort? effort;
   final NodeReviewState? reviewState;
   final List<String> contextTags;
+}
+
+enum _EditorPanelTab { edit, type, links }
+
+class _EditorPanelTabs extends StatelessWidget {
+  const _EditorPanelTabs({required this.selected, required this.onSelected});
+
+  final _EditorPanelTab selected;
+  final ValueChanged<_EditorPanelTab> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      key: const ValueKey('node-editor-tabs'),
+      height: 42,
+      child: Row(
+        children: [
+          for (final tab in _EditorPanelTab.values)
+            Expanded(
+              child: InkWell(
+                key: ValueKey('node-editor-tab-${tab.name}'),
+                onTap: () => onSelected(tab),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        width: 2,
+                        color: selected == tab
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.transparent,
+                      ),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      switch (tab) {
+                        _EditorPanelTab.edit => 'Edit',
+                        _EditorPanelTab.type => 'Type',
+                        _EditorPanelTab.links => 'Links',
+                      },
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: selected == tab
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: selected == tab
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _KanbanWipSummary extends StatefulWidget {
@@ -4762,8 +3916,8 @@ class _RelatedNodeChip extends StatelessWidget {
         InputChip(
           key: ValueKey('related-node-preview-${node.id}'),
           avatar: Icon(
-            nodeIcon(node.type),
-            color: nodeColor(node.type),
+            NodeVisuals.icon(node.type),
+            color: NodeVisuals.color(context, node.type),
             size: 14,
           ),
           label: ConstrainedBox(

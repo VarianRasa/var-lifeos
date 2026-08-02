@@ -118,6 +118,43 @@ void main() {
     });
   });
 
+  group('autoResolveConflicts', () {
+    test('shifts overlapping blocks to next available free slot', () {
+      final blocks = [
+        const DayTimeBlock(
+          id: 'a',
+          block: TimeBlock(startMinute: 9 * 60, endMinute: 10 * 60),
+        ),
+        const DayTimeBlock(
+          id: 'b',
+          block: TimeBlock(startMinute: 9 * 60 + 30, endMinute: 10 * 60 + 30),
+        ),
+      ];
+
+      final resolved = autoResolveConflicts(blocks);
+
+      expect(resolved.containsKey('b'), isTrue);
+      expect(resolved['b']!.startMinute, 10 * 60);
+      expect(resolved['b']!.endMinute, 11 * 60);
+    });
+
+    test('does not shift non-overlapping blocks', () {
+      final blocks = [
+        const DayTimeBlock(
+          id: 'a',
+          block: TimeBlock(startMinute: 9 * 60, endMinute: 10 * 60),
+        ),
+        const DayTimeBlock(
+          id: 'b',
+          block: TimeBlock(startMinute: 10 * 60, endMinute: 11 * 60),
+        ),
+      ];
+
+      final resolved = autoResolveConflicts(blocks);
+      expect(resolved, isEmpty);
+    });
+  });
+
   group('formatTimeOfDay', () {
     test('midnight is 00:00', () {
       expect(formatTimeOfDay(0), '00:00');

@@ -22,6 +22,23 @@ Expected result:
 - All tests pass.
 - Web release build succeeds without demo seed data or a sync endpoint.
 
+## Canvas benchmarks
+
+Run deterministic correctness and structural-culling checks in the normal suite:
+
+```bash
+flutter test test/features/mindmap/domain/canvas_spatial_index_scale_test.dart test/features/mindmap/presentation/canvas_structural_culling_scale_test.dart
+```
+
+Run profile benchmarks on physical Android hardware and a Windows host:
+
+```bash
+flutter drive --driver=test_driver/canvas_benchmark_driver.dart --target=integration_test/canvas_profile_benchmark_test.dart --profile -d <android-device-id> --no-dds
+flutter drive --driver=test_driver/canvas_benchmark_driver.dart --target=integration_test/canvas_profile_benchmark_test.dart --profile -d windows
+```
+
+Each run writes machine-readable output to `build/canvas_benchmark_summary.json`. Archive results with device model, OS version, Flutter version, and commit SHA. Release thresholds: at least 100 measured frames; build and raster p90 each at or below 16.67 ms; build and raster p99 each at or below 33.34 ms; no more than 5% of measured build or raster frames above 16.67 ms. Repeat each platform three times and use median run. Thresholds apply only to profile benchmark runs, never normal test suite timing.
+
 ## Manual smoke: local-only beta path
 
 Run without sync or demo seed data:
@@ -47,6 +64,22 @@ Check:
 - Agenda routine banner appears when recurring routines are due today, previews ready routines, supports per-routine selection/select-all/clear, applies selected routines, and then disappears only when no ready routines remain.
 - Agenda routine skip/custom-date snooze actions create visible routine markers with badges, snackbar Undo restores the banner, and marker row actions can delete, resnooze, or apply the routine immediately.
 - A day mindmap can create, edit, and delete a node.
+- Canvas Assistant can analyze a whole board or selection, preview clusters/actions/duplicates/layout, apply selected suggestions, reject stale analysis, and undo the applied batch.
+- Commenter/viewer collaboration roles can inspect Canvas Assistant results but cannot apply them; owner/editor changes sync through the normal board outbox.
+- Canvas search finds both nodes and native objects, lists results, cycles with Enter/Shift+Enter, and focuses the selected result.
+- A board with 1,000 objects remains navigable because offscreen objects are culled while selected/search results remain available.
+- Minimap adapts on mobile, includes native objects, and supports tap, drag, and keyboard navigation using dynamic board bounds.
+- Fit board, fit selection, actual-size, zoom, and persisted viewport restore correctly on day and project canvases.
+- Canvas objects expose useful semantics and keyboard actions; reduced-motion settings disable animated viewport transitions.
+- Project canvas facilitated workshops can start from Brainstorm, Retrospective, and Decision templates; stage timer expiry waits for host confirmation.
+- Private brainstorm contributions remain author/host-only across canvas rendering, search, minimap/navigation, Canvas Assistant, and board export until reveal.
+- Workshop stage controls support advance, restart, skip, reveal, voting, review, and persisted reload without timer activity noise.
+- Workshop summary reports stage timing, contribution counts, voting ranking, reactions, participants, and clusters.
+- Image and Video nodes can be created from safe HTTP(S) URLs; unsafe schemes stay blocked.
+- Local Image/Video attachments survive portable backup restore and can be exported with exact bytes.
+- Image nodes expose useful alt text semantics, and missing alt text shows an accessible warning.
+- Video nodes show poster/fallback controls, preserve resume position on pause/lifecycle changes, and gate Open/Export by available source.
+- Itinerary Wide layout can reorder agenda items, toggle completion, and convert an item to Task or Event.
 - Command palette opens with `Ctrl+K` and can search/create expected node actions.
 - Graph, insights, and workspaces render sensible empty states when there is no data.
 - Settings open and theme/accent preferences persist after reload.
@@ -67,20 +100,17 @@ Check:
 - Demo nodes appear only when the flag is set.
 - Calendar density, Month/Week/Agenda views, day summary, mindmap nodes, graph, insights, and workspace surfaces all render seeded data.
 
-## Optional smoke: sync endpoint path
+## Firebase sync smoke
 
-Run only when a test endpoint is available:
-
-```bash
-flutter run -d chrome --dart-define=VAR_SYNC_ENDPOINT=https://sync.example.test
-```
+Run with test Firebase platform configuration.
 
 Check:
 
-- Sync UI detects that sync is enabled.
-- Auth/setup flow handles valid and invalid credentials without losing local data.
-- Sync activity and restore-point flows show clear status.
-- App remains usable when the endpoint is unavailable or returns an error.
+- Signed-out use remains local-first.
+- Firebase Auth handles valid and invalid credentials without losing local data.
+- Firestore backup and restore-point flows show clear status.
+- Firebase Storage attachment sync runs only on eligible platforms for signed-in users.
+- App remains usable when Firebase is unavailable or returns an error.
 
 ## Platform sanity
 
@@ -98,5 +128,3 @@ Before platform-specific beta distribution, confirm visible metadata:
 - Production sync backend contract, auth UX, conflict review, and diagnostics are still planned work.
 - Full accessibility audit is pending.
 - Large-data performance optimization is pending.
-
-

@@ -33,5 +33,10 @@ void main() {
     expect(find.text('Var'), findsOneWidget);
     expect(find.text('Create your first node'), findsOneWidget);
     expect(find.text('Start fresh'), findsOneWidget);
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byType(FilledButton)).autofocus,
+      isTrue,
+    );
   });
 }

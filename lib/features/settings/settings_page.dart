@@ -853,8 +853,11 @@ class _BoardTemplatesManagerCardState
     final filtered = templates
         .where((item) => item.template.name.toLowerCase().contains(query))
         .toList(growable: false);
-    return DecoratedBox(
-      decoration: _settingsPanelDecoration(context),
+    final panelShape = _settingsPanelDecoration(context).shape;
+    return Material(
+      color: theme.colorScheme.surface,
+      shape: panelShape,
+      clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(

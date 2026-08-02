@@ -6,6 +6,7 @@ import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
+import 'package:var_app/features/mindmap/presentation/inline_node_workspace.dart';
 import 'package:var_app/features/mindmap/presentation/node_editor_panel.dart';
 
 void main() {
@@ -150,6 +151,7 @@ void main() {
         ),
       );
       await _pumpEditor(tester);
+      await _openLinksTab(tester);
 
       tester
           .widget<ActionChip>(find.widgetWithText(ActionChip, 'Launch plan'))
@@ -312,6 +314,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     expect(find.text('Backlinks'), findsOneWidget);
     expect(find.text('Weekly Plan - [[link]]'), findsOneWidget);
@@ -361,6 +364,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     expect(find.text('Possible links'), findsOneWidget);
     tester
@@ -420,6 +424,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     tester
         .widget<InputChip>(
@@ -486,6 +491,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     expect(find.text('Broken links: missing-node'), findsOneWidget);
     tester
@@ -545,6 +551,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     await tester.ensureVisible(
       find.byKey(const ValueKey('related-node-menu-node-target')),
@@ -605,6 +612,7 @@ void main() {
       ),
     );
     await _pumpEditor(tester);
+    await _openLinksTab(tester);
 
     await tester.ensureVisible(
       find.byKey(const ValueKey('add-connected-node')),
@@ -638,6 +646,45 @@ void main() {
     ]);
   });
 
+  testWidgets('NodeEditorPanel overflow omits page and tools entries', (
+    tester,
+  ) async {
+    final node = MindmapNode.create(
+      id: 'inline-only',
+      type: NodeType.note,
+      title: 'Inline only',
+      day: DateTime(2026, 7, 6),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(
+            InMemoryMindmapRepository(),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: NodeEditorPanel(
+              node: node,
+              onSave: (_) {},
+              onClose: () {},
+              onDelete: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpEditor(tester);
+
+    await tester.tap(find.byKey(const ValueKey('node-editor-overflow-menu')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open node page'), findsNothing);
+    expect(find.text('Node tools'), findsNothing);
+    expect(find.text('Delete node'), findsOneWidget);
+  });
+
   testWidgets('NodeEditorPanel starts focus timer from smart actions', (
     tester,
   ) async {
@@ -669,11 +716,10 @@ void main() {
     );
     await _pumpEditor(tester);
 
-    await tester.tap(find.byKey(const ValueKey('node-editor-overflow-menu')));
+    final startFocus = find.byKey(const ValueKey('start-focus-timer'));
+    await tester.ensureVisible(startFocus);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Node tools'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('start-focus-timer')));
+    await tester.tap(startFocus);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const ValueKey('save-node')));
     await tester.tap(find.byKey(const ValueKey('save-node')));
@@ -718,11 +764,10 @@ void main() {
     );
     await _pumpEditor(tester);
 
-    await tester.tap(find.byKey(const ValueKey('node-editor-overflow-menu')));
+    final convertToTask = find.byKey(const ValueKey('convert-node-to-task'));
+    await tester.ensureVisible(convertToTask);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Node tools'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('convert-node-to-task')));
+    await tester.tap(convertToTask);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const ValueKey('save-node')));
     await tester.tap(find.byKey(const ValueKey('save-node')));
@@ -737,6 +782,98 @@ void main() {
     ]);
   });
 
+  const sharedDispatcherCases = <(NodeType, String)>[
+    (NodeType.note, 'productivity-shared-1-title-field'),
+    (NodeType.resource, 'knowledge-shared-1-title-field'),
+    (NodeType.contact, 'life-data-editor-shared-1'),
+    (NodeType.itinerary, 'itinerary-editor-wide'),
+  ];
+  for (final (NodeType type, String editorKey) in sharedDispatcherCases) {
+    testWidgets('NodeEditorPanel dispatches ${type.name} type editor', (
+      tester,
+    ) async {
+      final repository = InMemoryMindmapRepository(seedNodes: const []);
+      final editNode = MindmapNode.create(
+        id: 'shared-1',
+        type: type,
+        title: type.label,
+        day: DateTime(2026, 6, 18),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 560,
+                height: 700,
+                child: NodeEditorPanel(
+                  node: editNode,
+                  initialTab: 1,
+                  onSave: (_) {},
+                  onClose: () {},
+                  onDelete: () {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await _pumpEditor(tester);
+
+      expect(find.byType(InlineNodeWorkspaceSurface), findsOneWidget);
+      expect(find.byKey(ValueKey<String>(editorKey)), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+  testWidgets('NodeEditorPanel type tab uses shared workspace dispatcher', (
+    tester,
+  ) async {
+    final repository = InMemoryMindmapRepository(seedNodes: const []);
+    final editNode = MindmapNode.create(
+      id: 'contact-1',
+      type: NodeType.contact,
+      title: 'Ada',
+      day: DateTime(2026, 6, 18),
+    );
+
+    MindmapNode? savedNode;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 440,
+              height: 700,
+              child: NodeEditorPanel(
+                node: editNode,
+                initialTab: 1,
+                onSave: (MindmapNode value) => savedNode = value,
+                onClose: () {},
+                onDelete: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await _pumpEditor(tester);
+
+    expect(find.byType(InlineNodeWorkspaceSurface), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('life-data-editor-contact-1')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('life-data-contact-role-field')),
+      'Engineer',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-node')));
+    await _pumpEditor(tester);
+    expect(savedNode?.data['role'], 'Engineer');
+  });
   testWidgets('NodeEditorPanel keeps header actions in overflow menu', (
     tester,
   ) async {
@@ -777,6 +914,14 @@ void main() {
       findsOneWidget,
     );
     expect(find.widgetWithText(FilledButton, 'Save'), findsOneWidget);
+    expect(find.byType(InlineNodeWorkspaceScrollBody), findsOneWidget);
+    final footerRect = tester.getRect(
+      find.byKey(const ValueKey('node-editor-fixed-footer')),
+    );
+    expect(
+      footerRect.bottom,
+      tester.view.physicalSize.height / tester.view.devicePixelRatio,
+    );
   });
 }
 
@@ -785,4 +930,9 @@ Future<void> _pumpEditor(WidgetTester tester) async {
   for (var i = 0; i < 5; i += 1) {
     await tester.pump(const Duration(milliseconds: 100));
   }
+}
+
+Future<void> _openLinksTab(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('node-editor-tab-links')));
+  await _pumpEditor(tester);
 }

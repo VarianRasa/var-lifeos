@@ -6,6 +6,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+
 /// A single shimmer pulse row.
 class SkeletonLine extends StatelessWidget {
   const SkeletonLine({
@@ -166,7 +169,7 @@ class _ShimmerState extends State<_Shimmer>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: AppDesignTokens.astryx.motionSlow,
     )..repeat(reverse: true);
   }
 
@@ -178,18 +181,20 @@ class _ShimmerState extends State<_Shimmer>
 
   @override
   Widget build(BuildContext context) {
-    final isTest = WidgetsBinding.instance.runtimeType.toString().contains(
-      'Test',
-    );
-    if (isTest) return widget.child;
+    final media = MediaQuery.maybeOf(context);
+    if (media != null &&
+        (media.disableAnimations || media.accessibleNavigation)) {
+      _controller.stop();
+      return widget.child;
+    }
+    if (!_controller.isAnimating) _controller.repeat(reverse: true);
 
     final theme = Theme.of(context);
-    final baseColor = theme.colorScheme.surfaceContainerHighest.withValues(
-      alpha: 0.3,
-    );
-    final highlightColor = theme.colorScheme.surfaceContainerHighest.withValues(
-      alpha: 0.6,
-    );
+    final track =
+        theme.extension<AppSemanticColors>()?.track ??
+        theme.colorScheme.outlineVariant;
+    final baseColor = track.withValues(alpha: 0.32);
+    final highlightColor = track.withValues(alpha: 0.68);
 
     return AnimatedBuilder(
       animation: _controller,

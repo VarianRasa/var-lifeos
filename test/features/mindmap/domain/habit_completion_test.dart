@@ -42,5 +42,41 @@ void main() {
       (loggedAgain.data['habit']! as Map<String, Object?>)['target'],
       '30 min',
     );
+    expect(loggedAgain.data['habit'], isA<Map<String, Object?>>());
+    expect(
+      () => (loggedAgain.data['habit']! as Map<String, Object?>)['target'] =
+          'changed',
+      throwsUnsupportedError,
+    );
+  });
+
+  test('removeHabitCompletion removes only selected completion day', () {
+    final node = MindmapNode.create(
+      id: 'habit-workout',
+      type: NodeType.habit,
+      title: 'Workout',
+      day: DateTime(2026, 6, 19),
+      data: const {
+        'habit': {
+          'recurrence': 'daily',
+          'target': '30 min',
+          'completions': ['2026-06-18', '2026-06-19'],
+        },
+      },
+      now: DateTime(2026, 6, 19, 8),
+    );
+
+    final updated = removeHabitCompletion(
+      node,
+      DateTime(2026, 6, 19, 20),
+      now: DateTime(2026, 6, 19, 21),
+    );
+
+    expect(habitCompletionKeys(updated), ['2026-06-18']);
+    expect(updated.updatedAt, DateTime(2026, 6, 19, 21));
+    expect(
+      (updated.data['habit']! as Map<String, Object?>)['target'],
+      '30 min',
+    );
   });
 }

@@ -4,7 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../shared/widgets/doodle_border.dart';
+import '../../core/theme/app_design_tokens.dart';
 
 class ShortcutGroup {
   const ShortcutGroup(this.label, this.items);
@@ -20,9 +20,9 @@ class ShortcutItem {
 
 const List<ShortcutGroup> _shortcutGroups = [
   ShortcutGroup('Global', [
-    ShortcutItem(['Ctrl', 'K'], 'Open command palette'),
-    ShortcutItem(['Ctrl', 'T'], 'Jump to today'),
-    ShortcutItem(['Ctrl', '/'], 'Show this shortcut reference'),
+    ShortcutItem(['Ctrl/⌘', 'K'], 'Open command palette'),
+    ShortcutItem(['Ctrl/⌘', 'T'], 'Jump to today'),
+    ShortcutItem(['Ctrl/⌘', '/'], 'Show this shortcut reference'),
     ShortcutItem(['?'], 'Show this shortcut reference'),
   ]),
   ShortcutGroup('Calendar / Agenda', [
@@ -56,13 +56,13 @@ const List<ShortcutGroup> _shortcutGroups = [
     ShortcutItem(['replace body A with text'], 'Replace body text'),
   ]),
   ShortcutGroup('Day Mindmap', [
-    ShortcutItem(['Ctrl', 'N'], 'Create new task node'),
-    ShortcutItem(['Ctrl', 'Z'], 'Undo last action'),
-    ShortcutItem(['Ctrl', 'Shift', 'Z'], 'Redo last undo'),
+    ShortcutItem(['Ctrl/⌘', 'N'], 'Create new task node'),
+    ShortcutItem(['Ctrl/⌘', 'Z'], 'Undo last action'),
+    ShortcutItem(['Ctrl/⌘', 'Shift', 'Z'], 'Redo last undo'),
     ShortcutItem(['Esc'], 'Deselect node / clear focus'),
     ShortcutItem(['Drag'], 'Move nodes on canvas'),
     ShortcutItem(['Shift', 'Drag'], 'Lasso multi-select'),
-    ShortcutItem(['Ctrl', 'Click'], 'Toggle multi-select'),
+    ShortcutItem(['Ctrl/⌘', 'Click'], 'Toggle multi-select'),
     ShortcutItem([
       'Batch toolbar',
     ], 'Status, priority, tag, project, area, due, archive'),
@@ -72,7 +72,7 @@ const List<ShortcutGroup> _shortcutGroups = [
     ShortcutItem(['Connect'], 'Create labeled relations'),
   ]),
   ShortcutGroup('Node Editor', [
-    ShortcutItem(['Ctrl', 'S'], 'Save current node'),
+    ShortcutItem(['Ctrl/⌘', 'S'], 'Save current node'),
     ShortcutItem(['Delete'], 'Delete selected node'),
     ShortcutItem(['Smart actions'], 'Complete, reschedule, pin, link, extract'),
   ]),
@@ -81,7 +81,7 @@ const List<ShortcutGroup> _shortcutGroups = [
     ShortcutItem(['Insights'], 'Open Automation Center and presets'),
   ]),
   ShortcutGroup('Graph', [
-    ShortcutItem(['Ctrl', 'F'], 'Search nodes in graph'),
+    ShortcutItem(['Ctrl/⌘', 'F'], 'Search nodes in graph'),
     ShortcutItem(['Save graph filter'], 'Persist current graph filters'),
     ShortcutItem(['Edit edge'], 'Rename relation label from graph links'),
   ]),
@@ -220,14 +220,17 @@ class _KeyboardShortcutsDialogState extends State<_KeyboardShortcutsDialog> {
                                           color: theme
                                               .colorScheme
                                               .surfaceContainerHighest,
-                                          shape: DoodleShapeBorder(
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppDesignTokens.of(
+                                                context,
+                                              ).radiusInner,
+                                            ),
                                             side: BorderSide(
                                               color: theme
                                                   .colorScheme
                                                   .outlineVariant,
                                             ),
-                                            radius: 6,
-                                            wobble: 0.8,
                                           ),
                                         ),
                                         child: Padding(

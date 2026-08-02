@@ -15,6 +15,7 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
     required Uri endpoint,
     required FutureOr<Database> database,
     http.Client? client,
+    this.requestTimeout = const Duration(seconds: 20),
   }) : _endpoint = _normalizeEndpoint(endpoint),
        _databaseSource = database,
        _client = client ?? http.Client();
@@ -25,6 +26,7 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
   final Uri _endpoint;
   final FutureOr<Database> _databaseSource;
   final http.Client _client;
+  final Duration requestTimeout;
   final StoreRef<String, Map<String, Object?>> _store = stringMapStoreFactory
       .store(_storeName);
   Database? _database;
@@ -152,7 +154,10 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
     );
     _requireSuccess(response, accepted: const {200, 201});
 
-    final state = _authStateFromResponse(response.body);
+    final state = _authStateFromResponse(
+      response.body,
+      expectedEmail: normalizedEmail,
+    );
     await _saveState(state);
     return state;
   }
@@ -162,7 +167,7 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
     bool ignoreRemoteErrors = false,
   }) async {
     try {
-      final response = await request();
+      final response = await request().timeout(requestTimeout);
       if (ignoreRemoteErrors) return response;
       return response;
     } on Object catch (error) {
@@ -186,7 +191,10 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
     );
   }
 
-  SyncAuthState _authStateFromResponse(String body) {
+  SyncAuthState _authStateFromResponse(
+    String body, {
+    required String expectedEmail,
+  }) {
     try {
       final decoded = jsonDecode(body);
       if (decoded is! Map<Object?, Object?>) {
@@ -199,10 +207,14 @@ final class HttpSyncAuthGateway implements SyncAuthGateway {
         throw const FormatException('Auth response is missing session data.');
       }
 
-      return SyncAuthState.signedIn(
-        _userFromJson(rawUser.cast<String, Object?>()),
-        accessToken: accessToken.trim(),
-      );
+      final user = _userFromJson(rawUser.cast<String, Object?>());
+      if (user.id.trim().isEmpty || user.email.trim().isEmpty) {
+        throw const FormatException('Auth response user is invalid.');
+      }
+      if (user.email.toLowerCase() != expectedEmail) {
+        throw const FormatException('Auth response belongs to another user.');
+      }
+      return SyncAuthState.signedIn(user, accessToken: accessToken.trim());
     } on FormatException catch (error) {
       throw SyncRemoteStoreException(
         'Remote auth response is invalid.',

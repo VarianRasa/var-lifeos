@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -187,6 +188,37 @@ void main() {
     expect(saved.name, 'Launch board');
     expect(saved.sourceBoardId, 'source');
     expect(find.text('Launch board'), findsOneWidget);
+  });
+
+  testWidgets('board template panel ListTiles paint ink and open actions', (
+    tester,
+  ) async {
+    final boards = InMemoryCanvasBoardRepository();
+    final templates = InMemoryCanvasBoardTemplateRepository();
+    await boards.saveBoard(_projectBoard('source', title: 'Roadmap'));
+    await templates.saveTemplate(_boardTemplate('linked', 'Launch', 'source'));
+    await tester.pumpWidget(
+      _settingsTestApp(canvasRepository: boards, templateRepository: templates),
+    );
+    await tester.pumpAndSettle();
+
+    await _tapKey(tester, 'settings-board-templates-toggle');
+    final linkedTile = find.widgetWithText(ListTile, 'Launch');
+    final panelMaterial = tester.widget<Material>(
+      find.ancestor(of: linkedTile, matching: find.byType(Material)).first,
+    );
+    expect(panelMaterial.color, isNot(Colors.transparent));
+    expect(panelMaterial.clipBehavior, Clip.antiAlias);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(linkedTile));
+    await tester.pump();
+    await tester.tap(linkedTile);
+    await tester.pump();
+    await _tapKey(tester, 'settings-board-template-menu-linked');
+
+    expect(find.text('Rename'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('renames and deletes linked board template', (tester) async {

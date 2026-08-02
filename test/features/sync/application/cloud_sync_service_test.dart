@@ -216,6 +216,66 @@ void main() {
     expect(snapshot?.baseline.nodes, [baseline]);
   });
 
+  test(
+    'previewPull is read-only and keeps remote and baseline intact',
+    () async {
+      final baseline = _node(
+        id: 'shared',
+        title: 'Shared',
+        now: DateTime(2026, 6, 18, 9),
+      );
+      final local = baseline.copyWith(
+        title: 'Local edit',
+        updatedAt: DateTime(2026, 6, 18, 10),
+      );
+      final remote = baseline.copyWith(
+        title: 'Remote edit',
+        updatedAt: DateTime(2026, 6, 18, 11),
+      );
+      final repository = InMemoryMindmapRepository(seedNodes: [baseline]);
+      final authGateway = LocalSyncAuthGateway();
+      final remoteStore = InMemorySyncRemoteBackupStore();
+      final syncStateStore = InMemorySyncStateStore();
+      final service = CloudSyncService(
+        repository: repository,
+        authGateway: authGateway,
+        remoteStore: remoteStore,
+        syncStateStore: syncStateStore,
+        sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+        now: () => DateTime(2026, 6, 18, 12),
+      );
+      final account = await authGateway.signIn(email: 'user@example.com');
+      await service.pushBackup();
+      await repository.saveNode(local);
+      final remoteDocument = MindmapBackupDocument.create(
+        sourceDevice: const SyncDeviceIdentity(id: 'device-b', label: 'Phone'),
+        exportedAt: DateTime(2026, 6, 18, 13),
+        nodes: [remote],
+      );
+      await remoteStore.uploadBackup(account.user!, remoteDocument);
+
+      final preview = await service.previewPull(
+        conflictStrategy: SyncConflictStrategy.keepRemote,
+      );
+
+      expect(preview.plan.nodesToSave.single.title, 'Remote edit');
+      expect(preview.plan.resolvedConflicts, hasLength(1));
+      expect((await repository.getNode('shared'))?.title, 'Local edit');
+      expect(
+        (await remoteStore.fetchLatestBackup(
+          account.user!,
+        ))?.nodes.single.title,
+        'Remote edit',
+      );
+      expect(
+        (await syncStateStore.readSnapshot(
+          account.user!,
+        ))?.baseline.nodes.single.title,
+        'Shared',
+      );
+    },
+  );
+
   test('returns an empty pull report when no remote backup exists', () async {
     final repository = InMemoryMindmapRepository();
     final authGateway = LocalSyncAuthGateway();
@@ -377,6 +437,97 @@ void main() {
       expect(snapshot?.baseline.nodes, [baseline]);
     },
   );
+
+  test('pull rejects changed remote revision without local mutation', () async {
+    final local = _node(
+      id: 'local',
+      title: 'Keep local',
+      now: DateTime(2026, 6, 18, 9),
+    );
+    final repository = InMemoryMindmapRepository(seedNodes: [local]);
+    final authGateway = LocalSyncAuthGateway();
+    final remoteStore = InMemorySyncRemoteBackupStore();
+    final service = CloudSyncService(
+      repository: repository,
+      authGateway: authGateway,
+      remoteStore: remoteStore,
+      sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+    );
+    final account = await authGateway.signIn(email: 'user@example.com');
+    final previewed = MindmapBackupDocument.create(
+      sourceDevice: const SyncDeviceIdentity(id: 'device-b', label: 'Phone'),
+      exportedAt: DateTime(2026, 6, 18, 13),
+      nodes: [
+        _node(
+          id: 'previewed',
+          title: 'Previewed remote',
+          now: DateTime(2026, 6, 18, 10),
+        ),
+      ],
+    );
+    await remoteStore.uploadBackup(account.user!, previewed);
+    final preview = await service.previewPull();
+    final changed = MindmapBackupDocument.create(
+      sourceDevice: const SyncDeviceIdentity(id: 'device-b', label: 'Phone'),
+      exportedAt: DateTime(2026, 6, 18, 14),
+      nodes: [
+        _node(
+          id: 'changed',
+          title: 'Changed remote',
+          now: DateTime(2026, 6, 18, 11),
+        ),
+      ],
+    );
+    await remoteStore.uploadBackup(account.user!, changed);
+
+    await expectLater(
+      service.pullBackup(expectedRemoteDocument: preview.remoteDocument),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(await repository.listNodes(), [local]);
+    expect(await remoteStore.fetchLatestBackup(account.user!), same(changed));
+  });
+
+  test('syncNow rejects remote appearing after missing preview', () async {
+    final local = _node(
+      id: 'local',
+      title: 'Keep local',
+      now: DateTime(2026, 6, 18, 9),
+    );
+    final repository = InMemoryMindmapRepository(seedNodes: [local]);
+    final authGateway = LocalSyncAuthGateway();
+    final remoteStore = InMemorySyncRemoteBackupStore();
+    final service = CloudSyncService(
+      repository: repository,
+      authGateway: authGateway,
+      remoteStore: remoteStore,
+      sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+    );
+    final account = await authGateway.signIn(email: 'user@example.com');
+    final preview = await service.previewPull();
+    expect(preview.remoteWasMissing, isTrue);
+    final appeared = MindmapBackupDocument.create(
+      sourceDevice: const SyncDeviceIdentity(id: 'device-b', label: 'Phone'),
+      exportedAt: DateTime(2026, 6, 18, 13),
+      nodes: [
+        _node(
+          id: 'remote',
+          title: 'Appeared remotely',
+          now: DateTime(2026, 6, 18, 10),
+        ),
+      ],
+    );
+    await remoteStore.uploadBackup(account.user!, appeared);
+
+    await expectLater(
+      service.syncNow(expectedRemoteWasMissing: preview.remoteWasMissing),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(await repository.listNodes(), [local]);
+    expect(await remoteStore.fetchLatestBackup(account.user!), same(appeared));
+  });
 
   test(
     'resolves conflicts with the newest node versions and uploads them',

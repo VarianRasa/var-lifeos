@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "var-voting-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://var-lifeos.web.app",
+    "FIREBASE_PROJECT_ID": "var-app-prod"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "var-voting",
+    "database_id": "15a33aeb-27c6-46e6-9216-10b1c0fc6086",
+    "migrations_dir": "migrations"
+  }],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 0.1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,19 +15,20 @@ def main() -> None:
     flutter = shutil.which("flutter")
     if flutter is None:
         raise SystemExit("Flutter executable not found")
-    subprocess.run(
-        [
-            flutter,
-            "build",
-            "web",
-            "--base-href",
-            "/app/",
-            "--output",
-            str(APP),
-        ],
-        cwd=ROOT,
-        check=True,
-    )
+    command = [
+        flutter,
+        "build",
+        "web",
+        "--base-href",
+        "/app/",
+        "--output",
+        str(APP),
+    ]
+    for name in ("VAR_DEMO_SEED", "VAR_VOTING_API_ENDPOINT"):
+        value = os.environ.get(name)
+        if value is not None:
+            command.append(f"--dart-define={name}={value}")
+    subprocess.run(command, cwd=ROOT, check=True)
     shutil.copytree(ROOT / "landing", OUTPUT, dirs_exist_ok=True)
     assets = OUTPUT / "assets"
     assets.mkdir(parents=True, exist_ok=True)

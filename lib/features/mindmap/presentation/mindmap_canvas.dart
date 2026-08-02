@@ -39,6 +39,7 @@ import '../domain/canvas_connector_router.dart';
 import '../domain/canvas_navigation.dart';
 import '../domain/canvas_object_style.dart';
 import '../domain/canvas_position.dart';
+import '../domain/canvas_scene_bounds.dart';
 import '../domain/canvas_spatial_index.dart' as spatial;
 import '../domain/canvas_workshop.dart';
 import '../domain/goal_progress.dart';
@@ -912,10 +913,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   void _zoomToGroup(List<MindmapNode> groupNodes) {
     final viewportSize = context.size;
     if (viewportSize == null || groupNodes.isEmpty) return;
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     Rect? bounds;
     for (final node in groupNodes) {
       final pos = _positionFor(node);
@@ -1065,6 +1063,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
   late Map<String, Size> _nodeSizes;
   final TransformationController _transformationController =
       TransformationController();
+  CanvasSceneBounds _sceneBounds = const CanvasSceneBounds.initial();
+  Offset get _sceneOrigin => _sceneBounds.sceneOffset;
   final GlobalKey _canvasExportKey = GlobalKey();
   bool _didSetInitialTransform = false;
   String? _followingCollaboratorId;
@@ -1641,6 +1641,44 @@ class MindmapCanvasState extends State<MindmapCanvas>
     return const ['.png', '.jpg', '.jpeg', '.gif', '.webp'].any(path.endsWith);
   }
 
+  void _expandSceneToInclude(
+    Iterable<Rect> content, {
+    bool compensateViewport = true,
+  }) {
+    var next = _sceneBounds;
+    for (final rect in content) {
+      next = next.expandToInclude(rect);
+    }
+    if (next == _sceneBounds) return;
+    final sceneShift = next.sceneOffset - _sceneBounds.sceneOffset;
+    _sceneBounds = next;
+    if (compensateViewport && sceneShift != Offset.zero) {
+      _transformationController.value = _transformationController.value.clone()
+        ..multiply(
+          Matrix4.translationValues(-sceneShift.dx, -sceneShift.dy, 0),
+        );
+    }
+  }
+
+  void _expandSceneForContent({bool compensateViewport = true}) {
+    _expandSceneToInclude(<Rect>[
+      for (final object in widget.board?.objects ?? const <CanvasObject>[])
+        Rect.fromLTWH(
+          (_canvasObjectGeometryOverrides[object.id] ?? object.geometry).x,
+          (_canvasObjectGeometryOverrides[object.id] ?? object.geometry).y,
+          (_canvasObjectGeometryOverrides[object.id] ?? object.geometry).width,
+          (_canvasObjectGeometryOverrides[object.id] ?? object.geometry).height,
+        ),
+      for (final node in widget.nodes)
+        Rect.fromLTWH(
+          (_dragPositions[node.id] ?? node.position).dx,
+          (_dragPositions[node.id] ?? node.position).dy,
+          _nodeSizeFor(node).width,
+          _nodeSizeFor(node).height,
+        ),
+    ], compensateViewport: compensateViewport);
+  }
+
   Future<void> _moveSelectionCenterTo(Offset target) async {
     final callback = widget.onNodeMoved;
     final selected = _selectedNodes();
@@ -1667,6 +1705,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     _presentationCache =
         widget.presentationCache ?? MindmapNodePresentationCache();
     _nodeSizes = _effectiveNodeSizes();
+    _expandSceneForContent(compensateViewport: false);
     _navigationIndex = CanvasNavigationIndex(
       nodes: widget.nodes,
       board: _workshopVisibleBoard(),
@@ -1832,10 +1871,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
       if (!mounted) return;
       final size = context.size;
       if (size == null || size.isEmpty) return;
-      final origin = Offset(
-        MindmapCanvas.canvasSize.width / 2,
-        MindmapCanvas.canvasSize.height / 2,
-      );
+      final origin = _sceneOrigin;
       final center = _transformationController.toScene(
         Offset(size.width / 2, size.height / 2),
       );
@@ -1920,10 +1956,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final centerLocal = Offset(viewportSize.width / 2, viewportSize.height / 2);
     final sceneCenter = _transformationController.toScene(centerLocal);
 
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
 
     return sceneCenter - origin;
   }
@@ -2046,13 +2079,20 @@ class MindmapCanvasState extends State<MindmapCanvas>
     if (object != null) _selectCanvasObject(object);
   }
 
+  @visibleForTesting
+  Rect get sceneWorldBounds => _sceneBounds.worldRect;
+
+  @visibleForTesting
+  Rect minimapWorldBoundsForTest() {
+    final size = context.size ?? Size.zero;
+    final scene = _minimapSceneBounds(size);
+    return scene.shift(-_sceneOrigin);
+  }
+
   CanvasViewport get currentViewport {
     final size = context.size;
     if (size == null || size.isEmpty) return const CanvasViewport();
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final center = _transformationController.toScene(
       Offset(size.width / 2, size.height / 2),
     );
@@ -2109,10 +2149,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
         )
         .clamp(0.04, 1.0)
         .toDouble();
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final position = _positionFor(node);
     final targetScene =
         origin +
@@ -2137,10 +2174,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final viewportSize = context.size;
     if (viewportSize == null) return;
 
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
 
     final targetScene = origin + Offset(pos.dx, pos.dy);
 
@@ -2161,10 +2195,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
         (_selectedNodeIds.isEmpty && _selectedCanvasObjectIds.isEmpty)) {
       return;
     }
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     Rect? bounds;
     for (final node in widget.nodes) {
       if (!_selectedNodeIds.contains(node.id)) continue;
@@ -2191,10 +2222,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   void _fitBoard() {
     final viewportSize = context.size;
     if (viewportSize == null) return;
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     Rect? bounds;
     for (final entry in _navigationIndex.entries) {
       final rect = entry.bounds.shift(origin);
@@ -2342,10 +2370,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     if (source == null) {
       final size = context.size;
       if (size == null) return null;
-      final origin = Offset(
-        MindmapCanvas.canvasSize.width / 2,
-        MindmapCanvas.canvasSize.height / 2,
-      );
+      final origin = _sceneOrigin;
       source =
           _transformationController.toScene(
             Offset(size.width / 2, size.height / 2),
@@ -2533,8 +2558,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
     if (viewportSize == null) return;
 
     final targetMatrix = Matrix4.translationValues(
-      (viewportSize.width - MindmapCanvas.canvasSize.width) / 2,
-      (viewportSize.height - MindmapCanvas.canvasSize.height) / 2,
+      viewportSize.width / 2 - _sceneOrigin.dx,
+      viewportSize.height / 2 - _sceneOrigin.dy,
       0,
     );
 
@@ -2589,10 +2614,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   Offset _alignedCanvasPositionFromScene(Offset scenePosition, NodeType type) {
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final nodeSize = type == NodeType.kanban
         ? MindmapCanvas.kanbanNodeSize
         : MindmapCanvas.nodeSize;
@@ -2665,10 +2687,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   CanvasObject? _canvasObjectAtScene(Offset scenePosition) {
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     for (final object in _orderedCanvasObjects().reversed) {
       if (!object.isVisible || object.type == CanvasObjectType.nodeReference) {
         continue;
@@ -2689,10 +2708,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final type = _creationObjectType;
     final callback = widget.onCanvasObjectCreated;
     if (type == null || callback == null) return;
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     if (type == CanvasObjectType.connector && _connectorStartScene == null) {
       setState(() {
         _connectorStartScene = scenePosition;
@@ -3773,12 +3789,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     if (box != null) {
       final local = box.globalToLocal(globalPosition);
       final scene = _transformationController.toScene(local);
-      _canvasObjectDropBoardPosition =
-          scene -
-          Offset(
-            MindmapCanvas.canvasSize.width / 2,
-            MindmapCanvas.canvasSize.height / 2,
-          );
+      _canvasObjectDropBoardPosition = _sceneBounds.sceneToWorld(scene);
     }
     if (previous == null) return;
     final scale = _canvasScale(_transformationController.value);
@@ -3988,6 +3999,30 @@ class MindmapCanvasState extends State<MindmapCanvas>
               )
               .firstOrNull
         : null;
+    _expandSceneToInclude(<Rect>[
+      for (final movingObject in movingObjects)
+        if (!movingObject.isLocked)
+          () {
+            final raw = _canvasObjectRawDragGeometries[movingObject.id]!;
+            return Rect.fromLTWH(
+              raw.x + smartDelta.dx,
+              raw.y + smartDelta.dy,
+              raw.width,
+              raw.height,
+            );
+          }(),
+      for (final movingNode in movingNodes)
+        () {
+          final position = _dragPositions[movingNode.id]!;
+          final size = _nodeSizeFor(movingNode);
+          return Rect.fromLTWH(
+            position.dx,
+            position.dy,
+            size.width,
+            size.height,
+          );
+        }(),
+    ]);
     setState(() {
       _canvasSmartGuides = hasGuides ? guides : null;
       _columnDropTargetId = dropTarget?.id;
@@ -4063,6 +4098,15 @@ class MindmapCanvasState extends State<MindmapCanvas>
           updatedAt: now,
         ),
     ];
+    _expandSceneToInclude(<Rect>[
+      for (final update in updates)
+        Rect.fromLTWH(
+          update.geometry.x,
+          update.geometry.y,
+          update.geometry.width,
+          update.geometry.height,
+        ),
+    ]);
     setState(() {
       for (final update in updates) {
         _canvasObjectGeometryOverrides[update.id] = update.geometry;
@@ -4282,7 +4326,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _canvasObjectGeometryOverrides[object.id] = layout.columnGeometry;
       for (final entry in layout.childBounds.entries) {
         final child = board.objectById(entry.key);
-        if (child == null || child.isLocked) continue;
+        if (child == null) continue;
         _canvasObjectGeometryOverrides[entry.key] = CanvasGeometry(
           x: entry.value.left,
           y: entry.value.top,
@@ -4291,18 +4335,26 @@ class MindmapCanvasState extends State<MindmapCanvas>
         );
       }
     }
-    final movingIds = movingObjects.map((candidate) => candidate.id);
+    final movingIds = <String>{
+      ...movingObjects.map((candidate) => candidate.id),
+      if (object.type == CanvasObjectType.column)
+        ...object.orderedColumnChildIds,
+    };
     final columnUpdates =
         primaryGeometry == null || object.type == CanvasObjectType.column
         ? null
         : _columnDropUpdates(object, _canvasObjectGeometry(object));
+    _expandSceneForContent();
     final updates =
         columnUpdates ??
         movingIds
             .map((id) {
               final candidate = board?.objectById(id);
               final geometry = _canvasObjectGeometryOverrides[id];
-              if (candidate == null || candidate.isLocked || geometry == null) {
+              if (candidate == null ||
+                  geometry == null ||
+                  (candidate.isLocked &&
+                      object.type != CanvasObjectType.column)) {
                 return null;
               }
               final moved = candidate.copyWith(
@@ -4361,18 +4413,23 @@ class MindmapCanvasState extends State<MindmapCanvas>
     }
     final sceneDelta = delta;
     final current = _canvasObjectGeometry(object);
-    setState(() {
-      _canvasObjectGeometryOverrides[object.id] = current.copyWith(
-        width: _snappedCanvasSize(
-          math.max(80, current.width + sceneDelta.dx),
-          minimum: 80,
-        ),
-        height: _snappedCanvasSize(
-          math.max(60, current.height + sceneDelta.dy),
-          minimum: 60,
-        ),
-      );
-    });
+    final minimumWidth = object.type == CanvasObjectType.column
+        ? minimumCanvasColumnWidth
+        : 80.0;
+    final geometry = current.copyWith(
+      width: _snappedCanvasSize(
+        math.max(minimumWidth, current.width + sceneDelta.dx),
+        minimum: minimumWidth,
+      ),
+      height: _snappedCanvasSize(
+        math.max(60, current.height + sceneDelta.dy),
+        minimum: 60,
+      ),
+    );
+    _expandSceneToInclude(<Rect>[
+      Rect.fromLTWH(geometry.x, geometry.y, geometry.width, geometry.height),
+    ]);
+    setState(() => _canvasObjectGeometryOverrides[object.id] = geometry);
   }
 
   double _snappedCanvasSize(double value, {required double minimum}) {
@@ -5222,10 +5279,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   void _updateConnectorDraft(Offset scenePosition) {
     final start = _connectorStartScene;
     if (start == null) return;
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final startBoard = start - origin;
     final endBoard = scenePosition - origin;
     final route = switch (_connectorAppearance.style) {
@@ -5323,10 +5377,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final points = _toolDraft.takeFreehand(pointer);
     final callback = widget.onCanvasObjectCreated;
     if (points.length < 2 || callback == null) return;
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final boardPoints = points.map((point) => point - origin).toList();
     final minX = boardPoints.map((point) => point.dx).reduce(math.min);
     final minY = boardPoints.map((point) => point.dy).reduce(math.min);
@@ -5411,13 +5462,40 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   Rect _minimapSceneBounds(Size viewportSize) {
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     var bounds = _viewportRectInSceneOf(viewportSize);
     for (final entry in _navigationIndex.entries) {
       bounds = bounds.expandToInclude(entry.bounds.shift(origin));
+    }
+    for (final geometry in _canvasObjectGeometryOverrides.values) {
+      bounds = bounds.expandToInclude(
+        Rect.fromLTWH(
+          geometry.x + origin.dx,
+          geometry.y + origin.dy,
+          geometry.width,
+          geometry.height,
+        ),
+      );
+    }
+    final optimisticNodeIds = <String>{
+      ..._dragPositions.keys,
+      ..._resizeChanges.keys,
+    };
+    for (final id in optimisticNodeIds) {
+      final node = widget.nodes
+          .where((candidate) => candidate.id == id)
+          .firstOrNull;
+      if (node == null) continue;
+      final position = _positionFor(node);
+      final size = _nodeSizeFor(node);
+      bounds = bounds.expandToInclude(
+        Rect.fromLTWH(
+          position.dx + origin.dx,
+          position.dy + origin.dy,
+          size.width,
+          size.height,
+        ),
+      );
     }
     if (bounds.width < 1200 || bounds.height < 800) {
       bounds = Rect.fromCenter(
@@ -5437,8 +5515,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final targetY = contentBounds.top + pctY * contentBounds.height;
 
     final pos = CanvasPosition(
-      targetX - MindmapCanvas.canvasSize.width / 2,
-      targetY - MindmapCanvas.canvasSize.height / 2,
+      targetX - _sceneOrigin.dx,
+      targetY - _sceneOrigin.dy,
     );
 
     final currentScale = _canvasScale(_transformationController.value);
@@ -5480,10 +5558,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final currentMatrix = _transformationController.value;
     final currentScale = _canvasScale(currentMatrix);
 
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
 
     final sceneX = origin.dx + peerPos.dx;
     final sceneY = origin.dy + peerPos.dy;
@@ -5529,6 +5604,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
         oldWidget.expandedNodeId != widget.expandedNodeId ||
         oldWidget.expandedNodeOverride != widget.expandedNodeOverride) {
       _nodeSizes = _effectiveNodeSizes();
+    }
+    if (oldWidget.nodes != widget.nodes || oldWidget.board != widget.board) {
+      _expandSceneForContent();
     }
     _handleExpandedFocusTransition(oldWidget.expandedNodeId);
     final collapsedNodeId = oldWidget.expandedNodeId;
@@ -5704,10 +5782,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
             constraints.maxWidth >= 840 && constraints.maxHeight >= 520;
         final leftOverlayInset = showMiroToolRail ? 80.0 : 16.0;
 
-        final origin = Offset(
-          MindmapCanvas.canvasSize.width / 2,
-          MindmapCanvas.canvasSize.height / 2,
-        );
+        final origin = _sceneOrigin;
         return RepaintBoundary(
           key: _canvasExportKey,
           child: ClipRect(
@@ -5969,14 +6044,13 @@ class MindmapCanvasState extends State<MindmapCanvas>
 
                             final scenePosition = _transformationController
                                 .toScene(event.localPosition);
-                            final canvasOrigin = Offset(
-                              MindmapCanvas.canvasSize.width / 2,
-                              MindmapCanvas.canvasSize.height / 2,
+                            final worldPosition = _sceneBounds.sceneToWorld(
+                              scenePosition,
                             );
                             focusOnPosition(
                               CanvasPosition(
-                                scenePosition.dx - canvasOrigin.dx,
-                                scenePosition.dy - canvasOrigin.dy,
+                                worldPosition.dx,
+                                worldPosition.dy,
                               ),
                               scale: 1.5,
                             );
@@ -6000,7 +6074,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
                             transformationController: _transformationController,
                             constrained: false,
                             boundaryMargin: EdgeInsets.all(
-                              MindmapCanvas.canvasSize.shortestSide * 0.2,
+                              math.max(
+                                    _sceneBounds.sceneSize.width,
+                                    _sceneBounds.sceneSize.height,
+                                  ) *
+                                  0.2,
                             ),
                             minScale: 0.04,
                             maxScale: 2.4,
@@ -6018,8 +6096,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                 }
                               },
                               child: SizedBox(
-                                width: MindmapCanvas.canvasSize.width,
-                                height: MindmapCanvas.canvasSize.height,
+                                width: _sceneBounds.sceneSize.width,
+                                height: _sceneBounds.sceneSize.height,
                                 child: MouseRegion(
                                   onHover: (event) {
                                     widget.onLocalCursorChanged?.call(
@@ -8721,10 +8799,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
           builder: (context, constraints) {
             final scaleX = constraints.maxWidth / contentBounds.width;
             final scaleY = constraints.maxHeight / contentBounds.height;
-            final origin = Offset(
-              MindmapCanvas.canvasSize.width / 2,
-              MindmapCanvas.canvasSize.height / 2,
-            );
+            final origin = _sceneOrigin;
             return Focus(
               key: const ValueKey('mindmap-minimap-focus'),
               onKeyEvent: (_, event) => _handleMinimapKey(
@@ -8769,6 +8844,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                   viewportSize,
                                 ),
                                 contentBounds: contentBounds,
+                                origin: origin,
                                 nodeColors: nodeColors,
                               ),
                             ),
@@ -8820,10 +8896,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     if (_didSetInitialTransform || !viewport.width.isFinite) return;
     final saved = widget.board?.viewport ?? const CanvasViewport();
     final scale = saved.scale.clamp(0.04, 2.4).toDouble();
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final target = origin + Offset(saved.x, saved.y);
     _didSetInitialTransform = true;
     _transformationController.value =
@@ -8862,6 +8935,14 @@ class MindmapCanvasState extends State<MindmapCanvas>
       basePosition.dx + change.positionDelta.dx,
       basePosition.dy + change.positionDelta.dy,
     );
+    _expandSceneToInclude(<Rect>[
+      Rect.fromLTWH(
+        targetPosition.dx,
+        targetPosition.dy,
+        change.size.width,
+        change.size.height,
+      ),
+    ]);
     setState(() {
       _resizeChanges[node.id] = _NodeResizeOverride(
         basePosition: basePosition,
@@ -9161,13 +9242,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     return <_SmartGuideGeometry>[
       for (final object in _orderedCanvasObjects())
         if (_isWorkshopObjectVisible(object) &&
-            _isCanvasObjectVisible(
-              object,
-              Offset(
-                MindmapCanvas.canvasSize.width / 2,
-                MindmapCanvas.canvasSize.height / 2,
-              ),
-            ) &&
+            _isCanvasObjectVisible(object, _sceneOrigin) &&
             !excludedObjectIds.contains(object.id) &&
             !(object.type == CanvasObjectType.nodeReference &&
                 liveNodeIds.contains(object.mindmapNodeId)))
@@ -9337,17 +9412,30 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _nodeEngagedGuides = null;
     }
     final translation = Offset(dx, dy);
+    for (final movingNode in movingNodes) {
+      final position = _nodeRawDragPositions[movingNode.id]!;
+      _dragPositions[movingNode.id] = CanvasPosition(
+        position.dx + translation.dx,
+        position.dy + translation.dy,
+      );
+    }
+    _expandSceneToInclude(<Rect>[
+      for (final movingNode in movingNodes)
+        () {
+          final position = _dragPositions[movingNode.id]!;
+          final nodeSize = _nodeSizeFor(movingNode);
+          return Rect.fromLTWH(
+            position.dx,
+            position.dy,
+            nodeSize.width,
+            nodeSize.height,
+          );
+        }(),
+    ]);
     setState(() {
       _canvasSmartGuides = guides.vertical != null || guides.horizontal != null
           ? guides
           : null;
-      for (final movingNode in movingNodes) {
-        final position = _nodeRawDragPositions[movingNode.id]!;
-        _dragPositions[movingNode.id] = CanvasPosition(
-          position.dx + translation.dx,
-          position.dy + translation.dy,
-        );
-      }
     });
   }
 
@@ -9595,19 +9683,13 @@ class MindmapCanvasState extends State<MindmapCanvas>
   Offset _nodeOutputScenePoint(MindmapNode node) {
     final position = _positionFor(node);
     final size = _nodeSizeFor(node);
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     return origin +
         Offset(position.dx + size.width, position.dy + _nodePortY(size));
   }
 
   MindmapNode? _nodeAtScene(Offset scenePosition, [String? sourceId]) {
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     for (final node in widget.nodes.reversed) {
       if (sourceId != null && node.id == sourceId) continue;
       final pos = _positionFor(node);
@@ -9624,10 +9706,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   bool _connectionAtScene(Offset scenePosition) {
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
+    final origin = _sceneOrigin;
     final nodesById = {for (final node in widget.nodes) node.id: node};
     for (final source in widget.nodes) {
       final sourcePosition = _positionFor(source);
@@ -9844,108 +9923,114 @@ class _ConnectionTargetMenuPanelState
               })
               .toList(growable: false);
 
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        key: const ValueKey('connection-target-menu-panel'),
-        width: 320,
-        constraints: const BoxConstraints(maxHeight: 430),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.98),
-          borderRadius: BorderRadius.circular(tokens.radiusContainer),
-          border: Border.all(
+    final borderRadius = BorderRadius.circular(tokens.radiusContainer);
+    return DecoratedBox(
+      key: const ValueKey('connection-target-menu-panel'),
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        boxShadow: tokens.shadowHigh,
+      ),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.98),
+        shape: RoundedRectangleBorder(
+          borderRadius: borderRadius,
+          side: BorderSide(
             color: theme.colorScheme.outlineVariant.withValues(alpha: 0.62),
           ),
-          boxShadow: tokens.shadowHigh,
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(2, 4, 2, 10),
-                child: Text(
-                  'Connect ${widget.source.title} to...',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              TextField(
-                controller: _searchController,
-                autofocus: true,
-                minLines: 1,
-                maxLines: 1,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Search node or type...',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 18),
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Clear search',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: _searchController.clear,
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                        ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 9,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (targets.isNotEmpty) ...[
-                const _ConnectionMenuSectionLabel(label: 'Existing nodes'),
-                for (final node in targets)
-                  _ConnectionTargetTile(
-                    icon: NodeVisuals.icon(node.type),
-                    color: NodeVisuals.color(context, node.type),
-                    title: node.title,
-                    subtitle: widget.compatibleTypes.contains(node.type)
-                        ? 'Suggested ${node.type.label}'
-                        : node.type.label,
-                    onTap: () => widget.onSelect(node),
-                  ),
-              ],
-              if (createTypes.isNotEmpty) ...[
-                if (targets.isNotEmpty) const SizedBox(height: 8),
-                _ConnectionMenuSectionLabel(
-                  label: targets.isEmpty
-                      ? 'Recommended new nodes'
-                      : 'Create linked node',
-                ),
-                for (final type in createTypes)
-                  _ConnectionTargetTile(
-                    icon: NodeVisuals.icon(type),
-                    color: NodeVisuals.color(context, type),
-                    title: 'Create ${type.label}',
-                    subtitle: 'Recommended for ${widget.source.type.label}',
-                    onTap: () => widget.onSelect(type),
-                  ),
-              ],
-              if (targets.isEmpty && createTypes.isEmpty)
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          width: 320,
+          constraints: const BoxConstraints(maxHeight: 430),
+          padding: const EdgeInsets.all(10),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Text(
-                      'No connection target found',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
+                  padding: const EdgeInsets.fromLTRB(2, 4, 2, 10),
+                  child: Text(
+                    'Connect ${widget.source.title} to...',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-            ],
+                TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  minLines: 1,
+                  maxLines: 1,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search node or type...',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _searchController.clear,
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                          ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if (targets.isNotEmpty) ...[
+                  const _ConnectionMenuSectionLabel(label: 'Existing nodes'),
+                  for (final node in targets)
+                    _ConnectionTargetTile(
+                      icon: NodeVisuals.icon(node.type),
+                      color: NodeVisuals.color(context, node.type),
+                      title: node.title,
+                      subtitle: widget.compatibleTypes.contains(node.type)
+                          ? 'Suggested ${node.type.label}'
+                          : node.type.label,
+                      onTap: () => widget.onSelect(node),
+                    ),
+                ],
+                if (createTypes.isNotEmpty) ...[
+                  if (targets.isNotEmpty) const SizedBox(height: 8),
+                  _ConnectionMenuSectionLabel(
+                    label: targets.isEmpty
+                        ? 'Recommended new nodes'
+                        : 'Create linked node',
+                  ),
+                  for (final type in createTypes)
+                    _ConnectionTargetTile(
+                      icon: NodeVisuals.icon(type),
+                      color: NodeVisuals.color(context, type),
+                      title: 'Create ${type.label}',
+                      subtitle: 'Recommended for ${widget.source.type.label}',
+                      onTap: () => widget.onSelect(type),
+                    ),
+                ],
+                if (targets.isEmpty && createTypes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Text(
+                        'No connection target found',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -11619,8 +11704,10 @@ class _ShapeToolSettings extends StatelessWidget {
     runSpacing: 6,
     children: [
       for (final shape in CanvasShapeKind.values)
-        Tooltip(
-          message: shape.name,
+        Semantics(
+          button: true,
+          selected: selected == shape,
+          label: shape.name,
           child: InkWell(
             key: ValueKey('canvas-shape-${shape.name}'),
             borderRadius: BorderRadius.circular(8),
@@ -15267,24 +15354,14 @@ class _InteractiveBackgroundPainter extends CustomPainter {
     final rect = Offset.zero & size;
 
     final palette = AppThemeVariantColors.of(variant);
-    final bgColors = isDark
-        ? [palette.darkBg, palette.darkSurface, palette.darkBg]
-        : [palette.lightBg, palette.lightSurface, palette.lightBg];
-
     canvas.drawRect(
       rect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: bgColors,
-        ).createShader(rect),
+      Paint()..color = isDark ? palette.darkBg : palette.lightBg,
     );
 
     if (showGrid) {
       _drawCanvasGuides(canvas, size, guideOffset);
     }
-    _drawCanvasVignette(canvas, rect);
   }
 
   void _drawCanvasGuides(Canvas canvas, Size size, Offset guideOffset) {
@@ -15357,15 +15434,6 @@ class _InteractiveBackgroundPainter extends CustomPainter {
     for (var y = startY; y <= size.height + step; y += step) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), guidePaint);
     }
-  }
-
-  void _drawCanvasVignette(Canvas canvas, Rect rect) {
-    final vignettePaint = Paint()
-      ..shader = RadialGradient(
-        colors: [Colors.transparent, Colors.black.withValues(alpha: 0.2)],
-        stops: const [0.55, 1],
-      ).createShader(rect);
-    canvas.drawRect(rect, vignettePaint);
   }
 
   @override
@@ -16161,6 +16229,7 @@ class _MinimapPainter extends CustomPainter {
     required this.nodeSizes,
     required this.viewportRect,
     required this.contentBounds,
+    required this.origin,
     required this.nodeColors,
   });
 
@@ -16171,6 +16240,7 @@ class _MinimapPainter extends CustomPainter {
   final Map<String, Size> nodeSizes;
   final Rect viewportRect;
   final Rect contentBounds;
+  final Offset origin;
   final Map<NodeType, Color> nodeColors;
 
   @override
@@ -16178,10 +16248,6 @@ class _MinimapPainter extends CustomPainter {
     final scaleX = size.width / contentBounds.width;
     final scaleY = size.height / contentBounds.height;
 
-    final origin = Offset(
-      MindmapCanvas.canvasSize.width / 2,
-      MindmapCanvas.canvasSize.height / 2,
-    );
     Offset mapPoint(Offset point) => Offset(
       (point.dx - contentBounds.left) * scaleX,
       (point.dy - contentBounds.top) * scaleY,

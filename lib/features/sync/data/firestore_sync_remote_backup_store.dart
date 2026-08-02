@@ -54,6 +54,8 @@ final class FirestoreSyncRemoteBackupStore implements SyncRemoteBackupStore {
         'sourceDevice':
             metadata['sourceDevice'] ?? const {'id': 'unknown', 'label': ''},
         'nodes': [for (final node in nodes) node.toJson()],
+        if (metadata['warnings'] case final List<Object?> warnings)
+          'warnings': warnings,
       });
     } on FormatException catch (error) {
       throw SyncRemoteStoreException(
@@ -73,6 +75,11 @@ final class FirestoreSyncRemoteBackupStore implements SyncRemoteBackupStore {
     SyncUser user,
     MindmapBackupDocument document,
   ) async {
+    if (document.attachments.isNotEmpty) {
+      throw const SyncRemoteStoreException(
+        'Remote backup cannot contain attachment payloads.',
+      );
+    }
     try {
       final userRef = _userRef(user);
       final nodesRef = userRef.collection('nodes');
@@ -85,6 +92,10 @@ final class FirestoreSyncRemoteBackupStore implements SyncRemoteBackupStore {
           'exportedAt': document.exportedAt.toIso8601String(),
           'sourceDevice': document.sourceDevice.toJson(),
           'nodeCount': document.nodes.length,
+          if (document.warnings.isNotEmpty)
+            'warnings': [
+              for (final warning in document.warnings) warning.toJson(),
+            ],
           'updatedAt': FieldValue.serverTimestamp(),
         }),
         for (final node in document.nodes)

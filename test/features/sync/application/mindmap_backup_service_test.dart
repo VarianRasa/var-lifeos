@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
+import 'package:var_app/features/mindmap/data/local_node_attachment_repository_web.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/sync/application/mindmap_backup_service.dart';
 import 'package:var_app/features/sync/application/portable_backup_codec.dart';
@@ -26,6 +27,53 @@ void main() {
     expect(document.exportedAt, DateTime(2026, 6, 18, 12));
     expect(document.sourceDevice.id, 'device-a');
     expect(document.nodes, [node]);
+  });
+
+  test('cloud backup omits attachment payloads', () async {
+    final attachments = MemoryNodeAttachmentRepository(maxTotalBytes: 1024);
+    final attachment = await attachments.importBytes(
+      bytes: const [1, 2, 3],
+      fileName: 'photo.png',
+      mimeType: 'image/png',
+    );
+    final node = _node(
+      id: 'image-1',
+      title: 'Image',
+      now: DateTime(2026, 6, 18, 9),
+    ).copyWith(data: {'attachmentId': attachment.id});
+    final service = MindmapBackupService(
+      repository: InMemoryMindmapRepository(seedNodes: [node]),
+      sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+      attachmentRepository: attachments,
+    );
+
+    final cloud = await service.createCloudBackup();
+    final portable = await service.createBackup();
+
+    expect(cloud.nodes, [node]);
+    expect(cloud.attachments, isEmpty);
+    expect(cloud.warnings, isEmpty);
+    expect(portable.attachments.single.attachment.id, attachment.id);
+    expect(portable.attachments.single.decodePayload(), [1, 2, 3]);
+  });
+
+  test('cloud backup warns when attachment metadata is missing', () async {
+    const missingId = '00000000-0000-4000-8000-000000000099';
+    final node = _node(
+      id: 'image-1',
+      title: 'Image',
+      now: DateTime(2026, 6, 18, 9),
+    ).copyWith(data: {'attachmentId': missingId});
+    final service = MindmapBackupService(
+      repository: InMemoryMindmapRepository(seedNodes: [node]),
+      sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+      attachmentRepository: MemoryNodeAttachmentRepository(maxTotalBytes: 1024),
+    );
+
+    final cloud = await service.createCloudBackup();
+
+    expect(cloud.attachments, isEmpty);
+    expect(cloud.warnings.single.attachmentId, missingId);
   });
 
   test('imports a backup by applying remote saves and deletes', () async {
@@ -102,6 +150,48 @@ void main() {
     expect((await repository.getNode('note-1'))?.title, 'Local edit');
   });
 
+  test('previews encrypted portable import without mutation', () async {
+    final local = _node(
+      id: 'local-only',
+      title: 'Local only',
+      now: DateTime(2026, 6, 19, 9),
+    );
+    final remote = _node(
+      id: 'remote-only',
+      title: 'Remote only',
+      now: DateTime(2026, 6, 19, 10),
+    );
+    final localRepository = InMemoryMindmapRepository(seedNodes: [local]);
+    final remoteRepository = InMemoryMindmapRepository(seedNodes: [remote]);
+    final codec = PortableMindmapBackupCodec(
+      iterations: PortableMindmapBackupCodec.minKdfIterations,
+      randomBytes: _deterministicRandomBytes(),
+    );
+    final localService = MindmapBackupService(
+      repository: localRepository,
+      sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
+      portableCodec: codec,
+    );
+    final remoteService = MindmapBackupService(
+      repository: remoteRepository,
+      sourceDevice: const SyncDeviceIdentity(id: 'device-b', label: 'Tablet'),
+      portableCodec: codec,
+    );
+    final package = await remoteService.createPortableBackup(
+      passphrase: 'shared-secret',
+    );
+
+    final preview = await localService.previewPortableImport(
+      package.package,
+      passphrase: 'shared-secret',
+    );
+
+    expect(preview.document.nodes.single.id, 'remote-only');
+    expect(preview.plan.nodesToSave.single.id, 'remote-only');
+    expect(preview.plan.nodeIdsToDelete, ['local-only']);
+    expect((await localRepository.listNodes()).single.id, 'local-only');
+  });
+
   test('exports and imports encrypted portable backup packages', () async {
     final sourceRepository = InMemoryMindmapRepository(
       seedNodes: [
@@ -114,7 +204,7 @@ void main() {
     );
     final targetRepository = InMemoryMindmapRepository();
     final codec = PortableMindmapBackupCodec(
-      iterations: 2,
+      iterations: PortableMindmapBackupCodec.minKdfIterations,
       randomBytes: _deterministicRandomBytes(),
     );
     final sourceService = MindmapBackupService(

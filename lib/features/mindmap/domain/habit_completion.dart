@@ -17,11 +17,37 @@ MindmapNode logHabitCompletion(
   final nextKeys = {...existingKeys, dayKey(normalizedDay)}.toList()..sort();
   if (nextKeys.length == existingKeys.length) return node;
 
+  return _withHabitCompletions(node, nextKeys, now: now);
+}
+
+MindmapNode removeHabitCompletion(
+  MindmapNode node,
+  DateTime day, {
+  DateTime? now,
+}) {
+  if (node.type != NodeType.habit) return node;
+
+  final key = dayKey(day.dateOnly);
+  final existingKeys = habitCompletionKeys(node);
+  if (!existingKeys.contains(key)) return node;
+
+  return _withHabitCompletions(
+    node,
+    existingKeys.where((completion) => completion != key).toList(),
+    now: now,
+  );
+}
+
+MindmapNode _withHabitCompletions(
+  MindmapNode node,
+  List<String> completions, {
+  DateTime? now,
+}) {
   final habitData = _habitData(node);
   return node.copyWith(
     data: {
       ...node.data,
-      'habit': {...habitData, 'completions': nextKeys},
+      'habit': {...habitData, 'completions': completions},
     },
     updatedAt: now ?? DateTime.now(),
   );

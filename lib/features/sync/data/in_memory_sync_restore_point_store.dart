@@ -23,15 +23,31 @@ final class InMemorySyncRestorePointStore implements SyncRestorePointStore {
   }
 
   @override
-  Future<void> prune({required int keepLatest}) async {
+  Future<void> prune({required int keepLatest, String? accountEmail}) async {
     if (keepLatest < 0) {
       throw ArgumentError.value(keepLatest, 'keepLatest');
     }
 
-    final retainedIds = (await recent(
-      limit: keepLatest,
-    )).map((point) => point.id).toSet();
-    _points.removeWhere((point) => !retainedIds.contains(point.id));
+    final normalizedAccount = accountEmail?.trim().toLowerCase();
+    final candidates =
+        _points
+            .where(
+              (point) =>
+                  normalizedAccount == null ||
+                  point.accountEmail.toLowerCase() == normalizedAccount,
+            )
+            .toList()
+          ..sort(_compareNewestFirst);
+    final retainedIds = candidates
+        .take(keepLatest)
+        .map((point) => point.id)
+        .toSet();
+    _points.removeWhere(
+      (point) =>
+          (normalizedAccount == null ||
+              point.accountEmail.toLowerCase() == normalizedAccount) &&
+          !retainedIds.contains(point.id),
+    );
   }
 
   @override
@@ -43,8 +59,20 @@ final class InMemorySyncRestorePointStore implements SyncRestorePointStore {
   }
 
   @override
-  Future<List<SyncRestorePoint>> recent({int limit = 5}) async {
-    final points = [..._points]..sort(_compareNewestFirst);
+  Future<List<SyncRestorePoint>> recent({
+    int limit = 5,
+    String? accountEmail,
+  }) async {
+    final normalizedAccount = accountEmail?.trim().toLowerCase();
+    final points =
+        _points
+            .where(
+              (point) =>
+                  normalizedAccount == null ||
+                  point.accountEmail.toLowerCase() == normalizedAccount,
+            )
+            .toList()
+          ..sort(_compareNewestFirst);
     return List.unmodifiable(points.take(limit));
   }
 }

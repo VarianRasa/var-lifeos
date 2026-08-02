@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:var_app/core/constants/app_constants.dart';
@@ -210,6 +211,12 @@ void main() {
     expect(find.byTooltip('Zoom out'), findsOneWidget);
     expect(find.byTooltip('Reset graph view'), findsOneWidget);
     expect(find.byTooltip('Zoom in'), findsOneWidget);
+    expect(find.byTooltip('Show graph node list'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show graph node list'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Graph nodes'), findsOneWidget);
+    expect(find.text('Launch task'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Zoom in'));
     await tester.pumpAndSettle();
@@ -348,6 +355,46 @@ void main() {
     expect(find.text('No links in this view'), findsOneWidget);
   });
 
+  testWidgets('GraphPage opens focused node as day highlight', (tester) async {
+    final repository = InMemoryMindmapRepository(
+      seedNodes: _buildExplorerNodes(),
+    );
+    final router = GoRouter(
+      initialLocation: '/graph',
+      routes: [
+        GoRoute(path: '/graph', builder: (_, _) => const GraphPage()),
+        GoRoute(
+          path: '/calendar/:date',
+          builder: (_, state) => Text(
+            'day=${state.pathParameters['date']} highlight=${state.uri.queryParameters['highlight']}',
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openExplorerList(tester);
+    await _openGraphFilters(tester);
+
+    final focusButton = find.byKey(const ValueKey('graph-focus-node-task-1'));
+    await tester.ensureVisible(focusButton);
+    await tester.tap(focusButton);
+    await tester.pumpAndSettle();
+    final openNode = find.widgetWithText(ActionChip, 'Open inline');
+    await tester.ensureVisible(openNode);
+    await tester.tap(openNode);
+    await tester.pumpAndSettle();
+
+    expect(find.text('day=2026-06-18 highlight=task-1'), findsOneWidget);
+  });
+
   testWidgets('GraphPage focuses a node neighborhood', (tester) async {
     final repository = InMemoryMindmapRepository(
       seedNodes: _buildExplorerNodes(),
@@ -451,6 +498,36 @@ void main() {
     expect(find.text('Launch task -> Daily standup'), findsOneWidget);
     expect(find.text('Launch task -> Release context'), findsOneWidget);
     expect(find.text('Ship v1 -> Launch task'), findsNothing);
+  });
+  testWidgets('GraphPage rejects invalid saved filter JSON', (tester) async {
+    final repository = InMemoryMindmapRepository(
+      seedNodes: _buildExplorerNodes(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(home: GraphPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openGraphFilters(tester);
+
+    await tester.tap(find.byTooltip('Graph filter import/export'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import JSON'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Graph filters JSON',
+      ),
+      '{not valid json}',
+    );
+    await tester.tap(find.text('Import'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Invalid graph filters JSON'), findsOneWidget);
   });
 }
 

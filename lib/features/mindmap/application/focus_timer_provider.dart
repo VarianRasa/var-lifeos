@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -26,6 +27,12 @@ class FocusTimerState {
     this.selectedNodeId,
     this.selectedNodeTitle,
     required this.completedSessionsCount,
+    this.workDurationMinutes = 25,
+    this.shortBreakMinutes = 5,
+    this.longBreakMinutes = 15,
+    this.sessionsPerCycle = 4,
+    this.autoStartBreaks = false,
+    this.autoStartFocus = false,
   });
 
   final int durationSeconds;
@@ -35,6 +42,12 @@ class FocusTimerState {
   final String? selectedNodeId;
   final String? selectedNodeTitle;
   final int completedSessionsCount;
+  final int workDurationMinutes;
+  final int shortBreakMinutes;
+  final int longBreakMinutes;
+  final int sessionsPerCycle;
+  final bool autoStartBreaks;
+  final bool autoStartFocus;
 
   int get remainingSeconds =>
       (durationSeconds - elapsedSeconds).clamp(0, durationSeconds);
@@ -50,6 +63,12 @@ class FocusTimerState {
     String? Function()? selectedNodeId,
     String? Function()? selectedNodeTitle,
     int? completedSessionsCount,
+    int? workDurationMinutes,
+    int? shortBreakMinutes,
+    int? longBreakMinutes,
+    int? sessionsPerCycle,
+    bool? autoStartBreaks,
+    bool? autoStartFocus,
   }) {
     return FocusTimerState(
       durationSeconds: durationSeconds ?? this.durationSeconds,
@@ -64,6 +83,12 @@ class FocusTimerState {
           : this.selectedNodeTitle,
       completedSessionsCount:
           completedSessionsCount ?? this.completedSessionsCount,
+      workDurationMinutes: workDurationMinutes ?? this.workDurationMinutes,
+      shortBreakMinutes: shortBreakMinutes ?? this.shortBreakMinutes,
+      longBreakMinutes: longBreakMinutes ?? this.longBreakMinutes,
+      sessionsPerCycle: sessionsPerCycle ?? this.sessionsPerCycle,
+      autoStartBreaks: autoStartBreaks ?? this.autoStartBreaks,
+      autoStartFocus: autoStartFocus ?? this.autoStartFocus,
     );
   }
 }
@@ -82,6 +107,15 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
 
   final Ref _ref;
   Timer? _timer;
+  AudioPlayer? _audioPlayer;
+
+  Future<void> _playAlertSound() async {
+    try {
+      _audioPlayer ??= AudioPlayer();
+      await _audioPlayer!.setAsset('assets/sounds/timer_bell.wav');
+      await _audioPlayer!.play();
+    } catch (_) {}
+  }
 
   void start() {
     if (state.isRunning) return;
@@ -108,7 +142,38 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
 
   void setDuration(int minutes) {
     pause();
-    state = state.copyWith(durationSeconds: minutes * 60, elapsedSeconds: 0);
+    state = state.copyWith(
+      workDurationMinutes: minutes,
+      durationSeconds: minutes * 60,
+      elapsedSeconds: 0,
+    );
+  }
+
+  void updateCustomDurations({
+    required int workMins,
+    required int shortBreakMins,
+    required int longBreakMins,
+    required int sessionsPerCycle,
+    required bool autoStartBreaks,
+    required bool autoStartFocus,
+  }) {
+    pause();
+    final newDurationSeconds = (state.phase == FocusTimerPhase.focus)
+        ? workMins * 60
+        : (state.phase == FocusTimerPhase.shortBreak
+              ? shortBreakMins * 60
+              : longBreakMins * 60);
+
+    state = state.copyWith(
+      workDurationMinutes: workMins,
+      shortBreakMinutes: shortBreakMins,
+      longBreakMinutes: longBreakMins,
+      sessionsPerCycle: sessionsPerCycle,
+      autoStartBreaks: autoStartBreaks,
+      autoStartFocus: autoStartFocus,
+      durationSeconds: newDurationSeconds,
+      elapsedSeconds: 0,
+    );
   }
 
   void selectNode(String? id, String? title) {
@@ -130,6 +195,8 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
     _timer?.cancel();
     _timer = null;
 
+    unawaited(_playAlertSound());
+
     final completedPhase = state.phase;
     final durationMins = (state.durationSeconds / 60).round();
     final completedTaskId = state.selectedNodeId;
@@ -142,13 +209,14 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
 
       await _logFocusSession(durationMins, completedTaskId, completedTaskTitle);
 
-      final nextPhase = (state.completedSessionsCount % 4 == 0)
+      final nextPhase =
+          (state.completedSessionsCount % state.sessionsPerCycle == 0)
           ? FocusTimerPhase.longBreak
           : FocusTimerPhase.shortBreak;
 
       final nextDuration = nextPhase == FocusTimerPhase.longBreak
-          ? 15 * 60
-          : 5 * 60;
+          ? state.longBreakMinutes * 60
+          : state.shortBreakMinutes * 60;
 
       state = state.copyWith(
         phase: nextPhase,
@@ -156,13 +224,21 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
         elapsedSeconds: 0,
         isRunning: false,
       );
+
+      if (state.autoStartBreaks) {
+        start();
+      }
     } else {
       state = state.copyWith(
         phase: FocusTimerPhase.focus,
-        durationSeconds: 25 * 60,
+        durationSeconds: state.workDurationMinutes * 60,
         elapsedSeconds: 0,
         isRunning: false,
       );
+
+      if (state.autoStartFocus) {
+        start();
+      }
     }
   }
 
@@ -227,12 +303,35 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
 
     await repository.saveNode(updatedNode);
 
+    if (taskId != null) {
+      final taskNode = dayNodes.firstWhere(
+        (n) => n.id == taskId,
+        orElse: () => journalNode!,
+      );
+      if (taskNode.id == taskId) {
+        final taskData = Map<String, Object?>.from(
+          taskNode.data['task'] as Map? ?? const {},
+        );
+        final prevFocusSeconds = (taskData['actualMinutes'] as num? ?? 0) * 60;
+        final updatedFocusMins = ((prevFocusSeconds + durationMins * 60) / 60)
+            .round();
+        taskData['actualMinutes'] = updatedFocusMins;
+
+        final updatedTaskNode = taskNode.copyWith(
+          data: {...taskNode.data, 'task': taskData},
+          updatedAt: DateTime.now(),
+        );
+        await repository.saveNode(updatedTaskNode);
+      }
+    }
+
     invalidateMindmapStateFromRef(_ref, day: today);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _audioPlayer?.dispose();
     super.dispose();
   }
 }

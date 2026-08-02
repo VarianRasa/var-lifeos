@@ -45,4 +45,36 @@ void main() {
       );
     },
   );
+
+  test(
+    'buildWorkloadBalancePlan ignores someday and inbox nodes in load density & movement',
+    () {
+      final day = DateTime(2026, 7, 1);
+      final light = DateTime(2026, 7, 2);
+      final plan = buildWorkloadBalancePlan(
+        candidateDays: [day, light],
+        overloadThreshold: 2,
+        nodes: [
+          MindmapNode.create(
+            id: 'someday-item',
+            type: NodeType.task,
+            title: 'Someday task',
+            day: day,
+            status: NodeStatus.someday,
+          ),
+          MindmapNode.create(
+            id: 'inbox-item',
+            type: NodeType.task,
+            title: 'Inbox task',
+            day: day,
+            status: NodeStatus.inbox,
+          ),
+          task(id: 'open-1', day: day),
+        ],
+      );
+
+      expect(plan.overloadedDays, isEmpty);
+      expect(plan.moves, isEmpty);
+    },
+  );
 }

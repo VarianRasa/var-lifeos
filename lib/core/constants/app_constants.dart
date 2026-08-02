@@ -41,7 +41,10 @@ enum NodeType {
   canvas,
   weather,
   fit,
-  empty;
+  empty,
+  itinerary,
+  image,
+  video;
 
   /// Human-readable label for chips, menus, and dialogs.
   String get label {
@@ -100,6 +103,12 @@ enum NodeType {
         return 'Fitness';
       case NodeType.empty:
         return 'Empty';
+      case NodeType.itinerary:
+        return 'Itinerary';
+      case NodeType.image:
+        return 'Image';
+      case NodeType.video:
+        return 'Video';
     }
   }
 }
@@ -108,9 +117,22 @@ enum NodeType {
 class LayoutConstants {
   const LayoutConstants._();
 
-  /// Breakpoint (in logical pixels) above which we use a desktop layout
-  /// (sidebar nav) instead of mobile (bottom nav).
+  /// Largest width that uses mobile navigation.
+  static const double mobileBreakpoint = 768;
+
+  /// Largest width that uses compact desktop navigation.
+  static const double mediumBreakpoint = 1024;
+
+  /// Width where feature layouts can switch from compact to wide.
+  static const double contentBreakpoint = mobileBreakpoint;
+
+  @Deprecated('Use contentBreakpoint for new feature layouts.')
   static const double desktopBreakpoint = 840;
+
+  static const double compactNavigationWidth = 72;
+  static const double extendedNavigationWidth = 256;
+  static const double inspectorMinWidth = 340;
+  static const double inspectorMaxWidth = 420;
 
   /// Compact target density for data-dense UI.
   static const double denseSpacing = 4;

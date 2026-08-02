@@ -141,4 +141,40 @@ void main() {
     expect(disabled.single.enabled, isFalse);
     expect(disabled.single.rule.isDueOn(DateTime(2026, 6, 26)), isTrue);
   });
+
+  test(
+    'AutomationRuleRecord serializes and deserializes trigger and action fields',
+    () {
+      final now = DateTime(2026, 7, 24);
+      final node = createAutomationRuleNode(
+        id: 'rule-1',
+        label: 'Auto Tag Review',
+        templateId: 'daily-plan',
+        rule: RecurringRule.daily(),
+        day: now,
+        enabled: true,
+        now: now,
+      );
+
+      final updatedData = Map<String, Object?>.from(node.data);
+      final ruleMap = Map<String, Object?>.from(
+        (updatedData[automationRuleDataKey] as Map).cast<String, Object?>(),
+      );
+
+      ruleMap['triggerType'] = AutomationTriggerType.taskCompleted.name;
+      ruleMap['actionType'] = AutomationActionType.autoTag.name;
+      ruleMap['actionTag'] = 'done-review';
+
+      updatedData[automationRuleDataKey] = ruleMap;
+      final finalNode = node.copyWith(data: updatedData);
+
+      final parsedRule = automationRuleFromNode(finalNode);
+
+      expect(parsedRule, isNotNull);
+      expect(parsedRule!.label, 'Auto Tag Review');
+      expect(parsedRule.triggerType, AutomationTriggerType.taskCompleted);
+      expect(parsedRule.actionType, AutomationActionType.autoTag);
+      expect(parsedRule.actionTag, 'done-review');
+    },
+  );
 }

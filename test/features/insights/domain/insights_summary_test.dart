@@ -175,9 +175,9 @@ void main() {
 
     final pulse = InsightsWeeklyPulse.fromNodes(today: today, nodes: nodes);
 
-    expect(pulse.days, hasLength(7));
-    expect(pulse.activeDayCount, 4);
-    expect(pulse.quietDayCount, 3);
+    expect(pulse.days, hasLength(4));
+    expect(pulse.activeDayCount, 3);
+    expect(pulse.quietDayCount, 1);
     expect(pulse.busiestDay, today);
     expect(pulse.busiestDayNodeCount, 3);
     expect(pulse.taskCount, 3);
@@ -185,5 +185,50 @@ void main() {
     expect(pulse.taskCompletionRate, closeTo(1 / 3, 0.001));
     expect(pulse.upcomingTaskCount, 1);
     expect(pulse.days.last.nodeCount, 3);
+  });
+
+  test('weekly review uses explicit range and updatedAt for wins', () {
+    final start = DateTime(2026, 7, 20);
+    final end = DateTime(2026, 7, 22);
+    final nodes = [
+      MindmapNode.create(
+        id: 'win',
+        type: NodeType.task,
+        title: 'Finished old task',
+        day: DateTime(2026, 7, 1),
+        progress: 1,
+        now: DateTime(2026, 7, 21),
+      ),
+      MindmapNode.create(
+        id: 'old-win',
+        type: NodeType.task,
+        title: 'Finished before range',
+        day: start,
+        status: NodeStatus.done,
+        now: DateTime(2026, 7, 19),
+      ),
+      MindmapNode.create(
+        id: 'late',
+        type: NodeType.task,
+        title: 'Late at period end',
+        day: start,
+        dueDate: DateTime(2026, 7, 21),
+        now: start,
+      ),
+      MindmapNode.create(
+        id: 'archived-late',
+        type: NodeType.task,
+        title: 'Archived late',
+        day: start,
+        dueDate: DateTime(2026, 7, 21),
+        isArchived: true,
+        now: start,
+      ),
+    ];
+
+    final review = InsightsWeeklyReview.fromNodes(today: end, nodes: nodes);
+
+    expect(review.completedTasks.map((node) => node.id), ['win']);
+    expect(review.overdueTasks.map((node) => node.id), ['late']);
   });
 }

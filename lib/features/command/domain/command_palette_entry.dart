@@ -65,7 +65,9 @@ List<CommandPaletteEntry> commandPaletteEntriesFromQuery({
       'join'.contains(trimmed.toLowerCase()) ||
       'room'.contains(trimmed.toLowerCase())) {
     for (final code in roomHistory) {
-      entries.add(CommandPaletteEntry.collab('var-collab://var.app/room/$code'));
+      entries.add(
+        CommandPaletteEntry.collab('var-collab://var.app/room/$code'),
+      );
     }
   }
 
@@ -75,8 +77,8 @@ List<CommandPaletteEntry> commandPaletteEntriesFromQuery({
     final rawLink = trimmed.startsWith('/join ')
         ? trimmed.substring(6).trim()
         : trimmed.startsWith('join ')
-            ? trimmed.substring(5).trim()
-            : trimmed;
+        ? trimmed.substring(5).trim()
+        : trimmed;
     if (rawLink.isNotEmpty) {
       final link = rawLink.startsWith('var-collab://')
           ? rawLink

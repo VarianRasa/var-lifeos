@@ -1,22 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'app_colors.dart';
 
-/// Current brightness preference. Defaults to dark (the app's primary look).
+/// Current brightness preference. Defaults to dark.
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>((
   ref,
 ) {
   return ThemeModeNotifier();
 });
 
-/// Current accent color preference. Defaults to lime marker.
-final themeAccentColorProvider =
-    StateNotifierProvider<ThemeAccentColorNotifier, Color>((ref) {
-      return ThemeAccentColorNotifier();
-    });
-
-/// Current theme variant preference (e.g. blackboard, blueprint, schoolboard, midnight, cardboard).
+/// Current Astryx theme preference.
 final themeVariantProvider =
     StateNotifierProvider<ThemeVariantNotifier, AppThemeVariant>((ref) {
       return ThemeVariantNotifier();
@@ -49,32 +44,8 @@ ThemeMode? _themeModeFromName(String? name) {
   return null;
 }
 
-class ThemeAccentColorNotifier extends StateNotifier<Color> {
-  ThemeAccentColorNotifier() : super(const Color(0xFFB6FF00)) {
-    _loadAccentColor();
-  }
-
-  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
-  static const _key = 'theme_accent_color';
-
-  Future<void> _loadAccentColor() async {
-    final hexString = await _prefs.getString(_key);
-    if (hexString != null) {
-      final value = int.tryParse(hexString, radix: 16);
-      if (value != null) {
-        state = Color(value);
-      }
-    }
-  }
-
-  Future<void> setAccentColor(Color color) async {
-    await _prefs.setString(_key, color.toARGB32().toRadixString(16));
-    state = color;
-  }
-}
-
 class ThemeVariantNotifier extends StateNotifier<AppThemeVariant> {
-  ThemeVariantNotifier() : super(AppThemeVariant.blackboard) {
+  ThemeVariantNotifier() : super(AppThemeVariant.astryxNeutral) {
     _loadThemeVariant();
   }
 
@@ -83,25 +54,21 @@ class ThemeVariantNotifier extends StateNotifier<AppThemeVariant> {
 
   Future<void> _loadThemeVariant() async {
     final stored = await _prefs.getString(_key);
-    final variant = _variantFromName(stored);
-    if (variant != null) {
-      state = variant;
-      ThemeVariantConfig.active = variant;
-    }
+    state = _variantFromName(stored);
   }
 
   Future<void> setThemeVariant(AppThemeVariant variant) async {
     await _prefs.setString(_key, variant.name);
     state = variant;
-    ThemeVariantConfig.active = variant;
   }
+}
 
-  AppThemeVariant? _variantFromName(String? name) {
-    for (final variant in AppThemeVariant.values) {
-      if (variant.name == name) return variant;
-    }
-    return null;
+AppThemeVariant _variantFromName(String? name) {
+  for (final variant in AppThemeVariant.values) {
+    if (variant.name == name) return variant;
   }
+  // Retired palettes remain harmless in preferences and fall back to Neutral.
+  return AppThemeVariant.astryxNeutral;
 }
 
 enum AppFontSize {
@@ -113,6 +80,12 @@ enum AppFontSize {
     AppFontSize.small => 0.85,
     AppFontSize.medium => 1.0,
     AppFontSize.large => 1.15,
+  };
+
+  String get label => switch (this) {
+    AppFontSize.small => 'Small',
+    AppFontSize.medium => 'Medium',
+    AppFontSize.large => 'Large',
   };
 }
 
@@ -132,11 +105,10 @@ class ThemeFontSizeNotifier extends StateNotifier<AppFontSize> {
   Future<void> _loadFontSize() async {
     final stored = await _prefs.getString(_key);
     if (stored != null) {
-      final val = AppFontSize.values.firstWhere(
-        (e) => e.name == stored,
+      state = AppFontSize.values.firstWhere(
+        (value) => value.name == stored,
         orElse: () => AppFontSize.medium,
       );
-      state = val;
     }
   }
 
