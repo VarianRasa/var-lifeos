@@ -2,30 +2,50 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sembast/sembast.dart';
 
 import '../../../core/config/runtime_config.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../insights/domain/insights_summary.dart';
+import '../data/aes_gcm_sembast_codec.dart';
+import '../data/canvas_board_repositories.dart';
+import '../data/canvas_board_template_repositories.dart';
+import '../data/collaboration_canvas_board_repository.dart';
+import '../data/collaboration_mindmap_repository.dart';
 import '../data/local_database_mindmap_repository.dart';
+import '../data/local_node_attachment_repository.dart';
 import '../data/mindmap_database_opener.dart';
 import '../data/persistent_mindmap_repository.dart';
 import '../data/seed_mindmap_nodes.dart';
+import '../data/sembast_collaboration_board_sync_store.dart';
+import '../data/sembast_collaboration_sync_store.dart';
+import '../data/sembast_drawing_draft_store.dart';
 import '../data/sembast_mindmap_node_database.dart';
 import '../data/shared_preferences_mindmap_node_store.dart';
 import '../data/xor_sembast_codec.dart';
 import '../domain/automation_suggestion.dart';
+import '../domain/canvas_board.dart';
+import '../domain/canvas_board_repository.dart';
+import '../domain/canvas_board_template.dart';
+import '../domain/canvas_board_template_repository.dart';
 import '../domain/day_node_summary.dart';
 import '../domain/life_os_summary.dart';
 import '../domain/mindmap_node.dart';
+import '../domain/mindmap_node_revision.dart';
+import '../domain/mindmap_node_revision_repository.dart';
 import '../domain/mindmap_repository.dart';
+import '../domain/node_attachment.dart';
 import '../domain/node_graph.dart';
 import '../domain/node_knowledge_index.dart';
 import '../domain/node_relations.dart';
 import '../domain/smart_node_view.dart';
 import '../domain/workspace_context.dart';
+import 'board_template_service.dart';
+import 'collaboration_session.dart';
 import 'database_lock_provider.dart';
+import 'media_file_import_service.dart';
 import 'recurring_routine_application.dart';
 
 final mindmapNodeStoreProvider = Provider<MindmapNodeStore>((ref) {
@@ -44,6 +64,9 @@ final mindmapDatabaseProvider = Provider<Future<Database>>((ref) {
     return completer.future;
   }
   if (lock.unlockedPin != null) {
+    if (lock.keyBytes != null) {
+      return openMindmapDatabase(codec: getAesGcmSembastCodec(lock.keyBytes!));
+    }
     return openMindmapDatabase(codec: getXorSembastCodec(lock.unlockedPin!));
   }
   return openMindmapDatabase();
@@ -55,12 +78,123 @@ final mindmapNodeDatabaseProvider = Provider<MindmapNodeDatabase>((ref) {
   );
 });
 
+final collaborationBoardSyncStoreProvider =
+    Provider<SembastCollaborationBoardSyncStore>((ref) {
+      final nodeDatabase = ref.watch(mindmapNodeDatabaseProvider);
+      return SembastCollaborationBoardSyncStore(
+        database: nodeDatabase is SembastMindmapNodeDatabase
+            ? nodeDatabase.database
+            : ref.watch(mindmapDatabaseProvider),
+      );
+    });
+
+final canvasBoardRepositoryProvider = Provider<CanvasBoardRepository>((ref) {
+  final base = SembastCanvasBoardRepository(
+    database: ref.watch(mindmapDatabaseProvider),
+  );
+  return CollaborationCanvasBoardRepository(
+    base: base,
+    store: ref.watch(collaborationBoardSyncStoreProvider),
+    sessionReader: ref.watch(activeCollaborationSessionProvider.notifier),
+  );
+});
+
+final canvasBoardTemplateRepositoryProvider =
+    Provider<CanvasBoardTemplateRepository>((ref) {
+      return SembastCanvasBoardTemplateRepository(
+        database: ref.watch(mindmapDatabaseProvider),
+      );
+    });
+
+final boardTemplateServiceProvider = Provider<BoardTemplateService>((ref) {
+  return BoardTemplateService(
+    boardRepository: ref.watch(canvasBoardRepositoryProvider),
+    templateRepository: ref.watch(canvasBoardTemplateRepositoryProvider),
+  );
+});
+
+final availableBoardTemplatesProvider = FutureProvider.autoDispose
+    .family<List<CanvasBoardTemplate>, String>((ref, workspaceName) async {
+      final boards = await ref.watch(
+        workspaceBoardGraphProvider(workspaceName).future,
+      );
+      return ref
+          .watch(boardTemplateServiceProvider)
+          .availableUserTemplates(workspaceName, workspaceBoards: boards);
+    });
+
+final drawingDraftStoreProvider = Provider<SembastDrawingDraftStore>((ref) {
+  return SembastDrawingDraftStore(database: ref.watch(mindmapDatabaseProvider));
+});
+
+final drawingDraftCheckpointsProvider = FutureProvider.autoDispose((ref) async {
+  final store = ref.watch(drawingDraftStoreProvider);
+  final subscription = store.changes.listen((_) => ref.invalidateSelf());
+  ref.onDispose(subscription.cancel);
+  return store.list();
+});
+
+final mindmapNodeRevisionRepositoryProvider =
+    Provider<MindmapNodeRevisionRepository>((ref) {
+      return ref.watch(mindmapNodeDatabaseProvider);
+    });
+
+final nodeRevisionsProvider = FutureProvider.autoDispose
+    .family<List<MindmapNodeRevision>, String>((ref, nodeId) {
+      return ref
+          .watch(mindmapNodeRevisionRepositoryProvider)
+          .listRevisions(nodeId);
+    });
+
+final collaborationSyncStoreProvider = Provider<SembastCollaborationSyncStore>((
+  ref,
+) {
+  final nodeDatabase = ref.watch(mindmapNodeDatabaseProvider);
+  return SembastCollaborationSyncStore(
+    database: nodeDatabase is SembastMindmapNodeDatabase
+        ? nodeDatabase.database
+        : ref.watch(mindmapDatabaseProvider),
+  );
+});
+
 final mindmapRepositoryProvider = Provider<MindmapRepository>((ref) {
   final config = ref.watch(runtimeConfigProvider);
-  return LocalDatabaseMindmapRepository(
+  final base = LocalDatabaseMindmapRepository(
     database: ref.watch(mindmapNodeDatabaseProvider),
     legacyStore: ref.watch(mindmapNodeStoreProvider),
     seedNodes: config.demoSeedEnabled ? buildSeedMindmapNodes() : const [],
+  );
+  return CollaborationMindmapRepository(
+    base: base,
+    store: ref.watch(collaborationSyncStoreProvider),
+    revisionRepository: ref.watch(mindmapNodeRevisionRepositoryProvider),
+    sessionReader: ref.watch(activeCollaborationSessionProvider.notifier),
+  );
+});
+
+final nodeAttachmentRepositoryProvider =
+    FutureProvider<NodeAttachmentRepository>((ref) {
+      return openLocalNodeAttachmentRepository();
+    });
+
+final nodeAttachmentPreviewBytesProvider = FutureProvider.autoDispose
+    .family<Uint8List?, String>((ref, attachmentId) async {
+      final id = attachmentId.trim();
+      if (id.isEmpty) return null;
+      final repository = await ref.watch(
+        nodeAttachmentRepositoryProvider.future,
+      );
+      final bytes = await repository.readBytes(id);
+      if (bytes == null) return null;
+      return bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    });
+
+final mediaFileImportServiceProvider = FutureProvider<MediaFileImportService>((
+  ref,
+) async {
+  return MediaFileImportService(
+    repository: await ref.watch(nodeAttachmentRepositoryProvider.future),
+    picker: const FilePickerMediaFilePicker(),
   );
 });
 
@@ -71,6 +205,62 @@ final nodesForDayProvider = FutureProvider.family<List<MindmapNode>, DateTime>((
   final repository = ref.watch(mindmapRepositoryProvider);
   final nodes = await repository.listNodes(day: day.dateOnly);
   return _activeNodes(nodes);
+});
+
+final dailyCanvasBoardProvider = FutureProvider.autoDispose
+    .family<CanvasBoard, DateTime>((ref, day) async {
+      final normalizedDay = day.dateOnly;
+      final repository = ref.watch(canvasBoardRepositoryProvider);
+      final persisted = await repository.getBoard(
+        dailyCanvasBoardId(normalizedDay),
+      );
+      if (persisted != null) return persisted;
+      final nodes = await ref.watch(nodesForDayProvider(normalizedDay).future);
+      return CanvasBoard.daily(
+        day: normalizedDay,
+        nodes: nodes,
+        now: DateTime.now(),
+      );
+    });
+
+final canvasBoardByIdProvider = FutureProvider.autoDispose
+    .family<CanvasBoard?, String>((ref, boardId) {
+      return ref.watch(canvasBoardRepositoryProvider).getBoard(boardId);
+    });
+
+final workspaceBoardGraphProvider = FutureProvider.autoDispose
+    .family<List<CanvasBoard>, String>((ref, workspaceName) {
+      return ref
+          .watch(canvasBoardRepositoryProvider)
+          .listWorkspaceBoards(
+            workspaceName,
+            includeArchived: true,
+            includeTrashed: true,
+          );
+    });
+
+final projectCanvasBoardProvider = FutureProvider.autoDispose
+    .family<CanvasBoard?, String>((ref, workspaceName) {
+      return ref
+          .watch(canvasBoardRepositoryProvider)
+          .getBoard(projectCanvasBoardId(workspaceName));
+    });
+
+final projectCanvasBoardsProvider = FutureProvider.autoDispose
+    .family<List<CanvasBoard>, String>((ref, workspaceName) {
+      return ref
+          .watch(canvasBoardRepositoryProvider)
+          .listBoards(
+            kind: CanvasBoardKind.project,
+            workspaceName: workspaceName,
+            includeArchived: true,
+          );
+    });
+
+final activeProjectCanvasBoardsProvider = FutureProvider.autoDispose((ref) {
+  return ref
+      .watch(canvasBoardRepositoryProvider)
+      .listBoards(kind: CanvasBoardKind.project);
 });
 
 final allMindmapNodesProvider = FutureProvider<List<MindmapNode>>((ref) {
