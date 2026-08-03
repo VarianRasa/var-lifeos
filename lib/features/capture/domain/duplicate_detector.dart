@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:crypto/crypto.dart';
 import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
@@ -20,15 +21,51 @@ class DuplicateMatchResult {
 }
 
 class DuplicateDetector {
+  static const _trackingParams = {
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'utm_term',
+    'utm_content',
+    'fbclid',
+    'gclid',
+  };
+
+  static String? tryNormalizeUrl(Object? raw) {
+    if (raw is! String || raw.trim().isEmpty) return null;
+    try {
+      return normalizeUrl(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static String normalizeUrl(String rawUrl) {
     final uri = Uri.parse(rawUrl);
+    final isDefaultPort =
+        (uri.scheme.toLowerCase() == 'http' && uri.port == 80) ||
+        (uri.scheme.toLowerCase() == 'https' && uri.port == 443);
+
+    Map<String, String>? queryParameters;
+    if (uri.queryParameters.isNotEmpty) {
+      final filtered = Map<String, String>.from(uri.queryParameters)
+        ..removeWhere((key, _) => _trackingParams.contains(key.toLowerCase()));
+      if (filtered.isNotEmpty) {
+        queryParameters = filtered;
+      }
+    }
+
+    String path = uri.path;
+    if (path.endsWith('/') && path.length > 1) {
+      path = path.substring(0, path.length - 1);
+    }
+
     final normalized = Uri(
       scheme: uri.scheme.toLowerCase(),
       host: uri.host.toLowerCase(),
-      port: (uri.port == 80 || uri.port == 443) ? 0 : uri.port,
-      path: uri.path.endsWith('/') && uri.path.length > 1
-          ? uri.path.substring(0, uri.path.length - 1)
-          : uri.path,
+      port: isDefaultPort ? null : (uri.hasPort ? uri.port : null),
+      path: path,
+      queryParameters: queryParameters,
     );
     return normalized.toString();
   }
@@ -41,11 +78,14 @@ class DuplicateDetector {
     CapturePayload payload,
     List<MindmapNode> existingNodes,
   ) {
-    if (payload.urls.isNotEmpty) {
-      final targetNormalized = normalizeUrl(payload.urls.first);
+    for (final rawPayloadUrl in payload.urls) {
+      final targetNormalized = tryNormalizeUrl(rawPayloadUrl);
+      if (targetNormalized == null) continue;
+
       for (final node in existingNodes) {
-        final nodeUrl = node.data['url'] as String?;
-        if (nodeUrl != null && normalizeUrl(nodeUrl) == targetNormalized) {
+        final rawNodeUrl = node.data['url'];
+        final storedNormalized = tryNormalizeUrl(rawNodeUrl);
+        if (storedNormalized != null && storedNormalized == targetNormalized) {
           return DuplicateMatchResult(
             hasDuplicate: true,
             existingNodeId: node.id,
@@ -58,10 +98,12 @@ class DuplicateDetector {
     if (payload.text != null && payload.text!.trim().isNotEmpty) {
       final targetHash = hashContent(payload.text!);
       for (final node in existingNodes) {
-        final nodeContent = node.title.isNotEmpty
+        final rawContent = node.title.isNotEmpty
             ? node.title
-            : (node.data['content'] as String?);
-        if (nodeContent != null && hashContent(nodeContent) == targetHash) {
+            : (node.data['content'] is String
+                  ? node.data['content'] as String
+                  : null);
+        if (rawContent != null && hashContent(rawContent) == targetHash) {
           return DuplicateMatchResult(
             hasDuplicate: true,
             existingNodeId: node.id,
