@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:var_app/core/services/url_metadata_scraper_service.dart';
-import 'package:var_app/features/mindmap/domain/link_metadata.dart';
 
 void main() {
   group('UrlMetadataScraperService', () {
@@ -13,7 +12,7 @@ void main() {
         <head>
           <meta property="og:title" content="Test Article Title" />
           <meta property="og:description" content="Test description content" />
-          <meta property="og:image" content="https://example.com/image.png" />
+          <meta property="og:image" content="/relative-image.png" />
           <meta property="og:site_name" content="Example Site" />
         </head>
         <body></body>
@@ -31,7 +30,7 @@ void main() {
 
       expect(metadata.title, equals('Test Article Title'));
       expect(metadata.description, equals('Test description content'));
-      expect(metadata.imageUrl, equals('https://example.com/image.png'));
+      expect(metadata.imageUrl, equals('https://example.com/relative-image.png'));
       expect(metadata.siteName, equals('Example Site'));
       expect(metadata.faviconUrl, contains('google.com/s2/favicons'));
     });

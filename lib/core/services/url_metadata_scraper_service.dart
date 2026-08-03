@@ -25,27 +25,41 @@ class UrlMetadataScraperService {
     ).toString();
 
     try {
+      final targetUri = Uri.parse(urlString);
       final response = await _client.get(
-        Uri.parse(urlString),
+        targetUri,
         headers: const <String, String>{
           'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
               'AppleWebKit/537.36 (KHTML, like Gecko) '
               'Chrome/120.0.0.0 Safari/537.36',
         },
-      );
+      ).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final document = html_parser.parse(response.body);
-        String? meta(String property) =>
-            (document.querySelector('meta[property="$property"]') ??
-                    document.querySelector('meta[name="$property"]'))
-                ?.attributes['content'];
+        String? meta(String property) {
+          final val = (document.querySelector('meta[property="$property"]') ??
+                  document.querySelector('meta[name="$property"]'))
+              ?.attributes['content']?.trim();
+          return (val != null && val.isNotEmpty) ? val : null;
+        }
+
+        final rawTitle = meta('og:title') ?? document.querySelector('title')?.text.trim();
+        final title = (rawTitle != null && rawTitle.isNotEmpty) ? rawTitle : host;
+        final rawImage = meta('og:image');
+        String? resolvedImage;
+        if (rawImage != null) {
+          final parsedImg = Uri.tryParse(rawImage);
+          if (parsedImg != null) {
+            resolvedImage = targetUri.resolveUri(parsedImg).toString();
+          }
+        }
+
         final metadata = LinkMetadata(
           url: urlString,
-          title:
-              meta('og:title') ?? document.querySelector('title')?.text ?? host,
+          title: title,
           description: meta('og:description'),
-          imageUrl: meta('og:image'),
+          imageUrl: resolvedImage,
           siteName: meta('og:site_name') ?? host,
           faviconUrl: favicon,
           fetchedAt: DateTime.now(),
@@ -53,7 +67,7 @@ class UrlMetadataScraperService {
         _cache[urlString] = metadata;
         return metadata;
       }
-    } on Object {
+    } on Exception {
       return _fallback(urlString, host, favicon);
     }
 

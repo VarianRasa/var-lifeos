@@ -26,49 +26,58 @@ class _CanvasDropzoneOverlayState extends State<CanvasDropzoneOverlay> {
 
     return Stack(
       children: [
-        widget.child,
-        DragTarget<List<String>>(
-          onWillAcceptWithDetails: (details) {
-            setState(() => _isDragging = true);
-            return true;
-          },
-          onLeave: (_) {
-            setState(() => _isDragging = false);
-          },
-          onAcceptWithDetails: (details) {
-            setState(() => _isDragging = false);
-            widget.onFilesDropped(details.data, details.offset);
-          },
-          builder: (context, candidateData, rejectedData) {
-            if (!_isDragging) return const SizedBox.shrink();
-
-            return Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                border: Border.all(color: theme.colorScheme.primary, width: 2),
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.cloud_upload_outlined,
-                      size: 48,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Drop files to add to Canvas',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+        Positioned.fill(child: widget.child),
+        Positioned.fill(
+          child: DragTarget<List<String>>(
+            onWillAcceptWithDetails: (details) {
+              setState(() => _isDragging = true);
+              return true;
+            },
+            onLeave: (_) {
+              setState(() => _isDragging = false);
+            },
+            onAcceptWithDetails: (details) {
+              setState(() => _isDragging = false);
+              widget.onFilesDropped(details.data, details.offset);
+            },
+            builder: (context, candidateData, rejectedData) {
+              return Container(
+                color: _isDragging
+                    ? theme.colorScheme.primary.withValues(alpha: 0.1)
+                    : Colors.transparent,
+                child: _isDragging
+                    ? Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: theme.colorScheme.primary,
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.cloud_upload_outlined,
+                                size: 48,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Drop files to add to Canvas',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              );
+            },
+          ),
         ),
       ],
     );
