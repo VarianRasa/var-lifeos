@@ -26,26 +26,33 @@ class UrlMetadataScraperService {
 
     try {
       final targetUri = Uri.parse(urlString);
-      final response = await _client.get(
-        targetUri,
-        headers: const <String, String>{
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-              'AppleWebKit/537.36 (KHTML, like Gecko) '
-              'Chrome/120.0.0.0 Safari/537.36',
-        },
-      ).timeout(const Duration(seconds: 5));
+      final response = await _client
+          .get(
+            targetUri,
+            headers: const <String, String>{
+              'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/120.0.0.0 Safari/537.36',
+            },
+          )
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final document = html_parser.parse(response.body);
         String? meta(String property) {
-          final val = (document.querySelector('meta[property="$property"]') ??
-                  document.querySelector('meta[name="$property"]'))
-              ?.attributes['content']?.trim();
+          final val =
+              (document.querySelector('meta[property="$property"]') ??
+                      document.querySelector('meta[name="$property"]'))
+                  ?.attributes['content']
+                  ?.trim();
           return (val != null && val.isNotEmpty) ? val : null;
         }
 
-        final rawTitle = meta('og:title') ?? document.querySelector('title')?.text.trim();
-        final title = (rawTitle != null && rawTitle.isNotEmpty) ? rawTitle : host;
+        final rawTitle =
+            meta('og:title') ?? document.querySelector('title')?.text.trim();
+        final title = (rawTitle != null && rawTitle.isNotEmpty)
+            ? rawTitle
+            : host;
         final rawImage = meta('og:image');
         String? resolvedImage;
         if (rawImage != null) {

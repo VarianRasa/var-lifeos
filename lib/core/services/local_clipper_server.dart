@@ -19,9 +19,9 @@ class LocalClipperServer {
     required CaptureService captureService,
     required String authToken,
     int port = 18420,
-  })  : _captureService = captureService,
-        _authToken = authToken,
-        _port = port;
+  }) : _captureService = captureService,
+       _authToken = authToken,
+       _port = port;
 
   int get port => _server?.port ?? _port;
 
@@ -50,7 +50,8 @@ class LocalClipperServer {
       request.response
         ..statusCode = HttpStatus.ok
         ..headers.contentType = ContentType.json
-        ..write(jsonEncode({
+        ..write(
+          jsonEncode({
             'boards': [
               {
                 'boardId': 'default',
@@ -58,7 +59,8 @@ class LocalClipperServer {
                 'workspaceId': 'default',
               },
             ],
-          }));
+          }),
+        );
       await request.response.close();
       return;
     }
@@ -130,7 +132,8 @@ class LocalClipperServer {
 final localClipperServerProvider = Provider<LocalClipperServer>((ref) {
   final service = ref.watch(captureServiceProvider);
   return LocalClipperServer(
-    captureService: service.valueOrNull ??
+    captureService:
+        service.valueOrNull ??
         (throw StateError('CaptureService not yet available')),
     // ponytail: generate per-install UUID token, store in shared_preferences
     authToken: 'var-local-token',

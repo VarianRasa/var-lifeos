@@ -30,7 +30,10 @@ void main() {
 
       expect(metadata.title, equals('Test Article Title'));
       expect(metadata.description, equals('Test description content'));
-      expect(metadata.imageUrl, equals('https://example.com/relative-image.png'));
+      expect(
+        metadata.imageUrl,
+        equals('https://example.com/relative-image.png'),
+      );
       expect(metadata.siteName, equals('Example Site'));
       expect(metadata.faviconUrl, contains('google.com/s2/favicons'));
     });
