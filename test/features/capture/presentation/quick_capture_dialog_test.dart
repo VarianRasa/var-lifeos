@@ -34,27 +34,30 @@ void main() {
                 ];
           }),
         ],
-        child: const MaterialApp(
-          home: Scaffold(
-            body: QuickCaptureDialog(),
-          ),
-        ),
+        child: const MaterialApp(home: Scaffold(body: QuickCaptureDialog())),
       );
     }
 
-    testWidgets('renders input fields and keeps save disabled without destination or content', (tester) async {
-      await tester.pumpWidget(buildTestableWidget());
-      await tester.pumpAndSettle();
+    testWidgets(
+      'renders input fields and keeps save disabled without destination or content',
+      (tester) async {
+        await tester.pumpWidget(buildTestableWidget());
+        await tester.pumpAndSettle();
 
-      expect(find.text('Quick Capture'), findsOneWidget);
-      expect(find.text('Save Capture'), findsOneWidget);
+        expect(find.text('Quick Capture'), findsOneWidget);
+        expect(find.text('Save Capture'), findsOneWidget);
 
-      final saveButtonFinder = find.byKey(const Key('quick_capture_save_button'));
-      final saveButton = tester.widget<ElevatedButton>(saveButtonFinder);
-      expect(saveButton.onPressed, isNull);
-    });
+        final saveButtonFinder = find.byKey(
+          const Key('quick_capture_save_button'),
+        );
+        final saveButton = tester.widget<ElevatedButton>(saveButtonFinder);
+        expect(saveButton.onPressed, isNull);
+      },
+    );
 
-    testWidgets('enables save button when content and destination selected', (tester) async {
+    testWidgets('enables save button when content and destination selected', (
+      tester,
+    ) async {
       await tester.pumpWidget(buildTestableWidget());
       await tester.pumpAndSettle();
 
@@ -64,7 +67,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('quick_capture_destination_dropdown')));
+      await tester.tap(
+        find.byKey(const Key('quick_capture_destination_dropdown')),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Inbox Board (main-workspace)').last);
@@ -76,29 +81,36 @@ void main() {
       expect(saveButton.onPressed, isNotNull);
     });
 
-    testWidgets('triggers duplicate detection and renders match options when match found', (tester) async {
-      final existingNode = MindmapNode.create(
-        id: 'existing-node-1',
-        title: 'https://example.com/duplicate',
-        type: NodeType.link,
-        day: DateTime.now(),
-        data: {'url': 'https://example.com/duplicate'},
-      );
-      await mindmapRepository.saveNode(existingNode);
+    testWidgets(
+      'triggers duplicate detection and renders match options when match found',
+      (tester) async {
+        final existingNode = MindmapNode.create(
+          id: 'existing-node-1',
+          title: 'https://example.com/duplicate',
+          type: NodeType.link,
+          day: DateTime.now(),
+          data: {'url': 'https://example.com/duplicate'},
+        );
+        await mindmapRepository.saveNode(existingNode);
 
-      await tester.pumpWidget(buildTestableWidget());
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(buildTestableWidget());
+        await tester.pumpAndSettle();
 
-      await tester.enterText(
-        find.byKey(const Key('quick_capture_url_field')),
-        'https://example.com/duplicate',
-      );
-      await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('quick_capture_url_field')),
+          'https://example.com/duplicate',
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.text('Duplicate content detected'), findsOneWidget);
-      expect(find.text('Open Existing'), findsOneWidget);
-      expect(find.text('Create Copy'), findsOneWidget);
-    });
+        expect(find.text('Duplicate content detected'), findsOneWidget);
+        expect(find.text('Open Existing'), findsOneWidget);
+        expect(find.text('Create Copy'), findsOneWidget);
+        final saveButton = tester.widget<ElevatedButton>(
+          find.byKey(const Key('quick_capture_save_button')),
+        );
+        expect(saveButton.onPressed, isNull);
+      },
+    );
 
     testWidgets('creates new node via CaptureService on save', (tester) async {
       await tester.pumpWidget(buildTestableWidget());
@@ -108,7 +120,9 @@ void main() {
         find.byKey(const Key('quick_capture_text_field')),
         'Save quick item',
       );
-      await tester.tap(find.byKey(const Key('quick_capture_destination_dropdown')));
+      await tester.tap(
+        find.byKey(const Key('quick_capture_destination_dropdown')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Inbox Board (main-workspace)').last);
       await tester.pumpAndSettle();

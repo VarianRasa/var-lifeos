@@ -125,6 +125,24 @@ void main() {
       );
     });
 
+    test('rejects blank destination identifiers', () async {
+      final service = CaptureService(
+        mindmapRepository: InMemoryMindmapRepository(),
+      );
+
+      expect(
+        () => service.saveCapture(
+          payload: const CapturePayload(text: 'item'),
+          destination: const CaptureDestination(
+            boardId: ' ',
+            boardTitle: 'Inbox',
+            workspaceId: '',
+          ),
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test(
       'triggers SearchIndexCoordinator and ContentExtractionPipeline background tasks after node persistence',
       () async {
@@ -168,11 +186,28 @@ void main() {
         expect(storedNodes.any((n) => n.id == node.id), isTrue);
 
         await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
-        expect(searchIndexRepository.upsertedDocuments.length, equals(1));
+        final stored = await repository.getNode(node.id);
+        final attachments = stored!.data['attachments'] as List<Object?>;
+        expect(attachments, hasLength(1));
         expect(
-          searchIndexRepository.upsertedDocuments.first.sourceId,
-          equals(node.id),
+          (attachments.single as Map<String, Object?>)['bytes'],
+          isNotEmpty,
+        );
+        expect(stored.data['extractions'], isNotNull);
+        expect(searchIndexRepository.upsertedDocuments.length, equals(2));
+        expect(
+          searchIndexRepository.upsertedDocuments.where(
+            (document) => document.sourceId == node.id,
+          ),
+          hasLength(2),
+        );
+        expect(
+          searchIndexRepository.upsertedDocuments.any(
+            (document) => document.text.contains('Extracted text'),
+          ),
+          isTrue,
         );
         expect(mockExtractor.requests.length, equals(1));
         expect(mockExtractor.requests.first.sourceId, equals(node.id));

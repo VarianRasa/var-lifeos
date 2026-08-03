@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+import 'package:var_app/features/capture/application/dns_lookup.dart';
 import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/capture/domain/capture_validation.dart';
 import 'package:var_app/features/capture/domain/captured_url_result.dart';
@@ -7,20 +8,22 @@ import 'package:var_app/features/capture/domain/duplicate_detector.dart';
 class UrlClassifierService {
   final http.Client _httpClient;
   final Duration _timeout;
+  final DnsResolver _dnsResolver;
 
   UrlClassifierService({
     http.Client? httpClient,
     Duration timeout = const Duration(seconds: 5),
+    DnsResolver? dnsResolver,
   }) : _httpClient = httpClient ?? http.Client(),
-       _timeout = timeout;
+       _timeout = timeout,
+       _dnsResolver = dnsResolver ?? defaultDnsResolver;
 
   Future<CapturedUrlResult> processUrl(String rawUrl) async {
     final initialUri = Uri.tryParse(rawUrl);
     final canonicalUrl = initialUri == null
         ? rawUrl
         : DuplicateDetector.normalizeUrl(rawUrl);
-    if (!_isAllowed(rawUrl)) return _fallback(rawUrl, canonicalUrl);
-
+    if (!await _isAllowed(rawUrl)) return _fallback(rawUrl, canonicalUrl);
     try {
       final response = await _fetch(initialUri!).timeout(_timeout);
       if (response.statusCode != 200 ||
@@ -29,7 +32,6 @@ class UrlClassifierService {
           )) {
         return _fallback(rawUrl, canonicalUrl);
       }
-
       final body = response.body;
       final title = _plainText(
         RegExp(
@@ -49,14 +51,14 @@ class UrlClassifierService {
               ' ',
             ),
       );
-      final isArticle =
-          text.length > 200 ||
-          RegExp(r'<article(?:\s|>)', caseSensitive: false).hasMatch(body);
-
       return CapturedUrlResult(
         url: rawUrl,
         canonicalUrl: canonicalUrl,
-        type: isArticle ? CapturedUrlType.article : CapturedUrlType.bookmark,
+        type:
+            text.length > 200 ||
+                RegExp(r'<article(?:\s|>)', caseSensitive: false).hasMatch(body)
+            ? CapturedUrlType.article
+            : CapturedUrlType.bookmark,
         title: title.isEmpty ? rawUrl : title,
         extractedText: text,
         htmlSnapshot: body,
@@ -69,12 +71,12 @@ class UrlClassifierService {
   Future<http.Response> _fetch(Uri initialUri) async {
     var uri = initialUri;
     for (var redirects = 0; redirects <= 5; redirects++) {
-      if (!_isAllowed(uri.toString())) throw const FormatException();
+      if (!await _isAllowed(uri.toString())) throw const FormatException();
       final request = http.Request('GET', uri)..followRedirects = false;
-      final streamed = await _httpClient.send(request);
-      final response = await http.Response.fromStream(streamed);
+      final response = await http.Response.fromStream(
+        await _httpClient.send(request),
+      );
       if (!_isRedirect(response.statusCode)) return response;
-
       final location = response.headers['location'];
       if (location == null || redirects == 5) throw const FormatException();
       uri = uri.resolve(location);
@@ -82,8 +84,18 @@ class UrlClassifierService {
     throw const FormatException();
   }
 
-  bool _isAllowed(String url) =>
-      CaptureValidator.validate(CapturePayload(urls: [url])).isValid;
+  Future<bool> _isAllowed(String url) async {
+    if (!CaptureValidator.validate(CapturePayload(urls: [url])).isValid) {
+      return false;
+    }
+    final uri = Uri.tryParse(url);
+    return uri != null &&
+        uri.host.isNotEmpty &&
+        !await CaptureValidator.isPrivateOrLocalHostAsync(
+          uri.host,
+          dnsResolver: _dnsResolver,
+        );
+  }
 
   bool _isRedirect(int statusCode) =>
       statusCode == 301 ||

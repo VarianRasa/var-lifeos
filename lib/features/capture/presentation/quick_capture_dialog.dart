@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:var_app/features/capture/application/capture_providers.dart';
@@ -22,6 +23,7 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
   bool _checkingDuplicates = false;
   DuplicateMatchResult _duplicateMatch = DuplicateMatchResult.none;
   MindmapNode? _matchedNode;
+  final List<CaptureFileAttachment> _attachments = [];
 
   @override
   void dispose() {
@@ -81,8 +83,46 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
     }
   }
 
+  Future<void> _pickAttachments() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
+    if (!mounted || result == null) return;
+    final attachments = [
+      for (final file in result.files)
+        if (file.bytes != null)
+          CaptureFileAttachment(
+            fileName: file.name,
+            mimeType: _mimeTypeFor(file.name),
+            bytes: file.bytes!,
+            localPath: file.path,
+          ),
+    ];
+    setState(() => _attachments.addAll(attachments));
+  }
+
+  String _mimeTypeFor(String fileName) {
+    final extension = fileName.split('.').last.toLowerCase();
+    return switch (extension) {
+      'png' => 'image/png',
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      'txt' => 'text/plain',
+      'md' => 'text/markdown',
+      'csv' => 'text/csv',
+      'json' => 'application/json',
+      'pdf' => 'application/pdf',
+      _ => 'application/octet-stream',
+    };
+  }
+
   Future<void> _handleSave({bool forceCopy = false}) async {
-    if (_selectedDestination == null) return;
+    if (_selectedDestination == null ||
+        (_duplicateMatch.hasDuplicate && !forceCopy)) {
+      return;
+    }
     setState(() => _isSaving = true);
 
     try {
@@ -92,9 +132,10 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
       final payload = CapturePayload(
         text: text.isEmpty ? null : text,
         urls: url.isEmpty ? const [] : [url],
+        attachments: List.unmodifiable(_attachments),
       );
 
-      final service = ref.read(captureServiceProvider);
+      final service = await ref.read(captureServiceProvider.future);
       final createdNode = await service.saveCapture(
         payload: payload,
         destination: _selectedDestination!,
@@ -105,9 +146,9 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Save failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Save failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -118,8 +159,12 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
   Widget build(BuildContext context) {
     final text = _textController.text.trim();
     final url = _urlController.text.trim();
-    final hasContent = text.isNotEmpty || url.isNotEmpty;
-    final canSave = _selectedDestination != null && hasContent;
+    final hasContent =
+        text.isNotEmpty || url.isNotEmpty || _attachments.isNotEmpty;
+    final canSave =
+        _selectedDestination != null &&
+        hasContent &&
+        !_duplicateMatch.hasDuplicate;
     final asyncDestinations = ref.watch(availableCaptureDestinationsProvider);
 
     return Dialog(
@@ -155,6 +200,33 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                 ),
                 onChanged: (_) => _onInputChanged(),
               ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('quick_capture_add_attachments_button'),
+                onPressed: _isSaving ? null : _pickAttachments,
+                icon: const Icon(Icons.attach_file),
+                label: const Text('Add images or files'),
+              ),
+              if (_attachments.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                for (var index = 0; index < _attachments.length; index++)
+                  ListTile(
+                    key: Key('quick_capture_attachment_$index'),
+                    leading: Icon(
+                      _attachments[index].mimeType.startsWith('image/')
+                          ? Icons.image_outlined
+                          : Icons.insert_drive_file_outlined,
+                    ),
+                    title: Text(_attachments[index].fileName),
+                    subtitle: Text(_attachments[index].mimeType),
+                    trailing: IconButton(
+                      tooltip: 'Remove attachment',
+                      onPressed: () =>
+                          setState(() => _attachments.removeAt(index)),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ),
+              ],
               const SizedBox(height: 16),
               asyncDestinations.when(
                 data: (destinations) {
@@ -168,7 +240,8 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                         child: Text('${dest.boardTitle} (${dest.workspaceId})'),
                       );
                     }).toList(),
-                    onChanged: (dest) => setState(() => _selectedDestination = dest),
+                    onChanged: (dest) =>
+                        setState(() => _selectedDestination = dest),
                   );
                 },
                 loading: () => const LinearProgressIndicator(),
@@ -196,7 +269,9 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: Theme.of(context).colorScheme.outline,
@@ -227,7 +302,10 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                             ),
                           const SizedBox(width: 8),
                           ElevatedButton(
-                            onPressed: canSave && !_isSaving
+                            onPressed:
+                                _selectedDestination != null &&
+                                    hasContent &&
+                                    !_isSaving
                                 ? () => _handleSave(forceCopy: true)
                                 : null,
                             child: const Text('Create Copy'),

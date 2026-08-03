@@ -117,6 +117,47 @@ void main() {
     });
 
     test(
+      'rejects public hostname resolving private IP before transport',
+      () async {
+        var fetchAttempted = false;
+        final service = UrlClassifierService(
+          httpClient: MockClient((request) async {
+            fetchAttempted = true;
+            return http.Response('unexpected', 200);
+          }),
+          dnsResolver: (_) async => ['10.0.0.7'],
+        );
+
+        final result = await service.processUrl('https://public.example/page');
+
+        expect(fetchAttempted, isFalse);
+        expect(result.title, 'https://public.example/page');
+      },
+    );
+
+    test('rejects redirect target resolving private IP', () async {
+      final requestedHosts = <String>[];
+      final service = UrlClassifierService(
+        httpClient: MockClient((request) async {
+          requestedHosts.add(request.url.host);
+          return http.Response(
+            '',
+            302,
+            headers: {'location': 'https://redirect.example/private'},
+          );
+        }),
+        dnsResolver: (host) async => [
+          host == 'redirect.example' ? 'fd00::1' : '203.0.113.1',
+        ],
+      );
+
+      final result = await service.processUrl('https://public.example/start');
+
+      expect(requestedHosts, ['public.example']);
+      expect(result.title, 'https://public.example/start');
+    });
+
+    test(
       'falls back to bookmark on network/HTTP errors or non-HTML content',
       () async {
         final client = MockClient((request) async {
