@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/features/capture/application/capture_service.dart';
-import 'package:var_app/features/capture/application/url_classifier_service.dart';
 import 'package:var_app/features/capture/domain/capture_destination.dart';
 import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
+import 'package:var_app/features/mindmap/domain/mindmap_repository.dart';
 
 class MockSearchIndexCoordinator implements SearchIndexCoordinator {
   final List<MindmapNode> indexedNodes = [];
@@ -24,11 +24,27 @@ class MockContentExtractionPipeline implements ContentExtractionPipeline {
   }
 }
 
-class FailingSaveMindmapRepository extends InMemoryMindmapRepository {
+class FailingSaveMindmapRepository implements MindmapRepository {
+  final _delegate = InMemoryMindmapRepository();
+
   @override
-  Future<void> saveNode(MindmapNode node) async {
+  Future<void> deleteNode(String id) => _delegate.deleteNode(id);
+
+  @override
+  Future<MindmapNode?> getNode(String id) => _delegate.getNode(id);
+
+  @override
+  Future<List<MindmapNode>> listNodes({DateTime? day}) =>
+      _delegate.listNodes(day: day);
+
+  @override
+  Future<MindmapNode> saveNode(MindmapNode node) async {
     throw Exception('Storage failure');
   }
+
+  @override
+  Future<List<MindmapNode>> searchNodes(String query) =>
+      _delegate.searchNodes(query);
 }
 
 void main() {
@@ -37,7 +53,7 @@ void main() {
       final repository = InMemoryMindmapRepository();
       final captureService = CaptureService(mindmapRepository: repository);
 
-      final payload = const CapturePayload(text: 'Captured quick thought');
+      const payload = CapturePayload(text: 'Captured quick thought');
       const destination = CaptureDestination(
         boardId: 'board-main',
         boardTitle: 'Main Board',
@@ -50,11 +66,11 @@ void main() {
       );
 
       expect(node.id, isNotEmpty);
-      expect(node.label, equals('Captured quick thought'));
+      expect(node.title, equals('Captured quick thought'));
       expect(node.data['boardId'], equals('board-main'));
       expect(node.data['workspaceId'], equals('ws-1'));
 
-      final storedNodes = await repository.loadNodes(node.day);
+      final storedNodes = await repository.listNodes(day: node.day);
       expect(storedNodes.any((n) => n.id == node.id), isTrue);
     });
 
@@ -102,7 +118,7 @@ void main() {
           destination: destination,
         );
 
-        final storedNodes = await repository.loadNodes(node.day);
+        final storedNodes = await repository.listNodes(day: node.day);
         expect(storedNodes.any((n) => n.id == node.id), isTrue);
 
         await Future<void>.delayed(Duration.zero);

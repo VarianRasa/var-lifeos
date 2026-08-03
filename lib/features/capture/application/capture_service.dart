@@ -1,10 +1,10 @@
+import 'dart:async';
+
 import 'package:var_app/core/constants/app_constants.dart';
-import 'package:var_app/core/utils/date_utils.dart';
 import 'package:var_app/features/capture/application/url_classifier_service.dart';
 import 'package:var_app/features/capture/domain/capture_destination.dart';
 import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/capture/domain/capture_validation.dart';
-import 'package:var_app/features/capture/domain/captured_url_result.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_repository.dart';
 
@@ -41,9 +41,9 @@ class CaptureService {
       throw ArgumentError(validation.errors.join('; '));
     }
 
-    final today = dayKey(DateTime.now());
+    final today = DateTime.now();
     NodeType nodeType = NodeType.note;
-    String label = payload.text ?? 'Captured item';
+    String title = payload.text ?? 'Captured item';
     final nodeData = <String, Object?>{
       'boardId': destination.boardId,
       'workspaceId': destination.workspaceId,
@@ -54,10 +54,8 @@ class CaptureService {
       final urlResult = await _urlClassifierService.processUrl(
         payload.urls.first,
       );
-      nodeType = urlResult.type == CapturedUrlType.article
-          ? NodeType.article
-          : NodeType.link;
-      label = urlResult.title;
+      nodeType = NodeType.link;
+      title = urlResult.title;
       nodeData['url'] = urlResult.url;
       nodeData['canonicalUrl'] = urlResult.canonicalUrl;
       if (urlResult.extractedText != null) {
@@ -68,21 +66,23 @@ class CaptureService {
       }
     }
 
-    final node = MindmapNode(
-      id: 'capture-${DateTime.now().millisecondsSinceEpoch}',
-      day: today,
+    final now = DateTime.now();
+    final node = MindmapNode.create(
+      id: 'capture-${now.millisecondsSinceEpoch}',
       type: nodeType,
-      label: label,
+      title: title,
+      day: today,
       data: nodeData,
+      now: now,
     );
 
     await _mindmapRepository.saveNode(node);
 
     if (_extractionPipeline != null) {
-      Future.microtask(() => _extractionPipeline.enqueue(node));
+      unawaited(Future.microtask(() => _extractionPipeline.enqueue(node)));
     }
     if (_indexCoordinator != null) {
-      Future.microtask(() => _indexCoordinator.indexNode(node));
+      unawaited(Future.microtask(() => _indexCoordinator.indexNode(node)));
     }
 
     return node;

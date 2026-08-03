@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/capture/domain/capture_validation.dart';

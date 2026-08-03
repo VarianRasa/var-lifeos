@@ -8,9 +8,18 @@
 
 ## Verification
 
-- `flutter test test/features/capture/application/capture_service_test.dart`: passed.
-- `flutter analyze lib/features/capture test/features/capture`: passed.
-- `dart format lib/features/capture/domain/capture_destination.dart lib/features/capture/application/capture_service.dart test/features/capture/application/capture_service_test.dart`: passed.
+- `flutter test test/features/capture/application/capture_service_test.dart`: passed (4 tests).
+- `flutter test test/features/capture/...`: passed (22 tests across all capture feature suites).
+- `flutter analyze lib/features/capture test/features/capture`: clean (0 issues).
+- `dart format --set-exit-if-changed lib/features/capture test/features/capture`: clean (0 changes).
+
+## Fixes Applied
+
+- Updated `MindmapNode` instantiation in `CaptureService` to use `MindmapNode.create()` with required named params (`title`, `day`, `createdAt`, `updatedAt`, `data`).
+- Replaced non-existent `NodeType.article` with `NodeType.link`.
+- Replaced invalid `InMemoryMindmapRepository` subclassing with `FailingSaveMindmapRepository` delegating to `InMemoryMindmapRepository`.
+- Updated test assertions to inspect `node.title` and `repository.listNodes(day: node.day)`.
+- Resolved unused imports and wrapped asynchronous background tasks in `unawaited()`.
 
 ## Concerns
 
