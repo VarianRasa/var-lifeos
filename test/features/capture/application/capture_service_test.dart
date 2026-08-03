@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/features/capture/application/capture_service.dart';
 import 'package:var_app/features/capture/domain/capture_destination.dart';
@@ -5,22 +7,51 @@ import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_repository.dart';
+import 'package:var_app/features/search/application/content_extraction_pipeline.dart';
+import 'package:var_app/features/search/application/search_index_coordinator.dart';
+import 'package:var_app/features/search/domain/content_extraction.dart';
+import 'package:var_app/features/search/domain/search_document.dart';
+import 'package:var_app/features/search/domain/search_index_repository.dart';
+import 'package:var_app/features/search/domain/search_query.dart';
+import 'package:var_app/features/search/domain/search_result.dart';
 
-class MockSearchIndexCoordinator implements SearchIndexCoordinator {
-  final List<MindmapNode> indexedNodes = [];
+class MockSearchIndexRepository implements SearchIndexRepository {
+  final List<SearchDocument> upsertedDocuments = [];
 
   @override
-  Future<void> indexNode(MindmapNode node) async {
-    indexedNodes.add(node);
+  Future<void> clear() async {}
+
+  @override
+  void close() {}
+
+  @override
+  Future<void> deleteBoard(String boardId) async {}
+
+  @override
+  Future<void> deleteSources(Iterable<SearchSourceRef> sources) async {}
+
+  @override
+  Future<List<SearchResult>> search(
+    SearchQuery query, {
+    int limit = 50,
+  }) async => [];
+
+  @override
+  Future<void> upsertAll(Iterable<SearchDocument> documents) async {
+    upsertedDocuments.addAll(documents);
   }
 }
 
-class MockContentExtractionPipeline implements ContentExtractionPipeline {
-  final List<MindmapNode> enqueuedNodes = [];
+class MockExtractor implements ContentExtractor {
+  final List<ContentExtractionRequest> requests = [];
 
   @override
-  Future<void> enqueue(MindmapNode node) async {
-    enqueuedNodes.add(node);
+  bool supports(String mimeType) => true;
+
+  @override
+  Future<ExtractedContent?> extract(ContentExtractionRequest request) async {
+    requests.add(request);
+    return const ExtractedContent(text: 'Extracted text');
   }
 }
 
@@ -98,15 +129,30 @@ void main() {
       'triggers SearchIndexCoordinator and ContentExtractionPipeline background tasks after node persistence',
       () async {
         final repository = InMemoryMindmapRepository();
-        final indexCoordinator = MockSearchIndexCoordinator();
-        final extractionPipeline = MockContentExtractionPipeline();
+        final searchIndexRepository = MockSearchIndexRepository();
+        final indexCoordinator = SearchIndexCoordinator(searchIndexRepository);
+        final mockExtractor = MockExtractor();
+        final extractionPipeline = ContentExtractionPipeline(
+          localExtractors: [mockExtractor],
+          cloudExtractor: null,
+          cloudEnabled: () async => false,
+        );
         final captureService = CaptureService(
           mindmapRepository: repository,
           indexCoordinator: indexCoordinator,
           extractionPipeline: extractionPipeline,
         );
 
-        const payload = CapturePayload(text: 'Background index test');
+        final payload = CapturePayload(
+          text: 'Background index test',
+          attachments: [
+            CaptureFileAttachment(
+              fileName: 'doc.txt',
+              mimeType: 'text/plain',
+              bytes: Uint8List.fromList([1, 2, 3]),
+            ),
+          ],
+        );
         const destination = CaptureDestination(
           boardId: 'board-main',
           boardTitle: 'Main Board',
@@ -123,10 +169,13 @@ void main() {
 
         await Future<void>.delayed(Duration.zero);
 
-        expect(indexCoordinator.indexedNodes.length, equals(1));
-        expect(indexCoordinator.indexedNodes.first.id, equals(node.id));
-        expect(extractionPipeline.enqueuedNodes.length, equals(1));
-        expect(extractionPipeline.enqueuedNodes.first.id, equals(node.id));
+        expect(searchIndexRepository.upsertedDocuments.length, equals(1));
+        expect(
+          searchIndexRepository.upsertedDocuments.first.sourceId,
+          equals(node.id),
+        );
+        expect(mockExtractor.requests.length, equals(1));
+        expect(mockExtractor.requests.first.sourceId, equals(node.id));
       },
     );
 
@@ -134,7 +183,8 @@ void main() {
       'does not trigger background indexing if node persistence fails',
       () async {
         final repository = FailingSaveMindmapRepository();
-        final indexCoordinator = MockSearchIndexCoordinator();
+        final searchIndexRepository = MockSearchIndexRepository();
+        final indexCoordinator = SearchIndexCoordinator(searchIndexRepository);
         final captureService = CaptureService(
           mindmapRepository: repository,
           indexCoordinator: indexCoordinator,
@@ -156,7 +206,7 @@ void main() {
         );
 
         await Future<void>.delayed(Duration.zero);
-        expect(indexCoordinator.indexedNodes, isEmpty);
+        expect(searchIndexRepository.upsertedDocuments, isEmpty);
       },
     );
   });

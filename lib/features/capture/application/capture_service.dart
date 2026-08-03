@@ -7,30 +7,29 @@ import 'package:var_app/features/capture/domain/capture_payload.dart';
 import 'package:var_app/features/capture/domain/capture_validation.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_repository.dart';
-
-abstract class ContentExtractionPipeline {
-  Future<void> enqueue(MindmapNode node);
-}
-
-abstract class SearchIndexCoordinator {
-  Future<void> indexNode(MindmapNode node);
-}
+import 'package:var_app/features/search/application/content_extraction_pipeline.dart';
+import 'package:var_app/features/search/application/search_document_projector.dart';
+import 'package:var_app/features/search/application/search_index_coordinator.dart';
+import 'package:var_app/features/search/domain/content_extraction.dart';
 
 class CaptureService {
   final MindmapRepository _mindmapRepository;
   final UrlClassifierService _urlClassifierService;
   final ContentExtractionPipeline? _extractionPipeline;
   final SearchIndexCoordinator? _indexCoordinator;
+  final SearchDocumentProjector _projector;
 
   CaptureService({
     required MindmapRepository mindmapRepository,
     UrlClassifierService? urlClassifierService,
     ContentExtractionPipeline? extractionPipeline,
     SearchIndexCoordinator? indexCoordinator,
+    SearchDocumentProjector projector = const SearchDocumentProjector(),
   }) : _mindmapRepository = mindmapRepository,
        _urlClassifierService = urlClassifierService ?? UrlClassifierService(),
        _extractionPipeline = extractionPipeline,
-       _indexCoordinator = indexCoordinator;
+       _indexCoordinator = indexCoordinator,
+       _projector = projector;
 
   Future<MindmapNode> saveCapture({
     required CapturePayload payload,
@@ -78,11 +77,30 @@ class CaptureService {
 
     await _mindmapRepository.saveNode(node);
 
-    if (_extractionPipeline != null) {
-      unawaited(Future.microtask(() => _extractionPipeline.enqueue(node)));
+    if (_extractionPipeline != null && payload.attachments.isNotEmpty) {
+      final pipeline = _extractionPipeline;
+      unawaited(
+        Future.microtask(() async {
+          for (final attachment in payload.attachments) {
+            await pipeline.extract(
+              ContentExtractionRequest(
+                sourceId: node.id,
+                bytes: attachment.bytes,
+                mimeType: attachment.mimeType,
+                fileName: attachment.fileName,
+              ),
+            );
+          }
+        }),
+      );
     }
     if (_indexCoordinator != null) {
-      unawaited(Future.microtask(() => _indexCoordinator.indexNode(node)));
+      final coordinator = _indexCoordinator;
+      final docs = _projector.projectNode(
+        node,
+        workspaceId: destination.workspaceId,
+      );
+      unawaited(Future.microtask(() => coordinator.indexDocuments(docs)));
     }
 
     return node;
