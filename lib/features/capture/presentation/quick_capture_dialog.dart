@@ -84,22 +84,24 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
   }
 
   Future<void> _pickAttachments() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: true,
-    );
-    if (!mounted || result == null) return;
-    final attachments = [
-      for (final file in result.files)
-        if (file.bytes != null)
-          CaptureFileAttachment(
-            fileName: file.name,
-            mimeType: _mimeTypeFor(file.name),
-            bytes: file.bytes!,
-            localPath: file.path,
-          ),
-    ];
-    setState(() => _attachments.addAll(attachments));
+    try {
+      final result = await FilePicker.pickFiles(
+        allowMultiple: true,
+        withData: true,
+      );
+      if (!mounted || result == null) return;
+      final attachments = [
+        for (final file in result.files)
+          if (file.bytes != null)
+            CaptureFileAttachment(
+              fileName: file.name,
+              mimeType: _mimeTypeFor(file.name),
+              bytes: file.bytes!,
+              localPath: file.path,
+            ),
+      ];
+      setState(() => _attachments.addAll(attachments));
+    } catch (_) {}
   }
 
   String _mimeTypeFor(String fileName) {

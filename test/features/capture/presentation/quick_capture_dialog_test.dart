@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/capture/application/capture_providers.dart';
+import 'package:var_app/features/capture/application/capture_service.dart';
 import 'package:var_app/features/capture/domain/capture_destination.dart';
 import 'package:var_app/features/capture/presentation/quick_capture_dialog.dart';
 import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
@@ -23,6 +24,9 @@ void main() {
       return ProviderScope(
         overrides: [
           mindmapRepositoryProvider.overrideWithValue(mindmapRepository),
+          captureServiceProvider.overrideWith(
+            (ref) async => CaptureService(mindmapRepository: mindmapRepository),
+          ),
           availableCaptureDestinationsProvider.overrideWith((ref) async {
             return overrideDestinations ??
                 const [

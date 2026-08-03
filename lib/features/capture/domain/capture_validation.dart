@@ -29,6 +29,10 @@ class CaptureValidator {
       return true;
     }
     final parts = clean.split('.');
+    if (parts.length == 2 && parts[0] == '127') {
+      final val = int.tryParse(parts[1]);
+      if (val != null && val >= 0 && val <= 255) return true;
+    }
     if (parts.length != 4) return false;
     final values = parts.map(int.tryParse).toList();
     if (values.any((value) => value == null || value < 0 || value > 255)) {

@@ -164,17 +164,18 @@ class CaptureService {
             }
           }
 
+          var nodeToIndex = savedNode;
           if (extractions.isNotEmpty) {
             final updatedData = Map<String, Object?>.from(savedNode.data)
               ..['extractions'] = extractions;
-            final nodeWithExtractions = savedNode.copyWith(data: updatedData);
-            await _mindmapRepository.saveNode(nodeWithExtractions);
+            nodeToIndex = savedNode.copyWith(data: updatedData);
+            await _mindmapRepository.saveNode(nodeToIndex);
           }
 
           if (coordinator != null) {
             try {
               final docs = projector.projectNode(
-                savedNode,
+                nodeToIndex,
                 workspaceId: destination.workspaceId,
               );
               await coordinator.indexDocuments(docs);
