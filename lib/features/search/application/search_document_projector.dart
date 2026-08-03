@@ -28,6 +28,7 @@ final class SearchDocumentProjector {
       for (final entry in node.data.entries)
         if (_nodeDataKeys.contains(entry.key)) ..._userText(entry.value),
     ];
+    final annotationText = _annotationPinText(node.data['annotations']);
     final text = _join([
       node.title,
       node.body,
@@ -40,6 +41,7 @@ final class SearchDocumentProjector {
       ...node.contextTags,
       ...node.checklist.map((item) => item.title),
       ...dataText,
+      ...annotationText,
     ]);
     return [
       SearchDocument(
@@ -162,6 +164,15 @@ final class SearchDocumentProjector {
 
 extension<T> on List<T> {
   T? get firstOrNull => isEmpty ? null : first;
+}
+
+Iterable<String> _annotationPinText(Object? value) sync* {
+  if (value is! Map) return;
+  final pins = value['pins'];
+  if (pins is! Iterable) return;
+  for (final pin in pins) {
+    if (pin is Map) yield* _userText(pin['text']);
+  }
 }
 
 Iterable<String> _userText(Object? value) sync* {
