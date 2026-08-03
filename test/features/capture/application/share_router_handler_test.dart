@@ -48,7 +48,8 @@ void main() {
       );
 
       await tester.tap(find.text('Open'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
       expect(find.text('Quick Capture'), findsOneWidget);
       expect(find.text('Incoming OS Share'), findsOneWidget);
