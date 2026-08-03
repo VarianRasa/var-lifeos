@@ -9,7 +9,9 @@ import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 
 class QuickCaptureDialog extends ConsumerStatefulWidget {
-  const QuickCaptureDialog({super.key});
+  final CapturePayload? initialPayload;
+
+  const QuickCaptureDialog({super.key, this.initialPayload});
 
   @override
   ConsumerState<QuickCaptureDialog> createState() => _QuickCaptureDialogState();
@@ -24,6 +26,23 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
   DuplicateMatchResult _duplicateMatch = DuplicateMatchResult.none;
   MindmapNode? _matchedNode;
   final List<CaptureFileAttachment> _attachments = [];
+
+  @override
+  void initState() {
+    super.initState();
+    final payload = widget.initialPayload;
+    if (payload != null) {
+      if (payload.text != null) {
+        _textController.text = payload.text!;
+      }
+      if (payload.urls.isNotEmpty) {
+        _urlController.text = payload.urls.first;
+      }
+      if (payload.attachments.isNotEmpty) {
+        _attachments.addAll(payload.attachments);
+      }
+    }
+  }
 
   @override
   void dispose() {
