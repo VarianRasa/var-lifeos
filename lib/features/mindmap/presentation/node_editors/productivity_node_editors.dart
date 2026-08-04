@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_sticky_colors.dart';
 import '../../../../core/theme/node_visuals.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../domain/goal_progress.dart';
@@ -16,6 +17,7 @@ import '../../domain/node_type_payloads.dart';
 import '../../domain/plan_progress.dart';
 import '../../domain/task_checklist_progress.dart';
 
+import '../widgets/sticky_note_card_widget.dart';
 import 'checklist_node_editor.dart';
 import 'kanban_node_editor.dart';
 import 'note_node_editor.dart';
@@ -175,6 +177,17 @@ final class _ProductivityContent extends StatelessWidget {
     final node = context.node;
     final preset = context.effectivePreset;
     final compact = preset == NodeSizePreset.compact;
+
+    if (node.type == NodeType.note) {
+      final colorName = node.data['stickyColor'] as String?;
+      final colorOption = StickyColorOption.fromName(colorName);
+      return StickyNoteCardWidget(
+        title: node.title,
+        body: node.body,
+        colorOption: colorOption,
+      );
+    }
+
     return Container(
       key: ValueKey<String>('productivity-${node.type.name}-${preset.name}'),
       padding: EdgeInsets.all(compact ? 10 : 14),

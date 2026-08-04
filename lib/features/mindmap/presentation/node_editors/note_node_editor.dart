@@ -340,11 +340,28 @@ final class _NoteNodeEditorState extends State<NoteNodeEditor> {
                               : Icons.push_pin_outlined,
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Note color',
-                        onSelected: (color) => widget.onPayloadChanged(
-                          payload.copyWith(color: color),
-                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Note color',
+                          onSelected: (color) {
+                            widget.onPayloadChanged(payload.copyWith(color: color));
+                            final stickyName = switch (color) {
+                              'amber' => 'yellow',
+                              'blue' => 'blue',
+                              'green' => 'green',
+                              'rose' => 'pink',
+                              'violet' => 'purple',
+                              _ => 'yellow',
+                            };
+                            widget.onNodeChanged(
+                              widget.node.copyWith(
+                                data: {
+                                  ...widget.node.data,
+                                  'stickyColor': stickyName,
+                                },
+                                updatedAt: DateTime.now(),
+                              ),
+                            );
+                          },
                         icon: Icon(
                           Icons.palette_outlined,
                           color: _colorForToken(payload.color, semantic),
