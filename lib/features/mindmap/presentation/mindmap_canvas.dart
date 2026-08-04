@@ -52,6 +52,7 @@ import '../domain/inline_node_workspace_policy.dart';
 import '../domain/kanban_board.dart';
 import '../domain/life_os_summary.dart';
 import '../domain/mindmap_node.dart';
+import '../domain/mindmap_node_data.dart';
 import '../domain/node_attachment.dart';
 import '../domain/node_presentation.dart';
 import '../domain/node_type_payloads.dart';
@@ -1505,11 +1506,17 @@ class MindmapCanvasState extends State<MindmapCanvas>
       if (groupId == null) {
         data
           ..remove('groupId')
-          ..remove('groupTitle');
+          ..remove('groupTitle')
+          ..remove('groupColor')
+          ..remove('groupCollapsed')
+          ..remove('groupLayout');
       } else {
         data
           ..['groupId'] = groupId
-          ..['groupTitle'] = 'Group';
+          ..['groupTitle'] = 'Group'
+          ..['groupColor'] = 'slate'
+          ..['groupCollapsed'] = false
+          ..['groupLayout'] = 'free';
       }
       await callback(node.copyWith(data: data, updatedAt: DateTime.now()));
     }
@@ -1584,11 +1591,75 @@ class MindmapCanvasState extends State<MindmapCanvas>
       final data = Map<String, Object?>.of(node.data)
         ..remove('groupId')
         ..remove('groupTitle')
+        ..remove('groupColor')
+        ..remove('groupCollapsed')
+        ..remove('groupLayout')
         ..remove('groupLocked')
         ..remove('swimlaneMode');
       await callback(node.copyWith(data: data, updatedAt: DateTime.now()));
     }
     setState(() => _selectedNodeIds.removeAll(nodes.map((node) => node.id)));
+  }
+
+  Future<void> _setGroupColor(List<MindmapNode> nodes, String color) async {
+    final callback = widget.onNodeUpdated;
+    if (callback == null) return;
+    for (final node in nodes) {
+      await callback(
+        node.copyWith(
+          data: {...node.data, 'groupColor': color},
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
+  }
+
+  Future<void> _setGroupCollapsed(
+    List<MindmapNode> nodes,
+    bool collapsed,
+  ) async {
+    final callback = widget.onNodeUpdated;
+    if (callback == null) return;
+    for (final node in nodes) {
+      await callback(
+        node.copyWith(
+          data: {...node.data, 'groupCollapsed': collapsed},
+          updatedAt: DateTime.now(),
+        ),
+      );
+    }
+  }
+
+  Future<void> _setGroupLayout(List<MindmapNode> nodes, String layout) async {
+    final callback = widget.onNodeUpdated;
+    if (callback == null || nodes.isEmpty) return;
+    final now = DateTime.now();
+    for (final node in nodes) {
+      await callback(
+        node.copyWith(
+          data: {...node.data, 'groupLayout': layout},
+          updatedAt: now,
+        ),
+      );
+    }
+
+    if (layout == 'column') {
+      final movedCallback = widget.onNodeMoved;
+      if (movedCallback == null) return;
+      final sorted = List<MindmapNode>.from(nodes)
+        ..sort((a, b) => _positionFor(a).dy.compareTo(_positionFor(b).dy));
+      final firstPos = _positionFor(sorted.first);
+      var currentY = firstPos.dy;
+      final updates = <MindmapNode>[];
+      final positions = <String, CanvasPosition>{};
+
+      for (final node in sorted) {
+        positions[node.id] = CanvasPosition(firstPos.dx, currentY);
+        updates.add(node);
+        currentY += _nodeSizeFor(node).height + 12.0;
+      }
+      await _persistMovedNodes(updates, positions);
+    }
   }
 
   Future<void> _setGroupSwimlaneMode(
@@ -5923,10 +5994,23 @@ class MindmapCanvasState extends State<MindmapCanvas>
                             true)
                       reference.mindmapNodeId!,
                 };
-                final visibleNodes = filteredNodes
+                 final visibleNodes = filteredNodes
                     .where((node) => !hiddenColumnNodeIds.contains(node.id))
+                    .where(
+                      (node) =>
+                          node.data['groupId'] == null ||
+                          widget.nodes
+                                  .where(
+                                    (n) =>
+                                        n.data['groupId'] == node.data['groupId'],
+                                  )
+                                  .firstOrNull
+                                  ?.data['groupCollapsed'] !=
+                              true,
+                    )
                     .where((node) => _isNodeVisible(node, origin))
                     .toList(growable: false);
+
                 final visibleArea = _visibleSceneRect;
                 final canvasObjectCandidates = visibleArea == null
                     ? _orderedCanvasObjects()
@@ -6336,12 +6420,28 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                 entry.value,
                                                 locked,
                                               ),
-                                          onSetSwimlaneMode: (mode) =>
-                                              _setGroupSwimlaneMode(
-                                                entry.value,
-                                                mode,
-                                              ),
-                                          onUngroup: () =>
+            onSetSwimlaneMode: (mode) =>
+                _setGroupSwimlaneMode(
+                  entry.value,
+                  mode,
+                ),
+            onSetColor: (color) =>
+                _setGroupColor(
+                  entry.value,
+                  color,
+                ),
+            onToggleCollapsed: () =>
+                _setGroupCollapsed(
+                  entry.value,
+                  !(entry.value.first.data['groupCollapsed'] == true),
+                ),
+            onSetLayout: (layout) =>
+                _setGroupLayout(
+                  entry.value,
+                  layout,
+                ),
+            onUngroup: () =>
+
                                               _ungroupNodes(entry.value),
                                         ),
                                       for (final source in visibleNodes)
@@ -9667,7 +9767,79 @@ class MindmapCanvasState extends State<MindmapCanvas>
     }
     _resetNodeGuideState();
     _nodeDragGlobalPosition = null;
-    unawaited(_persistMovedNodesWithColumns(movingNodes, finalPositions));
+    unawaited(
+      _persistMovedNodesWithColumns(movingNodes, finalPositions).then((_) async {
+        if (movingNodes.length == 1) {
+          await _updateGroupMembershipAfterMove(
+            movingNodes.single,
+            finalPositions[movingNodes.single.id]!,
+          );
+        }
+      }),
+    );
+  }
+
+  Future<void> _updateGroupMembershipAfterMove(
+    MindmapNode node,
+    CanvasPosition position,
+  ) async {
+    final callback = widget.onNodeUpdated;
+    if (callback == null) return;
+    final center = Offset(
+      position.dx + _nodeSizeFor(node).width / 2,
+      position.dy + _nodeSizeFor(node).height / 2,
+    );
+    final groups = <String, List<MindmapNode>>{};
+    for (final candidate in widget.nodes) {
+      if (candidate.id == node.id) continue;
+      final groupId = candidate.data['groupId'];
+      if (groupId is String && groupId.isNotEmpty) {
+        groups.putIfAbsent(groupId, () => []).add(candidate);
+      }
+    }
+    MapEntry<String, List<MindmapNode>>? target;
+    final currentGroupId = node.data['groupId'] as String?;
+    for (final entry in groups.entries) {
+      if (entry.key != currentGroupId && entry.value.length < 2) continue;
+      Rect? bounds;
+      for (final member in entry.value) {
+        final memberPosition = _positionFor(member);
+        final rect = Offset(memberPosition.dx, memberPosition.dy) &
+            _nodeSizeFor(member);
+        bounds = bounds == null ? rect : bounds.expandToInclude(rect);
+      }
+      final margin = entry.key == currentGroupId ? 48.0 : 28.0;
+      if (bounds!.inflate(margin).contains(center)) {
+        target = entry;
+        break;
+      }
+    }
+
+    if (target != null && target.key != currentGroupId) {
+      final metadata = groupMetadataFromData(target.value.first.data);
+      await callback(
+        node.copyWith(
+          data: {
+            ...dataWithGroupMetadata(node.data, metadata),
+            'groupId': target.key,
+          },
+          updatedAt: DateTime.now(),
+        ),
+      );
+      return;
+    }
+
+    if (currentGroupId != null && target?.key != currentGroupId) {
+      final data = Map<String, Object?>.of(node.data)
+        ..remove('groupId')
+        ..remove('groupTitle')
+        ..remove('groupColor')
+        ..remove('groupCollapsed')
+        ..remove('groupLayout')
+        ..remove('groupLocked')
+        ..remove('swimlaneMode');
+      await callback(node.copyWith(data: data, updatedAt: DateTime.now()));
+    }
   }
 
   Future<void> _persistMovedNodesWithColumns(
@@ -11508,6 +11680,9 @@ class _PositionedNodeGroup extends StatelessWidget {
     required this.onRename,
     required this.onToggleLock,
     required this.onSetSwimlaneMode,
+    required this.onSetColor,
+    required this.onToggleCollapsed,
+    required this.onSetLayout,
     required this.onUngroup,
   });
 
@@ -11524,7 +11699,37 @@ class _PositionedNodeGroup extends StatelessWidget {
   final Future<void> Function() onRename;
   final Future<void> Function(bool locked) onToggleLock;
   final Future<void> Function(String mode) onSetSwimlaneMode;
+  final Future<void> Function(String color) onSetColor;
+  final Future<void> Function() onToggleCollapsed;
+  final Future<void> Function(String layout) onSetLayout;
   final Future<void> Function() onUngroup;
+
+  Color _resolveColor(String value) {
+    switch (value.toLowerCase()) {
+      case 'indigo':
+        return const Color(0xFF6366F1);
+      case 'emerald':
+        return const Color(0xFF10B981);
+      case 'amber':
+        return const Color(0xFFF59E0B);
+      case 'rose':
+        return const Color(0xFFF43F5E);
+      case 'sky':
+        return const Color(0xFF0EA5E9);
+      case 'slate':
+        return const Color(0xFF64748B);
+      default:
+        if (value.startsWith('#') && (value.length == 7 || value.length == 9)) {
+          final hex = value.replaceFirst('#', '');
+          final parsed = int.tryParse(
+            hex.length == 6 ? 'FF$hex' : hex,
+            radix: 16,
+          );
+          if (parsed != null) return Color(parsed);
+        }
+        return const Color(0xFF64748B);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -11534,8 +11739,19 @@ class _PositionedNodeGroup extends StatelessWidget {
       final rect = Offset(position.dx, position.dy) & sizes[node.id]!;
       bounds = bounds == null ? rect : bounds.expandToInclude(rect);
     }
-    final frame = bounds!.inflate(28).translate(origin.dx, origin.dy);
-    final title = nodes.first.data['groupTitle'] as String? ?? 'Group';
+    final meta = groupMetadataFromData(nodes.first.data);
+    final accentColor = _resolveColor(meta.color);
+    final isCollapsed = meta.isCollapsed;
+
+    final frame = isCollapsed
+        ? (Rect.fromLTWH(
+            bounds!.left,
+            bounds.top,
+            math.max(220.0, bounds.width),
+            72.0,
+          ).inflate(12).translate(origin.dx, origin.dy))
+        : bounds!.inflate(28).translate(origin.dx, origin.dy);
+    final title = meta.title;
     final swimlaneMode = nodes.first.data['swimlaneMode'] as String? ?? 'none';
     return Positioned.fromRect(
       rect: frame,
@@ -11545,23 +11761,23 @@ class _PositionedNodeGroup extends StatelessWidget {
             child: DecoratedBox(
               key: ValueKey('mindmap-group-$groupId'),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.025),
+                color: accentColor.withValues(alpha: isCollapsed ? 0.16 : 0.04),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.24),
+                  color: accentColor.withValues(alpha: isCollapsed ? 0.6 : 0.35),
                   width: 2,
                 ),
               ),
             ),
           ),
-          if (swimlaneMode == 'horizontal')
+          if (!isCollapsed && swimlaneMode == 'horizontal')
             Center(
               child: Divider(
                 color: Colors.white.withValues(alpha: 0.2),
                 thickness: 1.5,
               ),
             )
-          else if (swimlaneMode == 'vertical')
+          else if (!isCollapsed && swimlaneMode == 'vertical')
             Center(
               child: VerticalDivider(
                 color: Colors.white.withValues(alpha: 0.2),
@@ -11578,18 +11794,105 @@ class _PositionedNodeGroup extends StatelessWidget {
                   key: ValueKey('mindmap-group-handle-$groupId'),
                   behavior: HitTestBehavior.opaque,
                   onTap: isPresentationMode ? null : onSelect,
-                  onSecondaryTapDown: isPresentationMode
+                  onPanUpdate: isLocked || isPresentationMode
                       ? null
-                      : (details) async {
-                          final action = await showMenu<String>(
-                            context: context,
-                            position: RelativeRect.fromLTRB(
-                              details.globalPosition.dx,
-                              details.globalPosition.dy,
-                              details.globalPosition.dx,
-                              details.globalPosition.dy,
+                      : (details) => onPanUpdate(details.delta),
+                  onPanEnd: isLocked || isPresentationMode
+                      ? null
+                      : (_) => onPanEnd(),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.max,
+                      children: [
+                        if (isLocked) ...[
+                          const Icon(
+                            Icons.lock,
+                            size: 14,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        InkWell(
+                          onTap: isPresentationMode ? null : () => onRename(),
+                          child: Text(
+                            title,
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.24),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${nodes.length} items',
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Colors.white70,
+                                  fontSize: 10,
+                                ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (!isPresentationMode) ...[
+                          IconButton(
+                            key: ValueKey(
+                              'mindmap-group-collapse-$groupId',
                             ),
-                            items: [
+                            icon: Icon(
+                              isCollapsed
+                                  ? Icons.unfold_more
+                                  : Icons.unfold_less,
+                              size: 18,
+                              color: Colors.white70,
+                            ),
+                            onPressed: onToggleCollapsed,
+                          ),
+                          PopupMenuButton<String>(
+                            key: ValueKey('mindmap-group-menu-$groupId'),
+                            icon: const Icon(
+                              Icons.more_vert,
+                              size: 18,
+                              color: Colors.white70,
+                            ),
+                            onSelected: (action) async {
+                              if (action == 'rename') await onRename();
+                              if (action == 'lock') {
+                                await onToggleLock(!isLocked);
+                              }
+                              if (action.startsWith('color_')) {
+                                await onSetColor(
+                                  action.replaceFirst('color_', ''),
+                                );
+                              }
+                              if (action == 'layout_free') {
+                                await onSetLayout('free');
+                              }
+                              if (action == 'layout_column') {
+                                await onSetLayout('column');
+                              }
+                              if (action == 'swimlane_h') {
+                                await onSetSwimlaneMode('horizontal');
+                              }
+                              if (action == 'swimlane_v') {
+                                await onSetSwimlaneMode('vertical');
+                              }
+                              if (action == 'swimlane_none') {
+                                await onSetSwimlaneMode('none');
+                              }
+                              if (action == 'ungroup') await onUngroup();
+                            },
+                            itemBuilder: (context) => [
                               const PopupMenuItem(
                                 value: 'rename',
                                 child: Text('Rename group'),
@@ -11600,6 +11903,40 @@ class _PositionedNodeGroup extends StatelessWidget {
                                   isLocked ? 'Unlock group' : 'Lock group',
                                 ),
                               ),
+                              PopupMenuItem(
+                                value: 'layout_${meta.layout == 'column' ? 'free' : 'column'}',
+                                child: Text(
+                                  meta.layout == 'column'
+                                      ? 'Layout: Free'
+                                      : 'Layout: Vertical Column',
+                                ),
+                              ),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem(
+                                value: 'color_slate',
+                                child: Text('Color: Slate'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'color_indigo',
+                                child: Text('Color: Indigo'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'color_emerald',
+                                child: Text('Color: Emerald'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'color_amber',
+                                child: Text('Color: Amber'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'color_rose',
+                                child: Text('Color: Rose'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'color_sky',
+                                child: Text('Color: Sky'),
+                              ),
+                              const PopupMenuDivider(),
                               const PopupMenuItem(
                                 value: 'swimlane_h',
                                 child: Text('Swimlane (Horizontal)'),
@@ -11617,47 +11954,8 @@ class _PositionedNodeGroup extends StatelessWidget {
                                 child: Text('Ungroup'),
                               ),
                             ],
-                          );
-                          if (action == 'rename') await onRename();
-                          if (action == 'lock') await onToggleLock(!isLocked);
-                          if (action == 'swimlane_h') {
-                            await onSetSwimlaneMode('horizontal');
-                          }
-                          if (action == 'swimlane_v') {
-                            await onSetSwimlaneMode('vertical');
-                          }
-                          if (action == 'swimlane_none') {
-                            await onSetSwimlaneMode('none');
-                          }
-                          if (action == 'ungroup') await onUngroup();
-                        },
-                  onPanUpdate: isLocked || isPresentationMode
-                      ? null
-                      : (details) => onPanUpdate(details.delta),
-                  onPanEnd: isLocked || isPresentationMode
-                      ? null
-                      : (_) => onPanEnd(),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 8, 24, 12),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isLocked) ...[
-                          const Icon(
-                            Icons.lock,
-                            size: 14,
-                            color: Colors.white70,
                           ),
-                          const SizedBox(width: 6),
                         ],
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.labelMedium
-                              ?.copyWith(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
                       ],
                     ),
                   ),
@@ -11670,6 +11968,7 @@ class _PositionedNodeGroup extends StatelessWidget {
     );
   }
 }
+
 
 class _PositionedCanvasMediaObject extends StatefulWidget {
   const _PositionedCanvasMediaObject({
@@ -16477,7 +16776,7 @@ class _ConnectionLinesPainter extends CustomPainter {
 
         if (style.arrowhead == ConnectionArrowhead.target ||
             style.arrowhead == ConnectionArrowhead.both) {
-          final metrics = path.computeMetrics();
+          final metrics = path.computeMetrics().toList();
           if (metrics.isNotEmpty) {
             final metric = metrics.first;
             final tangent = metric.getTangentForOffset(metric.length);
@@ -16493,7 +16792,7 @@ class _ConnectionLinesPainter extends CustomPainter {
           }
         }
         if (style.arrowhead == ConnectionArrowhead.both) {
-          final metrics = path.computeMetrics();
+          final metrics = path.computeMetrics().toList();
           if (metrics.isNotEmpty) {
             final metric = metrics.first;
             final tangent = metric.getTangentForOffset(0);

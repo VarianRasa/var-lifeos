@@ -5355,7 +5355,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
             )
             .constraints
             ?.minHeight,
-        2,
+        6,
       );
     },
   );
@@ -5531,6 +5531,54 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     expect(moved.keys, containsAll(['group-a', 'group-b']));
     expect(moved['group-a'], const CanvasPosition(-150, 20));
     expect(moved['group-b'], const CanvasPosition(210, 20));
+  });
+
+  testWidgets('MindmapCanvas renders item badge and color accent in group header', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 7, 11);
+    final nodes = [
+      MindmapNode.create(
+        id: 'group-a',
+        type: NodeType.task,
+        title: 'Task A',
+        day: day,
+        position: const CanvasPosition(-180, 0),
+        data: const {
+          'groupId': 'styled-group',
+          'groupTitle': 'Sprint',
+          'groupColor': 'emerald',
+        },
+        now: day,
+      ),
+      MindmapNode.create(
+        id: 'group-b',
+        type: NodeType.note,
+        title: 'Note B',
+        day: day,
+        position: const CanvasPosition(180, 0),
+        data: const {
+          'groupId': 'styled-group',
+          'groupTitle': 'Sprint',
+          'groupColor': 'emerald',
+        },
+        now: day,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MindmapCanvas(nodes: nodes)),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Sprint'), findsOneWidget);
+    expect(find.text('2 items'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('mindmap-group-collapse-styled-group')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('MindmapCanvas does not drag a locked persisted group', (
