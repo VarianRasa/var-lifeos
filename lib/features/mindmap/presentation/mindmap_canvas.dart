@@ -42,6 +42,7 @@ import '../domain/canvas_position.dart';
 import '../domain/canvas_scene_bounds.dart';
 import '../domain/canvas_spatial_index.dart' as spatial;
 import '../domain/canvas_workshop.dart';
+import '../domain/connection_style.dart';
 import '../domain/goal_progress.dart';
 import '../domain/habit_completion.dart';
 import '../domain/hybrid_timer.dart';
@@ -64,6 +65,7 @@ import 'node_editors/media_travel_node_editors.dart';
 import 'node_shell.dart';
 import 'node_type_content.dart';
 import 'node_type_inline_editor.dart';
+import 'widgets/connection_style_bar.dart';
 
 Uint8List _attachmentBytes(List<int> bytes) =>
     bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
@@ -1964,6 +1966,56 @@ class MindmapCanvasState extends State<MindmapCanvas>
   String _connectionLabel(MindmapNode source, String targetId) {
     final labels = source.data['connectionLabels'];
     return labels is Map ? (labels[targetId] as String? ?? '') : '';
+  }
+
+  ConnectionStyle _connectionStyle(MindmapNode source, String targetId) {
+    final styles = source.data['connection_styles'];
+    final styleMap = styles is Map ? styles[targetId] : null;
+    var style = styleMap is Map
+        ? ConnectionStyle.fromJson((styleMap).cast<String, dynamic>())
+        : const ConnectionStyle();
+    final label = _connectionLabel(source, targetId);
+    if (label.isNotEmpty && (style.label == null || style.label!.isEmpty)) {
+      style = style.copyWith(label: label);
+    }
+    return style;
+  }
+
+  Future<void> _updateConnectionStyle(
+    MindmapNode source,
+    String targetId,
+    ConnectionStyle newStyle,
+  ) async {
+    final styles = <String, Object?>{
+      if (source.data['connection_styles'] is Map)
+        ...(source.data['connection_styles'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+    };
+    styles[targetId] = newStyle.toJson();
+
+    final labels = <String, Object?>{
+      if (source.data['connectionLabels'] is Map)
+        ...(source.data['connectionLabels'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+    };
+    if (newStyle.label != null && newStyle.label!.isNotEmpty) {
+      labels[targetId] = newStyle.label!;
+    } else {
+      labels.remove(targetId);
+    }
+
+    await widget.onNodeUpdated?.call(
+      source.copyWith(
+        data: {
+          ...source.data,
+          'connection_styles': styles,
+          'connectionLabels': labels,
+        },
+        updatedAt: DateTime.now(),
+      ),
+    );
   }
 
   Future<void> _editConnectionLabel(MindmapNode source, String targetId) async {
@@ -6364,6 +6416,96 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                             node.id == targetId,
                                                       ),
                                                     ),
+                                              ),
+                                      if (_selectedConnectionKey != null)
+                                        for (final source in visibleNodes)
+                                          for (final targetId
+                                              in source.relatedNodeIds)
+                                            if (visibleNodes.any(
+                                                  (node) =>
+                                                      node.id == targetId,
+                                                ) &&
+                                                _selectedConnectionKey ==
+                                                    _connectionKey(
+                                                      source,
+                                                      visibleNodes.firstWhere(
+                                                        (node) =>
+                                                            node.id == targetId,
+                                                      ),
+                                                    ))
+                                              Builder(
+                                                builder: (context) {
+                                                  final target =
+                                                      visibleNodes.firstWhere(
+                                                    (node) =>
+                                                        node.id == targetId,
+                                                  );
+                                                  final srcPos =
+                                                      _positionFor(source);
+                                                  final tgtPos =
+                                                      _positionFor(target);
+                                                  final srcSize =
+                                                      _nodeSizeFor(source);
+                                                  final tgtSize =
+                                                      _nodeSizeFor(target);
+                                                  final startPt = origin +
+                                                      Offset(
+                                                        srcPos.dx +
+                                                            srcSize.width -
+                                                            2,
+                                                        srcPos.dy +
+                                                            _nodePortY(
+                                                              srcSize,
+                                                            ),
+                                                      );
+                                                  final endPt = origin +
+                                                      Offset(
+                                                        tgtPos.dx + 2,
+                                                        tgtPos.dy +
+                                                            _nodePortY(
+                                                              tgtSize,
+                                                            ),
+                                                      );
+                                                  final mid = Offset(
+                                                    (startPt.dx + endPt.dx) / 2,
+                                                    (startPt.dy + endPt.dy) / 2,
+                                                  );
+                                                  final style =
+                                                      _connectionStyle(
+                                                    source,
+                                                    targetId,
+                                                  );
+                                                  return Positioned(
+                                                    left: mid.dx - 120,
+                                                    top: mid.dy + 24,
+                                                    child: ConnectionStyleBar(
+                                                      style: style,
+                                                      onStyleChanged:
+                                                          (newStyle) {
+                                                        unawaited(
+                                                          _updateConnectionStyle(
+                                                            source,
+                                                            targetId,
+                                                            newStyle,
+                                                          ),
+                                                        );
+                                                      },
+                                                      onDelete: () {
+                                                        widget
+                                                            .onNodeDisconnected
+                                                            ?.call(
+                                                          source,
+                                                          target,
+                                                        );
+                                                        setState(
+                                                          () =>
+                                                              _selectedConnectionKey =
+                                                                  null,
+                                                        );
+                                                      },
+                                                    ),
+                                                  );
+                                                },
                                               ),
                                       for (final object in visibleCanvasObjects)
                                         if (object.isVisible &&
@@ -16103,6 +16245,120 @@ class _ConnectionLinesPainter extends CustomPainter {
     ).inputPort;
   }
 
+  ConnectionStyle _styleFor(MindmapNode source, String targetId) {
+    final styles = source.data['connection_styles'];
+    final styleMap = styles is Map ? styles[targetId] : null;
+    return styleMap is Map
+        ? ConnectionStyle.fromJson((styleMap).cast<String, dynamic>())
+        : const ConnectionStyle();
+  }
+
+  Path _buildPath(Offset pA, Offset pB, ConnectionLineType lineType) {
+    final dx = (pB.dx - pA.dx).abs();
+    final dy = (pB.dy - pA.dy).abs();
+    switch (lineType) {
+      case ConnectionLineType.straight:
+        return Path()
+          ..moveTo(pA.dx, pA.dy)
+          ..lineTo(pB.dx, pB.dy);
+      case ConnectionLineType.orthogonal:
+        final midX = (pA.dx + pB.dx) / 2;
+        return Path()
+          ..moveTo(pA.dx, pA.dy)
+          ..lineTo(midX, pA.dy)
+          ..lineTo(midX, pB.dy)
+          ..lineTo(pB.dx, pB.dy);
+      case ConnectionLineType.bezier:
+        Offset cp1;
+        Offset cp2;
+        if (dx > dy) {
+          cp1 = Offset(pA.dx + (pB.dx - pA.dx) * 0.5, pA.dy);
+          cp2 = Offset(pB.dx - (pB.dx - pA.dx) * 0.5, pB.dy);
+        } else {
+          cp1 = Offset(pA.dx, pA.dy + (pB.dy - pA.dy) * 0.5);
+          cp2 = Offset(pB.dx, pB.dy - (pB.dy - pA.dy) * 0.5);
+        }
+        return Path()
+          ..moveTo(pA.dx, pA.dy)
+          ..cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, pB.dx, pB.dy);
+    }
+  }
+
+  void _drawDashedPath(Canvas canvas, Path path, Paint paint,
+      ConnectionLinePattern pattern) {
+    if (pattern == ConnectionLinePattern.solid) {
+      canvas.drawPath(path, paint);
+      return;
+    }
+    final metrics = path.computeMetrics();
+    final double dashLen = pattern == ConnectionLinePattern.dashed ? 8.0 : 2.0;
+    const double gapLen = 4.0;
+    for (final metric in metrics) {
+      var distance = 0.0;
+      var draw = true;
+      while (distance < metric.length) {
+        final segLen = draw ? dashLen : gapLen;
+        final end = (distance + segLen).clamp(0.0, metric.length);
+        if (draw) {
+          final seg = metric.extractPath(distance, end);
+          canvas.drawPath(seg, paint);
+        }
+        distance = end;
+        draw = !draw;
+      }
+    }
+  }
+
+  void _drawArrowhead(Canvas canvas, Offset tip, Offset from, Paint paint) {
+    final dir = tip - from;
+    final len = dir.distance;
+    if (len == 0) return;
+    final unitDir = dir / len;
+    final normal = Offset(-unitDir.dy, unitDir.dx);
+    final arrowBase = tip - unitDir * 7;
+    final arrowPath = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo((arrowBase + normal * 4.5).dx, (arrowBase + normal * 4.5).dy)
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo((arrowBase - normal * 4.5).dx, (arrowBase - normal * 4.5).dy);
+    canvas.drawPath(arrowPath, paint);
+  }
+
+  void _drawLabel(Canvas canvas, Path path, String label, Color color) {
+    final metrics = path.computeMetrics();
+    if (metrics.isEmpty) return;
+    final metric = metrics.first;
+    final tangent = metric.getTangentForOffset(metric.length / 2);
+    if (tangent == null) return;
+    final mid = tangent.position;
+    final textSpan = TextSpan(
+      text: label,
+      style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500),
+    );
+    final tp = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final pillW = tp.width + 10;
+    final pillH = tp.height + 6;
+    final pillRect = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: mid, width: pillW, height: pillH),
+      const Radius.circular(6),
+    );
+    canvas.drawRRect(
+      pillRect,
+      Paint()..color = const Color(0xFF1E1E1E),
+    );
+    canvas.drawRRect(
+      pillRect,
+      Paint()
+        ..color = color.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    tp.paint(canvas, Offset(mid.dx - tp.width / 2, mid.dy - tp.height / 2));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final Map<String, MindmapNode> nodeMap = {for (final n in nodes) n.id: n};
@@ -16116,7 +16372,6 @@ class _ConnectionLinesPainter extends CustomPainter {
       for (final relatedId in node.relatedNodeIds) {
         if (!nodeMap.containsKey(relatedId)) continue;
 
-        // Check duplicate
         final connKey = node.id.compareTo(relatedId) < 0
             ? '${node.id}-$relatedId'
             : '$relatedId-${node.id}';
@@ -16126,79 +16381,94 @@ class _ConnectionLinesPainter extends CustomPainter {
         final targetNode = nodeMap[relatedId]!;
         final pB = _getInputPort(targetNode);
         final colorB = nodeColors[targetNode.type]!;
+        final style = _styleFor(node, relatedId);
+
+        final lineColor = style.colorHex != null
+            ? Color(int.parse('FF${style.colorHex!.replaceFirst('#', '')}',
+                radix: 16))
+            : Color.lerp(colorA, colorB, 0.5)!;
 
         final paint = Paint()
-          ..strokeWidth = 3.0
+          ..strokeWidth = style.strokeWidth
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
-          ..color = Color.lerp(colorA, colorB, 0.5)!.withValues(alpha: 0.82);
+          ..color = lineColor.withValues(alpha: 0.82);
 
-        final dx = (pB.dx - pA.dx).abs();
-        final dy = (pB.dy - pA.dy).abs();
-
-        Offset cp1;
-        Offset cp2;
-        if (dx > dy) {
-          cp1 = Offset(pA.dx + (pB.dx - pA.dx) * 0.5, pA.dy);
-          cp2 = Offset(pB.dx - (pB.dx - pA.dx) * 0.5, pB.dy);
-        } else {
-          cp1 = Offset(pA.dx, pA.dy + (pB.dy - pA.dy) * 0.5);
-          cp2 = Offset(pB.dx, pB.dy - (pB.dy - pA.dy) * 0.5);
-        }
-
-        final path = Path()
-          ..moveTo(pA.dx, pA.dy)
-          ..cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, pB.dx, pB.dy);
-        canvas.drawPath(path, paint);
+        final path = _buildPath(pA, pB, style.lineType);
+        _drawDashedPath(canvas, path, paint, style.linePattern);
 
         final sketchPaint = Paint()
           ..strokeWidth = 1.0
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
-          ..color = Color.lerp(colorA, colorB, 0.5)!.withValues(alpha: 0.36);
+          ..color = lineColor.withValues(alpha: 0.36);
 
-        final sketchPath = Path()..moveTo(pA.dx + 1.2, pA.dy - 0.8);
-        Offset scp1;
-        Offset scp2;
-        if (dx > dy) {
-          scp1 = Offset(cp1.dx + 2.0, cp1.dy - 1.2);
-          scp2 = Offset(cp2.dx - 1.2, cp2.dy + 1.8);
-        } else {
-          scp1 = Offset(cp1.dx - 1.2, cp1.dy + 2.0);
-          scp2 = Offset(cp2.dx + 1.8, cp2.dy - 1.2);
+        final dx = (pB.dx - pA.dx).abs();
+        final dy = (pB.dy - pA.dy).abs();
+        if (style.lineType == ConnectionLineType.bezier) {
+          final sketchPath = Path()..moveTo(pA.dx + 1.2, pA.dy - 0.8);
+          Offset scp1;
+          Offset scp2;
+          if (dx > dy) {
+            final cp1 = Offset(pA.dx + (pB.dx - pA.dx) * 0.5, pA.dy);
+            final cp2 = Offset(pB.dx - (pB.dx - pA.dx) * 0.5, pB.dy);
+            scp1 = Offset(cp1.dx + 2.0, cp1.dy - 1.2);
+            scp2 = Offset(cp2.dx - 1.2, cp2.dy + 1.8);
+          } else {
+            final cp1 = Offset(pA.dx, pA.dy + (pB.dy - pA.dy) * 0.5);
+            final cp2 = Offset(pB.dx, pB.dy - (pB.dy - pA.dy) * 0.5);
+            scp1 = Offset(cp1.dx - 1.2, cp1.dy + 2.0);
+            scp2 = Offset(cp2.dx + 1.8, cp2.dy - 1.2);
+          }
+          sketchPath.cubicTo(
+            scp1.dx, scp1.dy,
+            scp2.dx, scp2.dy,
+            pB.dx + 0.8, pB.dy - 0.8,
+          );
+          canvas.drawPath(sketchPath, sketchPaint);
         }
-        sketchPath.cubicTo(
-          scp1.dx,
-          scp1.dy,
-          scp2.dx,
-          scp2.dy,
-          pB.dx + 0.8,
-          pB.dy - 0.8,
-        );
-        canvas.drawPath(sketchPath, sketchPaint);
 
-        // Draw arrowhead pointing at target port pB.
-        final dir = pB - cp2;
-        final len = dir.distance;
-        if (len > 0) {
-          final unitDir = dir / len;
-          final arrowTip = pB - unitDir * 4.5;
-          final normal = Offset(-unitDir.dy, unitDir.dx);
-          final arrowLeft = arrowTip - unitDir * 7 + normal * 4.5;
-          final arrowRight = arrowTip - unitDir * 7 - normal * 4.5;
+        final arrowPaint = Paint()
+          ..strokeWidth = 1.6
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..color = lineColor.withValues(alpha: 0.72);
 
-          final arrowPath = Path()
-            ..moveTo(arrowTip.dx, arrowTip.dy)
-            ..lineTo(arrowLeft.dx, arrowLeft.dy)
-            ..moveTo(arrowTip.dx, arrowTip.dy)
-            ..lineTo(arrowRight.dx, arrowRight.dy);
+        if (style.arrowhead == ConnectionArrowhead.target ||
+            style.arrowhead == ConnectionArrowhead.both) {
+          final metrics = path.computeMetrics();
+          if (metrics.isNotEmpty) {
+            final metric = metrics.first;
+            final tangent = metric.getTangentForOffset(metric.length);
+            if (tangent != null) {
+              final from = metric
+                  .getTangentForOffset(
+                      (metric.length - 1).clamp(0, metric.length))
+                  ?.position;
+              if (from != null) {
+                _drawArrowhead(canvas, pB, from, arrowPaint);
+              }
+            }
+          }
+        }
+        if (style.arrowhead == ConnectionArrowhead.both) {
+          final metrics = path.computeMetrics();
+          if (metrics.isNotEmpty) {
+            final metric = metrics.first;
+            final tangent = metric.getTangentForOffset(0);
+            if (tangent != null) {
+              final to =
+                  metric.getTangentForOffset(1.0.clamp(0, metric.length))
+                      ?.position;
+              if (to != null) {
+                _drawArrowhead(canvas, pA, to, arrowPaint);
+              }
+            }
+          }
+        }
 
-          final arrowPaint = Paint()
-            ..strokeWidth = 1.6
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..color = Color.lerp(colorA, colorB, 0.5)!.withValues(alpha: 0.72);
-          canvas.drawPath(arrowPath, arrowPaint);
+        if (style.label != null && style.label!.isNotEmpty) {
+          _drawLabel(canvas, path, style.label!, lineColor);
         }
 
         final endpointPaintA = Paint()..color = colorA.withValues(alpha: 0.95);
