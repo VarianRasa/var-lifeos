@@ -26,6 +26,8 @@ import '../../../core/theme/app_design_tokens.dart';
 import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
+import '../application/canvas_file_drop_handler.dart';
+import '../application/canvas_file_drop_reader.dart';
 import '../application/collaboration_controller.dart';
 import '../application/mindmap_providers.dart';
 import '../application/node_inline_edit_controller.dart';
@@ -65,6 +67,7 @@ import 'node_editors/media_travel_node_editors.dart';
 import 'node_shell.dart';
 import 'node_type_content.dart';
 import 'node_type_inline_editor.dart';
+import 'widgets/canvas_dropzone_overlay.dart';
 import 'widgets/connection_style_bar.dart';
 
 Uint8List _attachmentBytes(List<int> bytes) =>
@@ -797,6 +800,7 @@ class MindmapCanvas extends StatefulWidget {
     this.onLocalPingRequested,
     this.onInlineEditStateChanged,
     this.onNodeCardBuilt,
+    this.onNodeCreated,
     this.onNodeCardBuildProbe,
     this.presentationCache,
     this.pingStream,
@@ -876,6 +880,7 @@ class MindmapCanvas extends StatefulWidget {
   onInlineEditStateChanged;
   final ValueChanged<String>? onNodeCardBuilt;
   final ValueChanged<String>? onNodeCardBuildProbe;
+  final NodeUpdateCallback? onNodeCreated;
   @visibleForTesting
   final MindmapNodePresentationCache? presentationCache;
 
@@ -2673,6 +2678,40 @@ class MindmapCanvasState extends State<MindmapCanvas>
     return scenePosition -
         origin -
         Offset(nodeSize.width / 2, nodeSize.height / 2);
+  }
+
+  Future<void> _handleFilesDropped(
+    List<String> filePaths,
+    Offset screenOffset,
+  ) async {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final localOffset = renderBox.globalToLocal(screenOffset);
+    final scenePosition = _transformationController.toScene(localOffset);
+    final worldPosition = _sceneBounds.sceneToWorld(scenePosition);
+    final day = widget.nodes.firstOrNull?.day ?? DateTime.now();
+    final dk = dayKey(day);
+    const handler = CanvasFileDropHandler();
+    for (var i = 0; i < filePaths.length; i++) {
+      try {
+        final bytes = await readCanvasFileBytes(filePaths[i]);
+        if (bytes.isEmpty) continue;
+        final fileName = filePaths[i].split(RegExp(r'[/\\]')).last;
+        final position = CanvasPosition(
+          worldPosition.dx + i * 24,
+          worldPosition.dy + i * 24,
+        );
+        final node = await handler.processDroppedFile(
+          fileName: fileName,
+          bytes: bytes,
+          position: position,
+          dayKey: dk,
+        );
+        widget.onNodeCreated?.call(node);
+      } catch (e) {
+        widget.onStatusMessage?.call('File drop failed: $e');
+      }
+    }
   }
 
   void _openCanvasContextMenu(PointerDownEvent event) {
@@ -5835,7 +5874,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
         final leftOverlayInset = showMiroToolRail ? 80.0 : 16.0;
 
         final origin = _sceneOrigin;
-        return RepaintBoundary(
+        return CanvasDropzoneOverlay(
+          onFilesDropped: _handleFilesDropped,
+          child: RepaintBoundary(
           key: _canvasExportKey,
           child: ClipRect(
             child: DragTarget<NodeType>(
@@ -7357,14 +7398,14 @@ class MindmapCanvasState extends State<MindmapCanvas>
                               );
                             },
                           ),
-                      ],
+                       ],
                     ),
                   ),
                 );
               },
             ),
           ),
-        );
+        ));
       },
     );
   }

@@ -11,6 +11,7 @@ import '../../domain/mindmap_node.dart';
 import '../../domain/node_presentation.dart';
 import '../../domain/node_type_payloads.dart';
 import '../../domain/quote_catalog.dart';
+import '../widgets/file_card_widget.dart';
 import 'audio_node_editor.dart';
 import 'canvas_node_editor.dart';
 import 'productivity_node_editors.dart';
@@ -295,6 +296,13 @@ final class _KnowledgeContent extends StatelessWidget {
   Widget build(BuildContext buildContext) {
     final node = context.node;
     final compact = context.effectivePreset == NodeSizePreset.compact;
+    if (node.type == NodeType.link && node.data['isLocalFile'] == true) {
+      return FileCardWidget(
+        fileName: node.data['title'] as String? ?? node.title,
+        fileSize: (node.data['fileSize'] as num?)?.toInt() ?? 0,
+        fileExtension: node.data['fileExtension'] as String? ?? '',
+      );
+    }
     if (node.type == NodeType.resource) {
       final payload = context.typedPayload is ResourcePayload
           ? context.typedPayload as ResourcePayload
