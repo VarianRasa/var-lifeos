@@ -55,6 +55,10 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         context.go('/calendar/${dayKey(DateTime.now())}');
       case DesktopMenuAction.commandPalette:
         showGlobalCommandPalette(context);
+      case DesktopMenuAction.toggleTopHeader:
+      case DesktopMenuAction.toggleRibbonToolbar:
+      case DesktopMenuAction.toggleBoardTabs:
+      case DesktopMenuAction.toggleAllCanvasControls:
       case DesktopMenuAction.closePanel:
         final date = GoRouterState.of(context).pathParameters['date'];
         context.go('/calendar/${date ?? dayKey(DateTime.now())}');

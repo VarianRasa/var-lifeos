@@ -501,8 +501,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   String? _workshopMaintenanceSignature;
   static const CanvasWorkshopController _workshop = CanvasWorkshopController();
   bool _isDayTabsCollapsed = true;
-  bool _isDayTabsHidden = false;
-  bool _isRibbonToolbarCollapsed = false;
+  final bool _isDayTabsHidden = false;
+  final bool _isRibbonToolbarCollapsed = false;
+  final bool _isFloatingTopBarVisible = true;
+  bool _isFloatingRibbonVisible = true;
+  bool _isFloatingBoardTabsVisible = true;
   bool _isBlankBoardHidden = false;
   bool _isCanvasAddNodeMenuOpen = false;
   bool _isLifeExplorerExpanded = true;
@@ -4019,153 +4022,162 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                 );
               },
             ),
-            appBar: AppBar(
-              automaticallyImplyLeading: false,
-              titleSpacing: 16,
-              title: Consumer(
-                builder: (context, ref, child) {
-                  final titleMap = ref.watch(workspaceTitleProvider);
-                  final titleKey =
-                      '${WorkspaceContextType.daily.name}_${dayKey(normalizedDate)}';
-                  final customTitle = titleMap[titleKey];
-                  final displayTitle =
-                      (customTitle != null && customTitle.isNotEmpty)
-                      ? customTitle
-                      : dayKey(normalizedDate);
+            appBar: _isFloatingTopBarVisible
+                ? AppBar(
+                    automaticallyImplyLeading: false,
+                    titleSpacing: 16,
+                    title: Consumer(
+                      builder: (context, ref, child) {
+                        final titleMap = ref.watch(workspaceTitleProvider);
+                        final titleKey =
+                            '${WorkspaceContextType.daily.name}_${dayKey(normalizedDate)}';
+                        final customTitle = titleMap[titleKey];
+                        final displayTitle =
+                            (customTitle != null && customTitle.isNotEmpty)
+                            ? customTitle
+                            : dayKey(normalizedDate);
 
-                  return Row(
-                    children: [
-                      Flexible(
-                        child: _InlineWorkspaceTitle(
-                          customTitle: customTitle,
-                          displayTitle: displayTitle,
-                          onTitleChanged: (String title) => ref
-                              .read(workspaceTitleProvider.notifier)
-                              .setTitle(
-                                WorkspaceContextType.daily,
-                                dayKey(normalizedDate),
-                                title,
+                        return Row(
+                          children: [
+                            Flexible(
+                              child: _InlineWorkspaceTitle(
+                                customTitle: customTitle,
+                                displayTitle: displayTitle,
+                                onTitleChanged: (String title) => ref
+                                    .read(workspaceTitleProvider.notifier)
+                                    .setTitle(
+                                      WorkspaceContextType.daily,
+                                      dayKey(normalizedDate),
+                                      title,
+                                    ),
                               ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-              bottom: _isDayTabsHidden
-                  ? null
-                  : PreferredSize(
-                      preferredSize: const Size.fromHeight(56),
-                      child: _DayTopTabStrip(
-                        selectedDay: normalizedDate,
-                        isCollapsed: _isDayTabsCollapsed,
-                        onDaySelected: (day) => unawaited(() async {
-                          if (await _flushInlineWorkspace() &&
-                              context.mounted) {
-                            goToDay(context, day);
-                          }
-                        }()),
-                        onCollapsedChanged: (value) {
-                          setState(() => _isDayTabsCollapsed = value);
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    bottom: _isDayTabsHidden
+                        ? null
+                        : PreferredSize(
+                            preferredSize: const Size.fromHeight(56),
+                            child: _DayTopTabStrip(
+                              selectedDay: normalizedDate,
+                              isCollapsed: _isDayTabsCollapsed,
+                              onDaySelected: (day) => unawaited(() async {
+                                if (await _flushInlineWorkspace() &&
+                                    context.mounted) {
+                                  goToDay(context, day);
+                                }
+                              }()),
+                              onCollapsedChanged: (value) {
+                                setState(() => _isDayTabsCollapsed = value);
+                              },
+                            ),
+                          ),
+                    actions: [
+                      Builder(
+                        builder: (context) {
+                          final tokens = AppDesignTokens.of(context);
+                          final actionWidth =
+                              MediaQuery.sizeOf(context).width * 0.62;
+                          final showViewToggle =
+                              MediaQuery.sizeOf(context).width >= 900;
+                          return SizedBox(
+                            width: actionWidth,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (MediaQuery.sizeOf(context).width >=
+                                      1100) ...[
+                                    CollaborationRoomBar(
+                                      nodes:
+                                          nodes.valueOrNull ??
+                                          const <MindmapNode>[],
+                                      followingId: _followingCollaboratorId,
+                                      onFollowChanged: (id) {
+                                        setState(
+                                          () => _followingCollaboratorId = id,
+                                        );
+                                        _canvasKey.currentState
+                                            ?.followCollaborator(id);
+                                      },
+                                    ),
+                                    SizedBox(width: tokens.spacing[4]),
+                                  ],
+                                  if (showViewToggle) ...[
+                                    _DayViewModeToggle(
+                                      mode: _viewMode,
+                                      onChanged: (value) {
+                                        _setViewMode(value);
+                                      },
+                                    ),
+                                    SizedBox(width: tokens.spacing[4]),
+                                  ],
+                                  _DayContextSwitcher(
+                                    filter: _contextFilter,
+                                    workspaceContext: activeWorkspaceContext,
+                                    workspaceContexts:
+                                        workspaceContexts.valueOrNull,
+                                    onChanged: _setContextFilter,
+                                    onWorkspaceChanged:
+                                        _setWorkspaceContextFilter,
+                                  ),
+                                  SizedBox(width: tokens.spacing[4]),
+                                  _DayToolbarGroup(
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Copy day markdown',
+                                        onPressed: () => unawaited(
+                                          _copyDayMarkdown(
+                                            normalizedDate,
+                                            allNodes.valueOrNull ??
+                                                const <MindmapNode>[],
+                                          ),
+                                        ),
+                                        icon: const Icon(
+                                          Icons.ios_share_outlined,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      _CanvasViewSettingsButton(
+                                        isRibbonToolbarCollapsed:
+                                            _isRibbonToolbarCollapsed,
+                                        isDayTabsHidden: _isDayTabsHidden,
+                                        onSelected: (value) {
+                                          setState(() {
+                                            if (value == 'ribbon') {
+                                              _isFloatingRibbonVisible =
+                                                  !_isFloatingRibbonVisible;
+                                            } else if (value == 'tabs') {
+                                              _isFloatingBoardTabsVisible =
+                                                  !_isFloatingBoardTabsVisible;
+                                            }
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(width: tokens.spacing[4]),
+                                  _UndoRedoIndicator(
+                                    undoCount: _undoStack.length,
+                                    redoCount: _redoStack.length,
+                                    onUndo: _undoStack.isEmpty ? null : _undo,
+                                    onRedo: _redoStack.isEmpty ? null : _redo,
+                                    onHistory: _showActivityLog,
+                                  ),
+                                  SizedBox(width: tokens.spacing[4]),
+                                ],
+                              ),
+                            ),
+                          );
                         },
                       ),
-                    ),
-              actions: [
-                Builder(
-                  builder: (context) {
-                    final tokens = AppDesignTokens.of(context);
-                    final actionWidth = MediaQuery.sizeOf(context).width * 0.62;
-                    final showViewToggle =
-                        MediaQuery.sizeOf(context).width >= 900;
-                    return SizedBox(
-                      width: actionWidth,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerRight,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (MediaQuery.sizeOf(context).width >= 1100) ...[
-                              CollaborationRoomBar(
-                                nodes:
-                                    nodes.valueOrNull ?? const <MindmapNode>[],
-                                followingId: _followingCollaboratorId,
-                                onFollowChanged: (id) {
-                                  setState(() => _followingCollaboratorId = id);
-                                  _canvasKey.currentState?.followCollaborator(
-                                    id,
-                                  );
-                                },
-                              ),
-                              SizedBox(width: tokens.spacing[4]),
-                            ],
-                            if (showViewToggle) ...[
-                              _DayViewModeToggle(
-                                mode: _viewMode,
-                                onChanged: (value) {
-                                  _setViewMode(value);
-                                },
-                              ),
-                              SizedBox(width: tokens.spacing[4]),
-                            ],
-                            _DayContextSwitcher(
-                              filter: _contextFilter,
-                              workspaceContext: activeWorkspaceContext,
-                              workspaceContexts: workspaceContexts.valueOrNull,
-                              onChanged: _setContextFilter,
-                              onWorkspaceChanged: _setWorkspaceContextFilter,
-                            ),
-                            SizedBox(width: tokens.spacing[4]),
-                            _DayToolbarGroup(
-                              children: [
-                                IconButton(
-                                  tooltip: 'Copy day markdown',
-                                  onPressed: () => unawaited(
-                                    _copyDayMarkdown(
-                                      normalizedDate,
-                                      allNodes.valueOrNull ??
-                                          const <MindmapNode>[],
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.ios_share_outlined,
-                                    size: 18,
-                                  ),
-                                ),
-                                _CanvasViewSettingsButton(
-                                  isRibbonToolbarCollapsed:
-                                      _isRibbonToolbarCollapsed,
-                                  isDayTabsHidden: _isDayTabsHidden,
-                                  onSelected: (value) {
-                                    setState(() {
-                                      if (value == 'ribbon') {
-                                        _isRibbonToolbarCollapsed =
-                                            !_isRibbonToolbarCollapsed;
-                                      } else if (value == 'tabs') {
-                                        _isDayTabsHidden = !_isDayTabsHidden;
-                                      }
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                            SizedBox(width: tokens.spacing[4]),
-                            _UndoRedoIndicator(
-                              undoCount: _undoStack.length,
-                              redoCount: _redoStack.length,
-                              onUndo: _undoStack.isEmpty ? null : _undo,
-                              onRedo: _redoStack.isEmpty ? null : _redo,
-                              onHistory: _showActivityLog,
-                            ),
-                            SizedBox(width: tokens.spacing[4]),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
+                    ],
+                  )
+                : null,
             body: nodes.when(
               data: (value) {
                 final canvasNodes = _canvasNodesFor(
@@ -4309,7 +4321,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                       ),
                     if (_viewMode == _DayViewMode.canvas &&
                         MediaQuery.sizeOf(context).width >= 840 &&
-                        !_isRibbonToolbarCollapsed)
+                        !_isRibbonToolbarCollapsed &&
+                        _isFloatingRibbonVisible)
                       _MindmapDocumentCanvasToolbar(
                         selectedNode: selectedNode,
                         homeTools: _DayToolsBar(
@@ -4564,7 +4577,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                             child: Column(
                               children: [
                                 if (_viewMode == _DayViewMode.canvas &&
-                                    allDayBoards.isNotEmpty)
+                                    allDayBoards.isNotEmpty &&
+                                    _isFloatingBoardTabsVisible)
                                   DayCanvasTabHeader(
                                     boards: allDayBoards,
                                     activeBoardId: activeCanvasBoard?.id,
