@@ -46,6 +46,7 @@ Object nodeTypeInlineDraftFor(MindmapNode node) => switch (node.type) {
   NodeType.itinerary => ItineraryPayload.fromNode(node),
   NodeType.image => ImagePayload.fromNode(node),
   NodeType.video => VideoPayload.fromNode(node),
+  NodeType.frame || NodeType.swatch => const <String, Object?>{},
 };
 
 MindmapNode applyNodeTypeInlineDraft(MindmapNode node, Object draft) {

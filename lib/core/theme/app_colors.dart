@@ -532,6 +532,8 @@ class AppThemeVariantColors {
     NodeType.itinerary: Color(orange),
     NodeType.image: Color(blue),
     NodeType.video: Color(purple),
+    NodeType.frame: Color(gray),
+    NodeType.swatch: Color(teal),
   };
 }
 
@@ -726,7 +728,11 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       track: Color.lerp(track, other.track, t),
       nodeColors: <NodeType, Color>{
         for (final type in NodeType.values)
-          type: Color.lerp(nodeColors[type], other.nodeColors[type], t)!,
+          type: Color.lerp(
+            nodeColors[type] ?? Colors.grey,
+            other.nodeColors[type] ?? Colors.grey,
+            t,
+          )!,
       },
     );
   }

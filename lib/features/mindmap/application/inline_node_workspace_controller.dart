@@ -417,6 +417,7 @@ String? _validationError(MindmapNode node) {
     ).validate(title: node.title),
     NodeType.image => ImagePayload.fromNode(node).validate(title: node.title),
     NodeType.video => VideoPayload.fromNode(node).validate(title: node.title),
+    NodeType.frame || NodeType.swatch => NodeValidation.requiredTitle(node.title),
   };
   return errors.firstOrNull;
 }

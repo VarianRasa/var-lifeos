@@ -44,7 +44,9 @@ enum NodeType {
   empty,
   itinerary,
   image,
-  video;
+  video,
+  frame,
+  swatch;
 
   /// Human-readable label for chips, menus, and dialogs.
   String get label {
@@ -109,6 +111,10 @@ enum NodeType {
         return 'Image';
       case NodeType.video:
         return 'Video';
+      case NodeType.frame:
+        return 'Frame';
+      case NodeType.swatch:
+        return 'Color Swatch';
     }
   }
 }

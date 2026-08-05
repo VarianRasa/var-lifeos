@@ -653,7 +653,7 @@ Object? _typedPayloadForNode(MindmapNode node) => switch (node.type) {
   NodeType.image => ImagePayload.fromNode(node),
   NodeType.video => VideoPayload.fromNode(node),
   NodeType.itinerary => ItineraryPayload.fromNode(node),
-  NodeType.note || NodeType.empty => null,
+  NodeType.note || NodeType.empty || NodeType.frame || NodeType.swatch => null,
 };
 
 NodeSizePreset _effectiveContentPreset(NodeType type, NodeSizePreset preset) =>
@@ -3941,7 +3941,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
 
   void _startCanvasObjectMove(Offset globalPosition) {
     _resetNodeGuideState();
-    _canvasObjectDragGlobalPosition = globalPosition;
+    setState(() => _canvasObjectDragGlobalPosition = globalPosition);
   }
 
   void _moveCanvasObjectFromGlobal(CanvasObject object, Offset globalPosition) {
@@ -3968,15 +3968,22 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final scale = _canvasScale(_transformationController.value);
     final sceneDelta = delta;
     final movingObjects = _canvasObjectsMovingWith(object);
-    final movingNodes = object.type == CanvasObjectType.frame
-        ? widget.nodes
-              .where(
-                (node) =>
-                    node.data['groupId'] == object.id &&
-                    node.data['groupLocked'] != true,
-              )
-              .toList(growable: false)
-        : const <MindmapNode>[];
+    final extraSelectedNodes =
+        _selectedCanvasObjectIds.contains(object.id) &&
+                _selectedNodeIds.isNotEmpty
+            ? widget.nodes
+                .where((n) => _selectedNodeIds.contains(n.id))
+                .toList(growable: false)
+            : const <MindmapNode>[];
+    final movingNodes = <MindmapNode>[
+      if (object.type == CanvasObjectType.frame)
+        ...widget.nodes.where(
+          (node) =>
+              node.data['groupId'] == object.id &&
+              node.data['groupLocked'] != true,
+        ),
+      ...extraSelectedNodes,
+    ];
     final movingIds = movingObjects.map((candidate) => candidate.id).toSet();
     for (final movingNode in movingNodes) {
       final current = _dragPositions.putIfAbsent(
@@ -4457,15 +4464,22 @@ class MindmapCanvasState extends State<MindmapCanvas>
         }
       });
     }
-    final movingNodes = object.type == CanvasObjectType.frame
-        ? widget.nodes
-              .where(
-                (node) =>
-                    node.data['groupId'] == object.id &&
-                    node.data['groupLocked'] != true,
-              )
-              .toList(growable: false)
-        : const <MindmapNode>[];
+    final extraSelectedNodes =
+        _selectedCanvasObjectIds.contains(object.id) &&
+                _selectedNodeIds.isNotEmpty
+            ? widget.nodes
+                .where((n) => _selectedNodeIds.contains(n.id))
+                .toList(growable: false)
+            : const <MindmapNode>[];
+    final movingNodes = <MindmapNode>[
+      if (object.type == CanvasObjectType.frame)
+        ...widget.nodes.where(
+          (node) =>
+              node.data['groupId'] == object.id &&
+              node.data['groupLocked'] != true,
+        ),
+      ...extraSelectedNodes,
+    ];
     if (movingNodes.isNotEmpty) {
       unawaited(
         _persistMovedNodes(movingNodes, <String, CanvasPosition>{
@@ -5948,588 +5962,545 @@ class MindmapCanvasState extends State<MindmapCanvas>
         return CanvasDropzoneOverlay(
           onFilesDropped: _handleFilesDropped,
           child: RepaintBoundary(
-          key: _canvasExportKey,
-          child: ClipRect(
-            child: DragTarget<NodeType>(
-              onAcceptWithDetails: (details) {
-                if (widget.onNodeDropped == null) return;
-                final renderBox = context.findRenderObject() as RenderBox?;
-                if (renderBox != null) {
-                  final localOffset = renderBox.globalToLocal(details.offset);
-                  widget.onNodeDropped!(
-                    details.data,
-                    _alignedCanvasPositionFromLocal(localOffset),
+            key: _canvasExportKey,
+            child: ClipRect(
+              child: DragTarget<NodeType>(
+                onAcceptWithDetails: (details) {
+                  if (widget.onNodeDropped == null) return;
+                  final renderBox = context.findRenderObject() as RenderBox?;
+                  if (renderBox != null) {
+                    final localOffset = renderBox.globalToLocal(details.offset);
+                    widget.onNodeDropped!(
+                      details.data,
+                      _alignedCanvasPositionFromLocal(localOffset),
+                    );
+                  }
+                },
+                builder: (context, candidateData, rejectedData) {
+                  final focusNode = _focusedNode();
+                  final searchResults = _navigationIndex.search(
+                    _searchQuery,
+                    category: _searchCategory,
                   );
-                }
-              },
-              builder: (context, candidateData, rejectedData) {
-                final focusNode = _focusedNode();
-                final searchResults = _navigationIndex.search(
-                  _searchQuery,
-                  category: _searchCategory,
-                );
-                final matchedObjectIds = <String>{
-                  for (final result in searchResults)
-                    if (result.objectId != null) result.objectId!,
-                };
-                final hasCanvasSearch =
-                    _searchQuery.isNotEmpty ||
-                    _searchCategory != CanvasSearchCategory.all;
-                final filteredNodes = _filteredNodesForRendering();
-                final isSearchActive =
-                    hasCanvasSearch ||
-                    _searchTypeFilter != null ||
-                    _reviewStateFilter != null ||
-                    _nextActionOnly;
-                final isFocusActive = focusNode != null;
-                final hiddenColumnNodeIds = <String>{
-                  for (final reference
-                      in widget.board?.objects ?? const <CanvasObject>[])
-                    if (reference.type == CanvasObjectType.nodeReference &&
-                        reference.mindmapNodeId != null &&
-                        reference.parentColumnId != null &&
-                        widget.board
-                                ?.objectById(reference.parentColumnId!)
-                                ?.isColumnCollapsed ==
-                            true)
-                      reference.mindmapNodeId!,
-                };
-                 final visibleNodes = filteredNodes
-                    .where((node) => !hiddenColumnNodeIds.contains(node.id))
-                    .where(
-                      (node) =>
-                          node.data['groupId'] == null ||
-                          widget.nodes
-                                  .where(
-                                    (n) =>
-                                        n.data['groupId'] == node.data['groupId'],
-                                  )
-                                  .firstOrNull
-                                  ?.data['groupCollapsed'] !=
-                              true,
-                    )
-                    .where((node) => _isNodeVisible(node, origin))
-                    .toList(growable: false);
-
-                final visibleArea = _visibleSceneRect;
-                final canvasObjectCandidates = visibleArea == null
-                    ? _orderedCanvasObjects()
-                    : _indexedCanvasObjects(
-                        spatial.CanvasBounds(
-                          visibleArea.left - origin.dx,
-                          visibleArea.top - origin.dy,
-                          visibleArea.right - origin.dx,
-                          visibleArea.bottom - origin.dy,
-                        ),
-                      );
-                final visibleCanvasObjects = _sortCanvasObjects(
-                  canvasObjectCandidates
-                      .where(_isWorkshopObjectVisible)
+                  final matchedObjectIds = <String>{
+                    for (final result in searchResults)
+                      if (result.objectId != null) result.objectId!,
+                  };
+                  final hasCanvasSearch =
+                      _searchQuery.isNotEmpty ||
+                      _searchCategory != CanvasSearchCategory.all;
+                  final filteredNodes = _filteredNodesForRendering();
+                  final isSearchActive =
+                      hasCanvasSearch ||
+                      _searchTypeFilter != null ||
+                      _reviewStateFilter != null ||
+                      _nextActionOnly;
+                  final isFocusActive = focusNode != null;
+                  final hiddenColumnNodeIds = <String>{
+                    for (final reference
+                        in widget.board?.objects ?? const <CanvasObject>[])
+                      if (reference.type == CanvasObjectType.nodeReference &&
+                          reference.mindmapNodeId != null &&
+                          reference.parentColumnId != null &&
+                          widget.board
+                                  ?.objectById(reference.parentColumnId!)
+                                  ?.isColumnCollapsed ==
+                              true)
+                        reference.mindmapNodeId!,
+                  };
+                  final visibleNodes = filteredNodes
+                      .where((node) => !hiddenColumnNodeIds.contains(node.id))
                       .where(
-                        (object) => _isCanvasObjectVisible(object, origin),
-                      ),
-                );
-                final scale = _canvasScale(_transformationController.value);
-                final useCompactCards = _isHeavyCanvas || scale < 0.45;
-                final highlightedNodeIds = {
-                  if (isSearchActive)
-                    for (final node in filteredNodes) node.id,
-                  ..._selectedNodeIds,
-                  if (widget.highlightedNodeId != null)
-                    widget.highlightedNodeId!,
-                  if (widget.expandedNodeId != null) widget.expandedNodeId!,
-                };
-                final compactNodeIds = {
-                  if (useCompactCards)
-                    for (final node in visibleNodes)
-                      if (!_editingNodeIds.contains(node.id)) node.id,
-                };
+                        (node) =>
+                            node.data['groupId'] == null ||
+                            widget.nodes
+                                    .where(
+                                      (n) =>
+                                          n.data['groupId'] ==
+                                          node.data['groupId'],
+                                    )
+                                    .firstOrNull
+                                    ?.data['groupCollapsed'] !=
+                                true,
+                      )
+                      .where((node) => _isNodeVisible(node, origin))
+                      .toList(growable: false);
 
-                return CallbackShortcuts(
-                  bindings: {
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyK, control: true),
-                    ): _openCommandPalette,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.slash),
-                    ): _openCommandPalette,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.space, shift: true),
-                    ): _broadcastCanvasPing,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyF, control: true),
-                    ): _focusCanvasSearch,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.equal, control: true),
-                    ): _zoomIn,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.minus, control: true),
-                    ): _zoomOut,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.digit0, control: true),
-                    ): _zoomReset,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyC, control: true),
-                    ): () =>
-                        unawaited(_copySelectedEntities()),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyV, control: true),
-                    ): () =>
-                        unawaited(_pasteSelectedEntities()),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyD, control: true),
-                    ): () =>
-                        unawaited(_duplicateSelectedEntities()),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyX, control: true),
-                    ): () {
-                      if (_selectedCanvasObjectIds.isNotEmpty) {
-                        unawaited(_cutSelectedCanvasObjects());
-                      }
-                    },
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyA, control: true),
-                    ): _selectAllCanvasObjects,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyA, meta: true),
-                    ): _selectAllCanvasObjects,
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(
-                        LogicalKeyboardKey.arrowUp,
-                        control: true,
-                      ),
-                    ): () =>
-                        _navigateSpatialSelection(LogicalKeyboardKey.arrowUp),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(
-                        LogicalKeyboardKey.arrowDown,
-                        control: true,
-                      ),
-                    ): () =>
-                        _navigateSpatialSelection(LogicalKeyboardKey.arrowDown),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(
-                        LogicalKeyboardKey.arrowLeft,
-                        control: true,
-                      ),
-                    ): () =>
-                        _navigateSpatialSelection(LogicalKeyboardKey.arrowLeft),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(
-                        LogicalKeyboardKey.arrowRight,
-                        control: true,
-                      ),
-                    ): () => _navigateSpatialSelection(
-                      LogicalKeyboardKey.arrowRight,
-                    ),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.arrowRight),
-                    ): () {
-                      if (_isPresentationMode) nextPresentationSlide();
-                    },
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.arrowLeft),
-                    ): () {
-                      if (_isPresentationMode) previousPresentationSlide();
-                    },
-                    const SingleActivator(LogicalKeyboardKey.escape): () {
-                      if (_isPresentationMode) {
-                        setPresentationMode(false);
-                      } else if (_hasActiveCanvasTool) {
-                        _activateCanvasSelectTool();
-                      } else if (_selectedCanvasObjectIds.isNotEmpty ||
-                          _selectedNodeIds.isNotEmpty ||
-                          _selectedConnectionKey != null ||
-                          _lassoStartLocal != null) {
-                        unawaited(_clearMultiSelection());
-                      } else if (_focusedNodeId != null) {
-                        setState(() => _focusedNodeId = null);
-                      } else {
-                        _clearSearch();
-                      }
-                    },
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyG, control: true),
-                    ): () =>
-                        setState(() => _showGrid = !_showGrid),
-                    const _CanvasNonTextEditingActivator(
-                      SingleActivator(LogicalKeyboardKey.keyS, control: true),
-                    ): () =>
-                        setState(() => _snapToGrid = !_snapToGrid),
-                  },
-                  child: Focus(
-                    focusNode: _canvasFocusNode,
-                    autofocus: true,
-                    onKeyEvent: _handleCanvasKeyEvent,
-                    child: Stack(
-                      children: [
-                        if (widget.nodes.isEmpty &&
-                            (widget.board?.objects.every(
-                                  (object) =>
-                                      object.type ==
-                                      CanvasObjectType.nodeReference,
-                                ) ??
-                                true))
-                          Center(
-                            child: _CanvasEmptyHint(
-                              onAddHint: widget.onCanvasContextMenu == null
-                                  ? 'Drop a type here to add your first node'
-                                  : 'Right click empty canvas to add a node',
-                            ),
+                  final visibleArea = _visibleSceneRect;
+                  final canvasObjectCandidates = visibleArea == null
+                      ? _orderedCanvasObjects()
+                      : _indexedCanvasObjects(
+                          spatial.CanvasBounds(
+                            visibleArea.left - origin.dx,
+                            visibleArea.top - origin.dy,
+                            visibleArea.right - origin.dx,
+                            visibleArea.bottom - origin.dy,
                           ),
-                        Listener(
-                          behavior: HitTestBehavior.opaque,
-                          onPointerSignal: _handleCanvasPointerSignal,
-                          onPointerDown: _openCanvasContextMenu,
-                          onPointerMove: _handleCanvasPointerMove,
-                          onPointerUp: (event) {
-                            if (_toolDraft.hasFreehand) {
-                              _finishFreehandStroke(event.pointer);
-                              return;
-                            }
-                            if (_isCanvasEraserActive) {
-                              _finishCanvasEraser();
-                              return;
-                            }
-                            if (_middlePanLastLocal != null) {
-                              _middlePanLastLocal = null;
-                              return;
-                            }
-                            if (_touchPanLastLocal != null) {
-                              _touchPanLastLocal = null;
-                              _scheduleViewportUpdate();
-                              return;
-                            }
-                            if (_lassoStartLocal != null) {
-                              _finishLasso(event, origin);
-                              return;
-                            }
-                            final now = DateTime.now();
-                            final previousTapAt = _lastCanvasTapAt;
-                            final previousTapLocal = _lastCanvasTapLocal;
-                            _lastCanvasTapAt = now;
-                            _lastCanvasTapLocal = event.localPosition;
-                            if (previousTapAt == null ||
-                                previousTapLocal == null ||
-                                now.difference(previousTapAt) >
-                                    const Duration(milliseconds: 320) ||
-                                (event.localPosition - previousTapLocal)
-                                        .distance >
-                                    28) {
-                              return;
-                            }
+                        );
+                  final visibleCanvasObjects = _sortCanvasObjects(
+                    canvasObjectCandidates
+                        .where(_isWorkshopObjectVisible)
+                        .where(
+                          (object) => _isCanvasObjectVisible(object, origin),
+                        ),
+                  );
+                  final scale = _canvasScale(_transformationController.value);
+                  final useCompactCards = _isHeavyCanvas || scale < 0.45;
+                  final highlightedNodeIds = {
+                    if (isSearchActive)
+                      for (final node in filteredNodes) node.id,
+                    ..._selectedNodeIds,
+                    if (widget.highlightedNodeId != null)
+                      widget.highlightedNodeId!,
+                    if (widget.expandedNodeId != null) widget.expandedNodeId!,
+                  };
+                  final compactNodeIds = {
+                    if (useCompactCards)
+                      for (final node in visibleNodes)
+                        if (!_editingNodeIds.contains(node.id)) node.id,
+                  };
 
-                            final scenePosition = _transformationController
-                                .toScene(event.localPosition);
-                            final worldPosition = _sceneBounds.sceneToWorld(
-                              scenePosition,
-                            );
-                            focusOnPosition(
-                              CanvasPosition(
-                                worldPosition.dx,
-                                worldPosition.dy,
+                  return CallbackShortcuts(
+                    bindings: {
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyK, control: true),
+                      ): _openCommandPalette,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.slash),
+                      ): _openCommandPalette,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.space, shift: true),
+                      ): _broadcastCanvasPing,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyF, control: true),
+                      ): _focusCanvasSearch,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.equal,
+                          control: true,
+                        ),
+                      ): _zoomIn,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.minus,
+                          control: true,
+                        ),
+                      ): _zoomOut,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.digit0,
+                          control: true,
+                        ),
+                      ): _zoomReset,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyC, control: true),
+                      ): () =>
+                          unawaited(_copySelectedEntities()),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyV, control: true),
+                      ): () =>
+                          unawaited(_pasteSelectedEntities()),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyD, control: true),
+                      ): () =>
+                          unawaited(_duplicateSelectedEntities()),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyX, control: true),
+                      ): () {
+                        if (_selectedCanvasObjectIds.isNotEmpty) {
+                          unawaited(_cutSelectedCanvasObjects());
+                        }
+                      },
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyA, control: true),
+                      ): _selectAllCanvasObjects,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyA, meta: true),
+                      ): _selectAllCanvasObjects,
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.arrowUp,
+                          control: true,
+                        ),
+                      ): () =>
+                          _navigateSpatialSelection(LogicalKeyboardKey.arrowUp),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.arrowDown,
+                          control: true,
+                        ),
+                      ): () => _navigateSpatialSelection(
+                        LogicalKeyboardKey.arrowDown,
+                      ),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.arrowLeft,
+                          control: true,
+                        ),
+                      ): () => _navigateSpatialSelection(
+                        LogicalKeyboardKey.arrowLeft,
+                      ),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(
+                          LogicalKeyboardKey.arrowRight,
+                          control: true,
+                        ),
+                      ): () => _navigateSpatialSelection(
+                        LogicalKeyboardKey.arrowRight,
+                      ),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.arrowRight),
+                      ): () {
+                        if (_isPresentationMode) nextPresentationSlide();
+                      },
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.arrowLeft),
+                      ): () {
+                        if (_isPresentationMode) previousPresentationSlide();
+                      },
+                      const SingleActivator(LogicalKeyboardKey.escape): () {
+                        if (_isPresentationMode) {
+                          setPresentationMode(false);
+                        } else if (_hasActiveCanvasTool) {
+                          _activateCanvasSelectTool();
+                        } else if (_selectedCanvasObjectIds.isNotEmpty ||
+                            _selectedNodeIds.isNotEmpty ||
+                            _selectedConnectionKey != null ||
+                            _lassoStartLocal != null) {
+                          unawaited(_clearMultiSelection());
+                        } else if (_focusedNodeId != null) {
+                          setState(() => _focusedNodeId = null);
+                        } else {
+                          _clearSearch();
+                        }
+                      },
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyG, control: true),
+                      ): () =>
+                          setState(() => _showGrid = !_showGrid),
+                      const _CanvasNonTextEditingActivator(
+                        SingleActivator(LogicalKeyboardKey.keyS, control: true),
+                      ): () =>
+                          setState(() => _snapToGrid = !_snapToGrid),
+                    },
+                    child: Focus(
+                      focusNode: _canvasFocusNode,
+                      autofocus: true,
+                      onKeyEvent: _handleCanvasKeyEvent,
+                      child: Stack(
+                        children: [
+                          if (widget.nodes.isEmpty &&
+                              (widget.board?.objects.every(
+                                    (object) =>
+                                        object.type ==
+                                        CanvasObjectType.nodeReference,
+                                  ) ??
+                                  true))
+                            Center(
+                              child: _CanvasEmptyHint(
+                                onAddHint: widget.onCanvasContextMenu == null
+                                    ? 'Drop a type here to add your first node'
+                                    : 'Right click empty canvas to add a node',
                               ),
-                              scale: 1.5,
-                            );
-                          },
-                          onPointerCancel: (event) {
-                            if (_toolDraft.pointer == event.pointer) {
-                              _toolDraft.clear();
-                            }
-                            _erasedCanvasObjectIds.clear();
-                            _middlePanLastLocal = null;
-                            _touchPanLastLocal = null;
-                            if (_lassoStartLocal != null && mounted) {
-                              setState(() {
-                                _lassoStartLocal = null;
-                                _lassoCurrentLocal = null;
-                              });
-                            }
-                          },
-                          child: InteractiveViewer(
-                            key: const ValueKey('mindmap-canvas'),
-                            transformationController: _transformationController,
-                            constrained: false,
-                            boundaryMargin: EdgeInsets.all(
-                              math.max(
-                                    _sceneBounds.sceneSize.width,
-                                    _sceneBounds.sceneSize.height,
-                                  ) *
-                                  0.2,
                             ),
-                            minScale: 0.04,
-                            maxScale: 2.4,
-                            panEnabled: false,
-                            scaleEnabled: _isCtrlPressed,
-                            trackpadScrollCausesScale: _isCtrlPressed,
-                            child: Listener(
-                              key: const ValueKey('mindmap-scene-listener'),
-                              behavior: HitTestBehavior.opaque,
-                              onPointerDown: (_) {
-                                if (_followingCollaboratorId != null) {
-                                  setState(
-                                    () => _followingCollaboratorId = null,
-                                  );
-                                }
-                              },
-                              child: SizedBox(
-                                width: _sceneBounds.sceneSize.width,
-                                height: _sceneBounds.sceneSize.height,
-                                child: MouseRegion(
-                                  onHover: (event) {
-                                    widget.onLocalCursorChanged?.call(
-                                      event.localPosition,
+                          Listener(
+                            behavior: HitTestBehavior.opaque,
+                            onPointerSignal: _handleCanvasPointerSignal,
+                            onPointerDown: _openCanvasContextMenu,
+                            onPointerMove: _handleCanvasPointerMove,
+                            onPointerUp: (event) {
+                              if (_toolDraft.hasFreehand) {
+                                _finishFreehandStroke(event.pointer);
+                                return;
+                              }
+                              if (_isCanvasEraserActive) {
+                                _finishCanvasEraser();
+                                return;
+                              }
+                              if (_middlePanLastLocal != null) {
+                                _middlePanLastLocal = null;
+                                return;
+                              }
+                              if (_touchPanLastLocal != null) {
+                                _touchPanLastLocal = null;
+                                _scheduleViewportUpdate();
+                                return;
+                              }
+                              if (_lassoStartLocal != null) {
+                                _finishLasso(event, origin);
+                                return;
+                              }
+                              final now = DateTime.now();
+                              final previousTapAt = _lastCanvasTapAt;
+                              final previousTapLocal = _lastCanvasTapLocal;
+                              _lastCanvasTapAt = now;
+                              _lastCanvasTapLocal = event.localPosition;
+                              if (previousTapAt == null ||
+                                  previousTapLocal == null ||
+                                  now.difference(previousTapAt) >
+                                      const Duration(milliseconds: 320) ||
+                                  (event.localPosition - previousTapLocal)
+                                          .distance >
+                                      28) {
+                                return;
+                              }
+
+                              final scenePosition = _transformationController
+                                  .toScene(event.localPosition);
+                              final worldPosition = _sceneBounds.sceneToWorld(
+                                scenePosition,
+                              );
+                              focusOnPosition(
+                                CanvasPosition(
+                                  worldPosition.dx,
+                                  worldPosition.dy,
+                                ),
+                                scale: 1.5,
+                              );
+                            },
+                            onPointerCancel: (event) {
+                              if (_toolDraft.pointer == event.pointer) {
+                                _toolDraft.clear();
+                              }
+                              _erasedCanvasObjectIds.clear();
+                              _middlePanLastLocal = null;
+                              _touchPanLastLocal = null;
+                              if (_lassoStartLocal != null && mounted) {
+                                setState(() {
+                                  _lassoStartLocal = null;
+                                  _lassoCurrentLocal = null;
+                                });
+                              }
+                            },
+                            child: InteractiveViewer(
+                              key: const ValueKey('mindmap-canvas'),
+                              transformationController:
+                                  _transformationController,
+                              constrained: false,
+                              boundaryMargin: EdgeInsets.all(
+                                math.max(
+                                      _sceneBounds.sceneSize.width,
+                                      _sceneBounds.sceneSize.height,
+                                    ) *
+                                    0.2,
+                              ),
+                              minScale: 0.04,
+                              maxScale: 2.4,
+                              panEnabled: false,
+                              scaleEnabled: false,
+                              trackpadScrollCausesScale: false,
+                              child: Listener(
+                                key: const ValueKey('mindmap-scene-listener'),
+                                behavior: HitTestBehavior.opaque,
+                                onPointerDown: (_) {
+                                  if (_followingCollaboratorId != null) {
+                                    setState(
+                                      () => _followingCollaboratorId = null,
                                     );
-                                    if (_connectorStartScene != null) {
-                                      _updateConnectorDraft(
+                                  }
+                                },
+                                child: SizedBox(
+                                  width: _sceneBounds.sceneSize.width,
+                                  height: _sceneBounds.sceneSize.height,
+                                  child: MouseRegion(
+                                    onHover: (event) {
+                                      widget.onLocalCursorChanged?.call(
                                         event.localPosition,
                                       );
-                                    }
-                                    if (_isHeavyCanvas) return;
-                                    final now = DateTime.now();
-                                    if (_lastHoverPaintAt != null &&
-                                        now.difference(_lastHoverPaintAt!) <
-                                            const Duration(milliseconds: 48)) {
-                                      return;
-                                    }
-                                    _lastHoverPaintAt = now;
-                                    setState(() {
-                                      _mousePos = event.localPosition;
-                                      _cursorTrail.clear();
-                                    });
-                                  },
-                                  onExit: (_) {
-                                    setState(() {
-                                      _mousePos = null;
-                                    });
-                                  },
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Positioned.fill(
-                                        child: CustomPaint(
-                                          key: ValueKey(
-                                            'mindmap-background-mode-$_backgroundMode',
-                                          ),
-                                          painter:
-                                              _InteractiveBackgroundPainter(
-                                                mousePos: _isHeavyCanvas
-                                                    ? null
-                                                    : _mousePos,
-                                                cursorTrail: _isHeavyCanvas
-                                                    ? const []
-                                                    : List<Offset>.unmodifiable(
-                                                        _cursorTrail,
-                                                      ),
-                                                animationValue: _isHeavyCanvas
-                                                    ? 0
-                                                    : _cursorAnimController
-                                                          .value,
-                                                showGrid:
-                                                    _showGrid &&
-                                                    !_isHeavyCanvas,
-                                                backgroundMode: _backgroundMode,
-                                                variant: variant,
-                                                isDark: isDark,
-                                              ),
-                                        ),
-                                      ),
-                                      Positioned.fill(
-                                        child: CustomPaint(
-                                          painter: _ConnectionLinesPainter(
-                                            nodes:
-                                                _isHeavyCanvas &&
-                                                    _selectedNodeIds.isEmpty &&
-                                                    highlightedNodeIds.isEmpty
-                                                ? const <MindmapNode>[]
-                                                : visibleNodes,
-                                            dragPositions: _dragPositions,
-                                            nodeSizes: _nodeSizes,
-                                            origin: origin,
-                                            compactNodeIds: compactNodeIds,
-                                            nodeColors: nodeColors,
-                                          ),
-                                        ),
-                                      ),
-                                      Positioned.fill(
-                                        child: IgnorePointer(
-                                          child: RepaintBoundary(
-                                            child: ListenableBuilder(
-                                              listenable: _toolDraft,
-                                              builder: (context, child) =>
-                                                  CustomPaint(
-                                                    key: const ValueKey(
-                                                      'mindmap-canvas-tool-draft',
-                                                    ),
-                                                    painter:
-                                                        _CanvasToolDraftPainter(
-                                                          draft: _toolDraft,
-                                                          pen: _penAppearance,
-                                                          connector:
-                                                              _connectorAppearance,
+                                      if (_connectorStartScene != null) {
+                                        _updateConnectorDraft(
+                                          event.localPosition,
+                                        );
+                                      }
+                                      if (_isHeavyCanvas) return;
+                                      final now = DateTime.now();
+                                      if (_lastHoverPaintAt != null &&
+                                          now.difference(_lastHoverPaintAt!) <
+                                              const Duration(
+                                                milliseconds: 48,
+                                              )) {
+                                        return;
+                                      }
+                                      _lastHoverPaintAt = now;
+                                      setState(() {
+                                        _mousePos = event.localPosition;
+                                        _cursorTrail.clear();
+                                      });
+                                    },
+                                    onExit: (_) {
+                                      setState(() {
+                                        _mousePos = null;
+                                      });
+                                    },
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                            key: ValueKey(
+                                              'mindmap-background-mode-$_backgroundMode',
+                                            ),
+                                            painter:
+                                                _InteractiveBackgroundPainter(
+                                                  mousePos: _isHeavyCanvas
+                                                      ? null
+                                                      : _mousePos,
+                                                  cursorTrail: _isHeavyCanvas
+                                                      ? const []
+                                                      : List<
+                                                          Offset
+                                                        >.unmodifiable(
+                                                          _cursorTrail,
                                                         ),
-                                                  ),
+                                                  animationValue: _isHeavyCanvas
+                                                      ? 0
+                                                      : _cursorAnimController
+                                                            .value,
+                                                  showGrid:
+                                                      _showGrid &&
+                                                      !_isHeavyCanvas,
+                                                  backgroundMode:
+                                                      _backgroundMode,
+                                                  variant: variant,
+                                                  isDark: isDark,
+                                                ),
+                                          ),
+                                        ),
+                                        Positioned.fill(
+                                          child: CustomPaint(
+                                            painter: _ConnectionLinesPainter(
+                                              nodes:
+                                                  _isHeavyCanvas &&
+                                                      _selectedNodeIds
+                                                          .isEmpty &&
+                                                      highlightedNodeIds.isEmpty
+                                                  ? const <MindmapNode>[]
+                                                  : visibleNodes,
+                                              dragPositions: _dragPositions,
+                                              nodeSizes: _nodeSizes,
+                                              origin: origin,
+                                              compactNodeIds: compactNodeIds,
+                                              nodeColors: nodeColors,
                                             ),
                                           ),
                                         ),
-                                      ),
-                                      if (!_isPresentationMode &&
-                                          _connectionDrag != null)
                                         Positioned.fill(
                                           child: IgnorePointer(
-                                            child: CustomPaint(
-                                              painter: _ConnectionDragPainter(
-                                                drag: _connectionDrag!,
-                                                nodeColors: nodeColors,
+                                            child: RepaintBoundary(
+                                              child: ListenableBuilder(
+                                                listenable: _toolDraft,
+                                                builder: (context, child) => CustomPaint(
+                                                  key: const ValueKey(
+                                                    'mindmap-canvas-tool-draft',
+                                                  ),
+                                                  painter:
+                                                      _CanvasToolDraftPainter(
+                                                        draft: _toolDraft,
+                                                        pen: _penAppearance,
+                                                        connector:
+                                                            _connectorAppearance,
+                                                      ),
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
-                                      for (final entry in _visibleGroups(
-                                        visibleNodes,
-                                      ).entries)
-                                        _PositionedNodeGroup(
-                                          groupId: entry.key,
-                                          nodes: entry.value,
-                                          positions: {
-                                            for (final node in entry.value)
-                                              node.id: _positionFor(node),
-                                          },
-                                          sizes: {
-                                            for (final node in entry.value)
-                                              node.id: _nodeSizeFor(node),
-                                          },
-                                          origin: origin,
-                                          isLocked: entry.value.any(
-                                            (node) =>
-                                                node.data['groupLocked'] ==
-                                                true,
-                                          ),
-                                          isPresentationMode:
-                                              _isPresentationMode,
-                                          onPanUpdate: (delta) =>
-                                              _moveGroup(entry.value, delta),
-                                          onPanEnd: () =>
-                                              _finishGroupMove(entry.value),
-                                          onSelect: () =>
-                                              _selectGroup(entry.value),
-                                          onRename: () =>
-                                              _renameGroup(entry.value),
-                                          onToggleLock: (locked) =>
-                                              _setGroupLocked(
-                                                entry.value,
-                                                locked,
-                                              ),
-            onSetSwimlaneMode: (mode) =>
-                _setGroupSwimlaneMode(
-                  entry.value,
-                  mode,
-                ),
-            onSetColor: (color) =>
-                _setGroupColor(
-                  entry.value,
-                  color,
-                ),
-            onToggleCollapsed: () =>
-                _setGroupCollapsed(
-                  entry.value,
-                  !(entry.value.first.data['groupCollapsed'] == true),
-                ),
-            onSetLayout: (layout) =>
-                _setGroupLayout(
-                  entry.value,
-                  layout,
-                ),
-            onUngroup: () =>
-
-                                              _ungroupNodes(entry.value),
-                                        ),
-                                      for (final source in visibleNodes)
-                                        for (final targetId
-                                            in source.relatedNodeIds)
-                                          if (visibleNodes.any(
-                                            (node) => node.id == targetId,
-                                          ))
-                                            _ConnectionOverlay(
-                                              source: source,
-                                              target: visibleNodes.firstWhere(
-                                                (node) => node.id == targetId,
-                                              ),
-                                              sourcePosition: _positionFor(
-                                                source,
-                                              ),
-                                              targetPosition: _positionFor(
-                                                visibleNodes.firstWhere(
-                                                  (node) => node.id == targetId,
+                                        if (!_isPresentationMode &&
+                                            _connectionDrag != null)
+                                          Positioned.fill(
+                                            child: IgnorePointer(
+                                              child: CustomPaint(
+                                                painter: _ConnectionDragPainter(
+                                                  drag: _connectionDrag!,
+                                                  nodeColors: nodeColors,
                                                 ),
                                               ),
-                                              sourceSize: _nodeSizeFor(source),
-                                              targetSize: _nodeSizeFor(
-                                                visibleNodes.firstWhere(
-                                                  (node) => node.id == targetId,
-                                                ),
-                                              ),
-                                              origin: origin,
-                                              label: _connectionLabel(
-                                                source,
-                                                targetId,
-                                              ),
-                                              isSelected:
-                                                  _selectedConnectionKey ==
-                                                  _connectionKey(
-                                                    source,
-                                                    visibleNodes.firstWhere(
-                                                      (node) =>
-                                                          node.id == targetId,
-                                                    ),
-                                                  ),
-                                              onSelect: () => _selectConnection(
-                                                source,
-                                                visibleNodes.firstWhere(
-                                                  (node) => node.id == targetId,
-                                                ),
-                                              ),
-                                              onContextMenu: (position) =>
-                                                  _showConnectionContextMenu(
-                                                    source,
-                                                    visibleNodes.firstWhere(
-                                                      (node) =>
-                                                          node.id == targetId,
-                                                    ),
-                                                    position,
-                                                  ),
-                                              onEditLabel: () =>
-                                                  _editConnectionLabel(
-                                                    source,
-                                                    targetId,
-                                                  ),
-                                              onDetach: () => widget
-                                                  .onNodeDisconnected
-                                                  ?.call(
-                                                    source,
-                                                    visibleNodes.firstWhere(
-                                                      (node) =>
-                                                          node.id == targetId,
-                                                    ),
-                                                  ),
                                             ),
-                                      if (!_isPresentationMode)
+                                          ),
+                                        for (final entry in _visibleGroups(
+                                          visibleNodes,
+                                        ).entries)
+                                          _PositionedNodeGroup(
+                                            groupId: entry.key,
+                                            nodes: entry.value,
+                                            positions: {
+                                              for (final node in entry.value)
+                                                node.id: _positionFor(node),
+                                            },
+                                            sizes: {
+                                              for (final node in entry.value)
+                                                node.id: _nodeSizeFor(node),
+                                            },
+                                            origin: origin,
+                                            isLocked: entry.value.any(
+                                              (node) =>
+                                                  node.data['groupLocked'] ==
+                                                  true,
+                                            ),
+                                            isPresentationMode:
+                                                _isPresentationMode,
+                                            onPanUpdate: (delta) =>
+                                                _moveGroup(entry.value, delta),
+                                            onPanEnd: () =>
+                                                _finishGroupMove(entry.value),
+                                            onSelect: () =>
+                                                _selectGroup(entry.value),
+                                            onRename: () =>
+                                                _renameGroup(entry.value),
+                                            onToggleLock: (locked) =>
+                                                _setGroupLocked(
+                                                  entry.value,
+                                                  locked,
+                                                ),
+                                            onSetSwimlaneMode: (mode) =>
+                                                _setGroupSwimlaneMode(
+                                                  entry.value,
+                                                  mode,
+                                                ),
+                                            onSetColor: (color) =>
+                                                _setGroupColor(
+                                                  entry.value,
+                                                  color,
+                                                ),
+                                            onToggleCollapsed: () =>
+                                                _setGroupCollapsed(
+                                                  entry.value,
+                                                  !(entry
+                                                          .value
+                                                          .first
+                                                          .data['groupCollapsed'] ==
+                                                      true),
+                                                ),
+                                            onSetLayout: (layout) =>
+                                                _setGroupLayout(
+                                                  entry.value,
+                                                  layout,
+                                                ),
+                                            onUngroup: () =>
+                                                _ungroupNodes(entry.value),
+                                          ),
                                         for (final source in visibleNodes)
                                           for (final targetId
                                               in source.relatedNodeIds)
                                             if (visibleNodes.any(
                                               (node) => node.id == targetId,
                                             ))
-                                              _ConnectionEndpointHandle(
+                                              _ConnectionOverlay(
                                                 source: source,
                                                 target: visibleNodes.firstWhere(
                                                   (node) => node.id == targetId,
+                                                ),
+                                                sourcePosition: _positionFor(
+                                                  source,
                                                 ),
                                                 targetPosition: _positionFor(
                                                   visibleNodes.firstWhere(
                                                     (node) =>
                                                         node.id == targetId,
                                                   ),
+                                                ),
+                                                sourceSize: _nodeSizeFor(
+                                                  source,
                                                 ),
                                                 targetSize: _nodeSizeFor(
                                                   visibleNodes.firstWhere(
@@ -6538,8 +6509,29 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                   ),
                                                 ),
                                                 origin: origin,
-                                                onPanStart: (position) =>
-                                                    _startConnectionRelink(
+                                                label: _connectionLabel(
+                                                  source,
+                                                  targetId,
+                                                ),
+                                                isSelected:
+                                                    _selectedConnectionKey ==
+                                                    _connectionKey(
+                                                      source,
+                                                      visibleNodes.firstWhere(
+                                                        (node) =>
+                                                            node.id == targetId,
+                                                      ),
+                                                    ),
+                                                onSelect: () =>
+                                                    _selectConnection(
+                                                      source,
+                                                      visibleNodes.firstWhere(
+                                                        (node) =>
+                                                            node.id == targetId,
+                                                      ),
+                                                    ),
+                                                onContextMenu: (position) =>
+                                                    _showConnectionContextMenu(
                                                       source,
                                                       visibleNodes.firstWhere(
                                                         (node) =>
@@ -6547,10 +6539,14 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                       ),
                                                       position,
                                                     ),
-                                                onPanUpdate:
-                                                    _updateConnectionDrag,
-                                                onPanEnd: (_) =>
-                                                    _finishConnectionRelink(
+                                                onEditLabel: () =>
+                                                    _editConnectionLabel(
+                                                      source,
+                                                      targetId,
+                                                    ),
+                                                onDetach: () => widget
+                                                    .onNodeDisconnected
+                                                    ?.call(
                                                       source,
                                                       visibleNodes.firstWhere(
                                                         (node) =>
@@ -6558,954 +6554,1068 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                       ),
                                                     ),
                                               ),
-                                      if (_selectedConnectionKey != null)
-                                        for (final source in visibleNodes)
-                                          for (final targetId
-                                              in source.relatedNodeIds)
-                                            if (visibleNodes.any(
-                                                  (node) =>
-                                                      node.id == targetId,
-                                                ) &&
-                                                _selectedConnectionKey ==
-                                                    _connectionKey(
-                                                      source,
-                                                      visibleNodes.firstWhere(
+                                        if (!_isPresentationMode)
+                                          for (final source in visibleNodes)
+                                            for (final targetId
+                                                in source.relatedNodeIds)
+                                              if (visibleNodes.any(
+                                                (node) => node.id == targetId,
+                                              ))
+                                                _ConnectionEndpointHandle(
+                                                  source: source,
+                                                  target: visibleNodes
+                                                      .firstWhere(
                                                         (node) =>
                                                             node.id == targetId,
                                                       ),
-                                                    ))
-                                              Builder(
-                                                builder: (context) {
-                                                  final target =
-                                                      visibleNodes.firstWhere(
+                                                  targetPosition: _positionFor(
+                                                    visibleNodes.firstWhere(
+                                                      (node) =>
+                                                          node.id == targetId,
+                                                    ),
+                                                  ),
+                                                  targetSize: _nodeSizeFor(
+                                                    visibleNodes.firstWhere(
+                                                      (node) =>
+                                                          node.id == targetId,
+                                                    ),
+                                                  ),
+                                                  origin: origin,
+                                                  onPanStart: (position) =>
+                                                      _startConnectionRelink(
+                                                        source,
+                                                        visibleNodes.firstWhere(
+                                                          (node) =>
+                                                              node.id ==
+                                                              targetId,
+                                                        ),
+                                                        position,
+                                                      ),
+                                                  onPanUpdate:
+                                                      _updateConnectionDrag,
+                                                  onPanEnd: (_) =>
+                                                      _finishConnectionRelink(
+                                                        source,
+                                                        visibleNodes.firstWhere(
+                                                          (node) =>
+                                                              node.id ==
+                                                              targetId,
+                                                        ),
+                                                      ),
+                                                ),
+                                        if (_selectedConnectionKey != null)
+                                          for (final source in visibleNodes)
+                                            for (final targetId
+                                                in source.relatedNodeIds)
+                                              if (visibleNodes.any(
                                                     (node) =>
                                                         node.id == targetId,
-                                                  );
-                                                  final srcPos =
-                                                      _positionFor(source);
-                                                  final tgtPos =
-                                                      _positionFor(target);
-                                                  final srcSize =
-                                                      _nodeSizeFor(source);
-                                                  final tgtSize =
-                                                      _nodeSizeFor(target);
-                                                  final startPt = origin +
-                                                      Offset(
-                                                        srcPos.dx +
-                                                            srcSize.width -
-                                                            2,
-                                                        srcPos.dy +
-                                                            _nodePortY(
-                                                              srcSize,
-                                                            ),
-                                                      );
-                                                  final endPt = origin +
-                                                      Offset(
-                                                        tgtPos.dx + 2,
-                                                        tgtPos.dy +
-                                                            _nodePortY(
-                                                              tgtSize,
-                                                            ),
-                                                      );
-                                                  final mid = Offset(
-                                                    (startPt.dx + endPt.dx) / 2,
-                                                    (startPt.dy + endPt.dy) / 2,
-                                                  );
-                                                  final style =
-                                                      _connectionStyle(
-                                                    source,
-                                                    targetId,
-                                                  );
-                                                  return Positioned(
-                                                    left: mid.dx - 120,
-                                                    top: mid.dy + 24,
-                                                    child: ConnectionStyleBar(
-                                                      style: style,
-                                                      onStyleChanged:
-                                                          (newStyle) {
-                                                        unawaited(
-                                                          _updateConnectionStyle(
-                                                            source,
-                                                            targetId,
-                                                            newStyle,
-                                                          ),
+                                                  ) &&
+                                                  _selectedConnectionKey ==
+                                                      _connectionKey(
+                                                        source,
+                                                        visibleNodes.firstWhere(
+                                                          (node) =>
+                                                              node.id ==
+                                                              targetId,
+                                                        ),
+                                                      ))
+                                                Builder(
+                                                  builder: (context) {
+                                                    final target = visibleNodes
+                                                        .firstWhere(
+                                                          (node) =>
+                                                              node.id ==
+                                                              targetId,
                                                         );
-                                                      },
-                                                      onDelete: () {
-                                                        widget
-                                                            .onNodeDisconnected
-                                                            ?.call(
+                                                    final srcPos = _positionFor(
+                                                      source,
+                                                    );
+                                                    final tgtPos = _positionFor(
+                                                      target,
+                                                    );
+                                                    final srcSize =
+                                                        _nodeSizeFor(source);
+                                                    final tgtSize =
+                                                        _nodeSizeFor(target);
+                                                    final startPt =
+                                                        origin +
+                                                        Offset(
+                                                          srcPos.dx +
+                                                              srcSize.width -
+                                                              2,
+                                                          srcPos.dy +
+                                                              _nodePortY(
+                                                                srcSize,
+                                                              ),
+                                                        );
+                                                    final endPt =
+                                                        origin +
+                                                        Offset(
+                                                          tgtPos.dx + 2,
+                                                          tgtPos.dy +
+                                                              _nodePortY(
+                                                                tgtSize,
+                                                              ),
+                                                        );
+                                                    final mid = Offset(
+                                                      (startPt.dx + endPt.dx) /
+                                                          2,
+                                                      (startPt.dy + endPt.dy) /
+                                                          2,
+                                                    );
+                                                    final style =
+                                                        _connectionStyle(
                                                           source,
-                                                          target,
+                                                          targetId,
                                                         );
-                                                        setState(
-                                                          () =>
-                                                              _selectedConnectionKey =
-                                                                  null,
-                                                        );
-                                                      },
+                                                    return Positioned(
+                                                      left: mid.dx - 120,
+                                                      top: mid.dy + 24,
+                                                      child: ConnectionStyleBar(
+                                                        style: style,
+                                                        onStyleChanged: (newStyle) {
+                                                          unawaited(
+                                                            _updateConnectionStyle(
+                                                              source,
+                                                              targetId,
+                                                              newStyle,
+                                                            ),
+                                                          );
+                                                        },
+                                                        onDelete: () {
+                                                          widget
+                                                              .onNodeDisconnected
+                                                              ?.call(
+                                                                source,
+                                                                target,
+                                                              );
+                                                          setState(
+                                                            () =>
+                                                                _selectedConnectionKey =
+                                                                    null,
+                                                          );
+                                                        },
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                        for (final object
+                                            in visibleCanvasObjects)
+                                          if (object.isVisible &&
+                                              (!hasCanvasSearch ||
+                                                  matchedObjectIds.contains(
+                                                    object.id,
+                                                  )) &&
+                                              (object.type ==
+                                                      CanvasObjectType
+                                                          .stickyNote ||
+                                                  object.type ==
+                                                      CanvasObjectType.shape ||
+                                                  object.type ==
+                                                      CanvasObjectType.text ||
+                                                  object.type ==
+                                                      CanvasObjectType
+                                                          .connector ||
+                                                  object.type ==
+                                                      CanvasObjectType
+                                                          .freehand ||
+                                                  object.type ==
+                                                      CanvasObjectType.frame ||
+                                                  object.type ==
+                                                      CanvasObjectType.column ||
+                                                  object.type ==
+                                                      CanvasObjectType
+                                                          .boardReference ||
+                                                  object.type ==
+                                                      CanvasObjectType.image ||
+                                                  object.type ==
+                                                      CanvasObjectType
+                                                          .linkPreview))
+                                            if (object.parentColumnId != null &&
+                                                widget.board
+                                                        ?.objectById(
+                                                          object
+                                                              .parentColumnId!,
+                                                        )
+                                                        ?.isColumnCollapsed ==
+                                                    true)
+                                              const SizedBox.shrink()
+                                            else if (object.type ==
+                                                CanvasObjectType.connector)
+                                              _PositionedCanvasConnector(
+                                                object: object,
+                                                geometry: _effectiveConnector(
+                                                  object,
+                                                ).geometry,
+                                                route: _effectiveConnector(
+                                                  object,
+                                                ).route,
+                                                origin: origin,
+                                                isSelected:
+                                                    _selectedCanvasObjectIds
+                                                        .contains(object.id),
+                                                onSelect: () =>
+                                                    _selectCanvasObject(object),
+                                                onPanUpdate: (delta) =>
+                                                    _moveCanvasObject(
+                                                      object,
+                                                      delta,
                                                     ),
-                                                  );
-                                                },
-                                              ),
-                                      for (final object in visibleCanvasObjects)
-                                        if (object.isVisible &&
-                                            (!hasCanvasSearch ||
-                                                matchedObjectIds.contains(
-                                                  object.id,
-                                                )) &&
-                                            (object.type ==
-                                                    CanvasObjectType
-                                                        .stickyNote ||
-                                                object.type ==
-                                                    CanvasObjectType.shape ||
-                                                object.type ==
-                                                    CanvasObjectType.text ||
-                                                object.type ==
-                                                    CanvasObjectType
-                                                        .connector ||
-                                                object.type ==
-                                                    CanvasObjectType.freehand ||
-                                                object.type ==
-                                                    CanvasObjectType.frame ||
-                                                object.type ==
-                                                    CanvasObjectType.column ||
-                                                object.type ==
-                                                    CanvasObjectType
-                                                        .boardReference ||
-                                                object.type ==
+                                                onPanEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onPanCancel:
+                                                    _cancelCanvasObjectMove,
+                                              )
+                                            else if (object.type ==
+                                                CanvasObjectType.freehand)
+                                              _PositionedCanvasFreehand(
+                                                object: object,
+                                                geometry: _canvasObjectGeometry(
+                                                  object,
+                                                ),
+                                                origin: origin,
+                                                isSelected:
+                                                    _selectedCanvasObjectIds
+                                                        .contains(object.id),
+                                                onSelect: () =>
+                                                    _selectCanvasObject(object),
+                                                onPanUpdate: (delta) =>
+                                                    _moveCanvasObject(
+                                                      object,
+                                                      delta,
+                                                    ),
+                                                onPanEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onPanCancel:
+                                                    _cancelCanvasObjectMove,
+                                              )
+                                            else if (object.type ==
+                                                CanvasObjectType.column)
+                                              _PositionedCanvasColumn(
+                                                object: object,
+                                                geometry: _canvasObjectGeometry(
+                                                  object,
+                                                ),
+                                                origin: origin,
+                                                isSelected:
+                                                    _selectedCanvasObjectIds
+                                                        .contains(object.id),
+                                                onSelect: () =>
+                                                    _selectCanvasObject(object),
+                                                onPanDown:
+                                                    _startCanvasObjectMove,
+                                                onPanUpdate: (position) =>
+                                                    _moveCanvasObjectFromGlobal(
+                                                      object,
+                                                      position,
+                                                    ),
+                                                onPanEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onToggle: () =>
+                                                    _toggleColumn(object),
+                                                onResizeUpdate: (delta) =>
+                                                    _resizeCanvasObject(
+                                                      object,
+                                                      delta,
+                                                    ),
+                                                onResizeEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                              )
+                                            else if (object.type ==
                                                     CanvasObjectType.image ||
                                                 object.type ==
                                                     CanvasObjectType
-                                                        .linkPreview))
-                                          if (object.parentColumnId != null &&
-                                              widget.board
-                                                      ?.objectById(
-                                                        object.parentColumnId!,
-                                                      )
-                                                      ?.isColumnCollapsed ==
-                                                  true)
-                                            const SizedBox.shrink()
-                                          else if (object.type ==
-                                              CanvasObjectType.connector)
-                                            _PositionedCanvasConnector(
-                                              object: object,
-                                              geometry: _effectiveConnector(
-                                                object,
-                                              ).geometry,
-                                              route: _effectiveConnector(
-                                                object,
-                                              ).route,
-                                              origin: origin,
-                                              isSelected:
-                                                  _selectedCanvasObjectIds
-                                                      .contains(object.id),
-                                              onSelect: () =>
-                                                  _selectCanvasObject(object),
-                                              onPanUpdate: (delta) =>
-                                                  _moveCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onPanEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onPanCancel:
-                                                  _cancelCanvasObjectMove,
-                                            )
-                                          else if (object.type ==
-                                              CanvasObjectType.freehand)
-                                            _PositionedCanvasFreehand(
-                                              object: object,
-                                              geometry: _canvasObjectGeometry(
-                                                object,
-                                              ),
-                                              origin: origin,
-                                              isSelected:
-                                                  _selectedCanvasObjectIds
-                                                      .contains(object.id),
-                                              onSelect: () =>
-                                                  _selectCanvasObject(object),
-                                              onPanUpdate: (delta) =>
-                                                  _moveCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onPanEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onPanCancel:
-                                                  _cancelCanvasObjectMove,
-                                            )
-                                          else if (object.type ==
-                                              CanvasObjectType.column)
-                                            _PositionedCanvasColumn(
-                                              object: object,
-                                              geometry: _canvasObjectGeometry(
-                                                object,
-                                              ),
-                                              origin: origin,
-                                              isSelected:
-                                                  _selectedCanvasObjectIds
-                                                      .contains(object.id),
-                                              onSelect: () =>
-                                                  _selectCanvasObject(object),
-                                              onPanDown: _startCanvasObjectMove,
-                                              onPanUpdate: (position) =>
-                                                  _moveCanvasObjectFromGlobal(
-                                                    object,
-                                                    position,
-                                                  ),
-                                              onPanEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onToggle: () =>
-                                                  _toggleColumn(object),
-                                              onResizeUpdate: (delta) =>
-                                                  _resizeCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onResizeEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                            )
-                                          else if (object.type ==
-                                                  CanvasObjectType.image ||
-                                              object.type ==
-                                                  CanvasObjectType.linkPreview)
-                                            _PositionedCanvasMediaObject(
-                                              object: object,
-                                              geometry: _canvasObjectGeometry(
-                                                object,
-                                              ),
-                                              origin: origin,
-                                              isSelected:
-                                                  _selectedCanvasObjectIds
-                                                      .contains(object.id),
-                                              loadAttachmentBytes: widget
-                                                  .loadCanvasAttachmentBytes,
-                                              onSelect: () =>
-                                                  _selectCanvasObject(object),
-                                              onPanUpdate: (delta) =>
-                                                  _moveCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onPanEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onPanCancel:
-                                                  _cancelCanvasObjectMove,
-                                              onResizeUpdate: (delta) =>
-                                                  _resizeCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onResizeEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                            )
-                                          else
-                                            _PositionedCanvasObject(
-                                              key: _canvasObjectKeys.putIfAbsent(
-                                                object.id,
-                                                () =>
-                                                    GlobalKey<
-                                                      _PositionedCanvasObjectState
-                                                    >(),
-                                              ),
-                                              object: object,
-                                              geometry: _canvasObjectGeometry(
-                                                object,
-                                              ),
-                                              origin: origin,
-                                              isSelected:
-                                                  _selectedCanvasObjectIds
-                                                      .contains(object.id),
-                                              onSelect: () =>
-                                                  _selectCanvasObject(object),
-                                              onOpen:
-                                                  object.type ==
-                                                      CanvasObjectType
-                                                          .boardReference
-                                                  ? () => widget
-                                                        .onBoardReferenceOpened
-                                                        ?.call(object)
-                                                  : null,
-                                              onPanDown: _startCanvasObjectMove,
-                                              onPanStart: (position) =>
-                                                  _selectCanvasObject(object),
-                                              onPanUpdate: (position) =>
-                                                  _moveCanvasObjectFromGlobal(
-                                                    object,
-                                                    position,
-                                                  ),
-                                              onPanEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onPanCancel:
-                                                  _cancelCanvasObjectMove,
-                                              onResizeUpdate: (delta) =>
-                                                  _resizeCanvasObject(
-                                                    object,
-                                                    delta,
-                                                  ),
-                                              onResizeEnd: () =>
-                                                  _finishCanvasObjectMove(
-                                                    object,
-                                                  ),
-                                              onTextChanged: (text) =>
-                                                  _updateCanvasObjectText(
-                                                    object,
-                                                    text,
-                                                  ),
-                                              onEditingFinished: () =>
-                                                  _canvasFocusNode
-                                                      .requestFocus(),
-                                            ),
-                                      if (_columnDropTargetId != null &&
-                                          widget.board?.objectById(
-                                                _columnDropTargetId!,
-                                              ) !=
-                                              null)
-                                        Positioned(
-                                          key: const ValueKey(
-                                            'canvas-column-insertion-indicator',
-                                          ),
-                                          left:
-                                              origin.dx +
-                                              widget.board!
-                                                  .objectById(
-                                                    _columnDropTargetId!,
-                                                  )!
-                                                  .geometry
-                                                  .x +
-                                              CanvasColumnLayoutEngine.padding,
-                                          top:
-                                              origin.dy +
-                                              widget.board!
-                                                  .objectById(
-                                                    _columnDropTargetId!,
-                                                  )!
-                                                  .geometry
-                                                  .y +
-                                              CanvasColumnLayoutEngine
-                                                  .headerHeight +
-                                              CanvasColumnLayoutEngine.padding +
-                                              (_columnDropInsertionIndex ?? 0) *
-                                                  (CanvasColumnLayoutEngine
-                                                          .minimumChildHeight +
-                                                      CanvasColumnLayoutEngine
-                                                          .childGap),
-                                          width:
-                                              widget.board!
-                                                  .objectById(
-                                                    _columnDropTargetId!,
-                                                  )!
-                                                  .geometry
-                                                  .width -
-                                              CanvasColumnLayoutEngine.padding *
-                                                  2,
-                                          height: 3,
-                                          child: ColoredBox(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.primary,
-                                          ),
-                                        ),
-                                      if (_canvasSmartGuides != null)
-                                        Positioned.fill(
-                                          child: IgnorePointer(
-                                            child: Semantics(
-                                              label:
-                                                  _canvasSmartGuides!
-                                                          .distance ==
-                                                      null
-                                                  ? null
-                                                  : 'Equal spacing ${_canvasSmartGuides!.distance!.round()} px',
-                                              child: CustomPaint(
-                                                key: const ValueKey(
-                                                  'mindmap-canvas-smart-guides',
-                                                ),
-                                                painter:
-                                                    _CanvasSmartGuidesPainter(
-                                                      guides:
-                                                          _canvasSmartGuides!,
-                                                      origin: origin,
-                                                      color: Theme.of(
-                                                        context,
-                                                      ).colorScheme.primary,
-                                                    ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      for (final object
-                                          in widget.assistantPreviewObjects)
-                                        _CanvasAssistantPreviewOutline(
-                                          object: object,
-                                          origin: origin,
-                                        ),
-                                      for (final object in visibleCanvasObjects)
-                                        if (object.isVisible &&
-                                            object.type !=
-                                                CanvasObjectType
-                                                    .nodeReference &&
-                                            (!hasCanvasSearch ||
-                                                matchedObjectIds.contains(
-                                                  object.id,
-                                                )) &&
-                                            (_canvasObjectVoteCount(object) >
-                                                    0 ||
-                                                _hasLocalVote(object) ||
-                                                _canvasObjectOpenCommentCount(
-                                                      object,
-                                                    ) >
-                                                    0))
-                                          _CanvasObjectSignalsBadge(
-                                            object: object,
-                                            voteCount: _canvasObjectVoteCount(
-                                              object,
-                                            ),
-                                            hasLocalVote: _hasLocalVote(object),
-                                            openCommentCount:
-                                                _canvasObjectOpenCommentCount(
+                                                        .linkPreview)
+                                              _PositionedCanvasMediaObject(
+                                                object: object,
+                                                geometry: _canvasObjectGeometry(
                                                   object,
                                                 ),
-                                            geometry: _canvasObjectGeometry(
-                                              object,
-                                            ),
-                                            origin: origin,
-                                          ),
-                                      for (final node in visibleNodes) ...[
-                                        _PositionedNode(
-                                          cardKey: _nodeCardKeys.putIfAbsent(
-                                            node.id,
-                                            () =>
-                                                GlobalKey<
-                                                  _MindmapNodeCardState
-                                                >(),
-                                          ),
-                                          node: node,
-                                          focusNode: _nodeFocusNodes
-                                              .putIfAbsent(
-                                                node.id,
-                                                () => FocusNode(
-                                                  debugLabel: 'Mindmap node',
-                                                ),
-                                              ),
-                                          preset: _presentationCache
-                                              .uiStateFor(node)
-                                              .sizePreset,
-                                          typedPayload: _presentationCache
-                                              .typedPayloadFor(node),
-                                          position: _positionFor(node),
-                                          size: _nodeSizeFor(node),
-                                          origin: origin,
-                                          isMovementLocked: _editingNodeIds
-                                              .contains(node.id),
-                                          enableHoverEffects: false,
-                                          onInlineEditingChanged: (isEditing) {
-                                            setState(() {
-                                              if (isEditing) {
-                                                _editingNodeIds.add(node.id);
-                                              } else {
-                                                _editingNodeIds.remove(node.id);
-                                              }
-                                            });
-                                            widget.onInlineEditStateChanged
-                                                ?.call(
-                                                  node.id,
-                                                  isEditing,
-                                                  isEditing
-                                                      ? NodeSaveStatus.idle
-                                                      : NodeSaveStatus.idle,
-                                                );
-                                          },
-                                          onInlineSaveStatusChanged: (status) =>
-                                              widget.onInlineEditStateChanged
-                                                  ?.call(
-                                                    node.id,
-                                                    _editingNodeIds.contains(
-                                                      node.id,
+                                                origin: origin,
+                                                isSelected:
+                                                    _selectedCanvasObjectIds
+                                                        .contains(object.id),
+                                                loadAttachmentBytes: widget
+                                                    .loadCanvasAttachmentBytes,
+                                                onSelect: () =>
+                                                    _selectCanvasObject(object),
+                                                onPanUpdate: (delta) =>
+                                                    _moveCanvasObject(
+                                                      object,
+                                                      delta,
                                                     ),
-                                                    status,
-                                                  ),
-                                          isHighlighted: highlightedNodeIds
-                                              .contains(node.id),
-                                          isCompact:
-                                              compactNodeIds.contains(
-                                                node.id,
-                                              ) &&
-                                              widget.expandedNodeId != node.id,
-                                          expandedChild:
-                                              widget.expandedNodeId == node.id
-                                              ? widget.expandedNodeBuilder
-                                                    ?.call(node)
-                                              : null,
-                                          onBuilt: widget.onNodeCardBuilt,
-                                          onBuildProbe:
-                                              widget.onNodeCardBuildProbe,
-                                          onPointerDown: (globalPosition) =>
-                                              _nodeDragGlobalPosition =
-                                                  globalPosition,
-                                          onPointerUp: () =>
-                                              _nodeDragGlobalPosition = null,
-                                          onPanUpdate: (globalPosition) {
-                                            final previous =
-                                                _nodeDragGlobalPosition;
-                                            _nodeDragGlobalPosition =
-                                                globalPosition;
-                                            if (previous == null) return;
-                                            final scale = _canvasScale(
-                                              _transformationController.value,
-                                            );
-                                            _moveNode(
-                                              node,
-                                              (globalPosition - previous) /
-                                                  scale,
-                                            );
-                                          },
-                                          onPanEnd: () => _finishMove(node),
-                                          onPanCancel: () {
-                                            _nodeDragGlobalPosition = null;
-                                            _resetNodeGuideState();
-                                          },
-
-                                          onConnectionStart: (globalPosition) =>
-                                              _startConnectionDrag(
-                                                node,
-                                                globalPosition,
-                                              ),
-                                          onConnectionUpdate:
-                                              _updateConnectionDrag,
-                                          onConnectionEnd:
-                                              _finishConnectionDrag,
-                                          onNodeUpdated: widget.onNodeUpdated,
-                                          onResizeChanged:
-                                              widget.onNodeResize == null ||
-                                                  widget.expandedNodeId ==
-                                                      node.id
-                                              ? null
-                                              : (change) => _applyNodeResize(
-                                                  node,
-                                                  change,
+                                                onPanEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onPanCancel:
+                                                    _cancelCanvasObjectMove,
+                                                onResizeUpdate: (delta) =>
+                                                    _resizeCanvasObject(
+                                                      object,
+                                                      delta,
+                                                    ),
+                                                onResizeEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                              )
+                                            else
+                                              _PositionedCanvasObject(
+                                                key: _canvasObjectKeys.putIfAbsent(
+                                                  object.id,
+                                                  () =>
+                                                      GlobalKey<
+                                                        _PositionedCanvasObjectState
+                                                      >(),
                                                 ),
-                                          onSelect: () =>
-                                              unawaited(_selectNode(node)),
-                                          onOpen: () => unawaited(
-                                            selectAndFocusNode(node),
-                                          ),
-                                          onContextMenu: (globalPosition) =>
-                                              widget.onNodeContextMenu?.call(
-                                                node,
-                                                globalPosition,
+                                                object: object,
+                                                geometry: _canvasObjectGeometry(
+                                                  object,
+                                                ),
+                                                origin: origin,
+                                                isSelected:
+                                                    _selectedCanvasObjectIds
+                                                        .contains(object.id),
+                                                onSelect: () =>
+                                                    _selectCanvasObject(object),
+                                                onOpen:
+                                                    object.type ==
+                                                        CanvasObjectType
+                                                            .boardReference
+                                                    ? () => widget
+                                                          .onBoardReferenceOpened
+                                                          ?.call(object)
+                                                    : null,
+                                                onPanDown:
+                                                    _startCanvasObjectMove,
+                                                onPanStart: (position) =>
+                                                    _selectCanvasObject(object),
+                                                onPanUpdate: (position) =>
+                                                    _moveCanvasObjectFromGlobal(
+                                                      object,
+                                                      position,
+                                                    ),
+                                                onPanEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onPanCancel:
+                                                    _cancelCanvasObjectMove,
+                                                onResizeUpdate: (delta) =>
+                                                    _resizeCanvasObject(
+                                                      object,
+                                                      delta,
+                                                    ),
+                                                onResizeEnd: () =>
+                                                    _finishCanvasObjectMove(
+                                                      object,
+                                                    ),
+                                                onTextChanged: (text) =>
+                                                    _updateCanvasObjectText(
+                                                      object,
+                                                      text,
+                                                    ),
+                                                onEditingFinished: () =>
+                                                    _canvasFocusNode
+                                                        .requestFocus(),
                                               ),
-                                          onTaskDoneChanged: (isDone) => widget
-                                              .onTaskDoneChanged
-                                              ?.call(node, isDone),
-                                          onTaskChecklistItemCompleted:
-                                              widget.onTaskChecklistItemCompleted ==
-                                                  null
-                                              ? null
-                                              : () => widget
-                                                    .onTaskChecklistItemCompleted
-                                                    ?.call(node),
-                                          onKanbanCardAdvanced:
-                                              widget.onKanbanCardAdvanced ==
-                                                  null
-                                              ? null
-                                              : (cardId) => widget
-                                                    .onKanbanCardAdvanced
-                                                    ?.call(node, cardId),
-                                          onHabitCompleted:
-                                              widget.onHabitCompleted == null
-                                              ? null
-                                              : () => widget.onHabitCompleted
-                                                    ?.call(node),
-                                          onGoalMilestoneAdvanced:
-                                              widget.onGoalMilestoneAdvanced ==
-                                                  null
-                                              ? null
-                                              : () => widget
-                                                    .onGoalMilestoneAdvanced
-                                                    ?.call(node),
-                                          onPlanStepAdvanced:
-                                              widget.onPlanStepAdvanced == null
-                                              ? null
-                                              : () => widget.onPlanStepAdvanced
-                                                    ?.call(node),
+                                        if (_columnDropTargetId != null &&
+                                            widget.board?.objectById(
+                                                  _columnDropTargetId!,
+                                                ) !=
+                                                null)
+                                          Positioned(
+                                            key: const ValueKey(
+                                              'canvas-column-insertion-indicator',
+                                            ),
+                                            left:
+                                                origin.dx +
+                                                widget.board!
+                                                    .objectById(
+                                                      _columnDropTargetId!,
+                                                    )!
+                                                    .geometry
+                                                    .x +
+                                                CanvasColumnLayoutEngine
+                                                    .padding,
+                                            top:
+                                                origin.dy +
+                                                widget.board!
+                                                    .objectById(
+                                                      _columnDropTargetId!,
+                                                    )!
+                                                    .geometry
+                                                    .y +
+                                                CanvasColumnLayoutEngine
+                                                    .headerHeight +
+                                                CanvasColumnLayoutEngine
+                                                    .padding +
+                                                (_columnDropInsertionIndex ??
+                                                        0) *
+                                                    (CanvasColumnLayoutEngine
+                                                            .minimumChildHeight +
+                                                        CanvasColumnLayoutEngine
+                                                            .childGap),
+                                            width:
+                                                widget.board!
+                                                    .objectById(
+                                                      _columnDropTargetId!,
+                                                    )!
+                                                    .geometry
+                                                    .width -
+                                                CanvasColumnLayoutEngine
+                                                        .padding *
+                                                    2,
+                                            height: 3,
+                                            child: ColoredBox(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.primary,
+                                            ),
+                                          ),
+                                        if (_canvasSmartGuides != null)
+                                          Positioned.fill(
+                                            child: IgnorePointer(
+                                              child: Semantics(
+                                                label:
+                                                    _canvasSmartGuides!
+                                                            .distance ==
+                                                        null
+                                                    ? null
+                                                    : 'Equal spacing ${_canvasSmartGuides!.distance!.round()} px',
+                                                child: CustomPaint(
+                                                  key: const ValueKey(
+                                                    'mindmap-canvas-smart-guides',
+                                                  ),
+                                                  painter:
+                                                      _CanvasSmartGuidesPainter(
+                                                        guides:
+                                                            _canvasSmartGuides!,
+                                                        origin: origin,
+                                                        color: Theme.of(
+                                                          context,
+                                                        ).colorScheme.primary,
+                                                      ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        for (final object
+                                            in widget.assistantPreviewObjects)
+                                          _CanvasAssistantPreviewOutline(
+                                            object: object,
+                                            origin: origin,
+                                          ),
+                                        for (final object
+                                            in visibleCanvasObjects)
+                                          if (object.isVisible &&
+                                              object.type !=
+                                                  CanvasObjectType
+                                                      .nodeReference &&
+                                              (!hasCanvasSearch ||
+                                                  matchedObjectIds.contains(
+                                                    object.id,
+                                                  )) &&
+                                              (_canvasObjectVoteCount(object) >
+                                                      0 ||
+                                                  _hasLocalVote(object) ||
+                                                  _canvasObjectOpenCommentCount(
+                                                        object,
+                                                      ) >
+                                                      0))
+                                            _CanvasObjectSignalsBadge(
+                                              object: object,
+                                              voteCount: _canvasObjectVoteCount(
+                                                object,
+                                              ),
+                                              hasLocalVote: _hasLocalVote(
+                                                object,
+                                              ),
+                                              openCommentCount:
+                                                  _canvasObjectOpenCommentCount(
+                                                    object,
+                                                  ),
+                                              geometry: _canvasObjectGeometry(
+                                                object,
+                                              ),
+                                              origin: origin,
+                                            ),
+                                        for (final node in visibleNodes) ...[
+                                          _PositionedNode(
+                                            cardKey: _nodeCardKeys.putIfAbsent(
+                                              node.id,
+                                              () =>
+                                                  GlobalKey<
+                                                    _MindmapNodeCardState
+                                                  >(),
+                                            ),
+                                            node: node,
+                                            focusNode: _nodeFocusNodes
+                                                .putIfAbsent(
+                                                  node.id,
+                                                  () => FocusNode(
+                                                    debugLabel: 'Mindmap node',
+                                                  ),
+                                                ),
+                                            preset: _presentationCache
+                                                .uiStateFor(node)
+                                                .sizePreset,
+                                            typedPayload: _presentationCache
+                                                .typedPayloadFor(node),
+                                            position: _positionFor(node),
+                                            size: _nodeSizeFor(node),
+                                            origin: origin,
+                                            isMovementLocked: _editingNodeIds
+                                                .contains(node.id),
+                                            enableHoverEffects: false,
+                                            onInlineEditingChanged:
+                                                (isEditing) {
+                                                  setState(() {
+                                                    if (isEditing) {
+                                                      _editingNodeIds.add(
+                                                        node.id,
+                                                      );
+                                                    } else {
+                                                      _editingNodeIds.remove(
+                                                        node.id,
+                                                      );
+                                                    }
+                                                  });
+                                                  widget
+                                                      .onInlineEditStateChanged
+                                                      ?.call(
+                                                        node.id,
+                                                        isEditing,
+                                                        isEditing
+                                                            ? NodeSaveStatus
+                                                                  .idle
+                                                            : NodeSaveStatus
+                                                                  .idle,
+                                                      );
+                                                },
+                                            onInlineSaveStatusChanged:
+                                                (status) => widget
+                                                    .onInlineEditStateChanged
+                                                    ?.call(
+                                                      node.id,
+                                                      _editingNodeIds.contains(
+                                                        node.id,
+                                                      ),
+                                                      status,
+                                                    ),
+                                            isHighlighted: highlightedNodeIds
+                                                .contains(node.id),
+                                            isCompact:
+                                                compactNodeIds.contains(
+                                                  node.id,
+                                                ) &&
+                                                widget.expandedNodeId !=
+                                                    node.id,
+                                            expandedChild:
+                                                widget.expandedNodeId == node.id
+                                                ? widget.expandedNodeBuilder
+                                                      ?.call(node)
+                                                : null,
+                                            onBuilt: widget.onNodeCardBuilt,
+                                            onBuildProbe:
+                                                widget.onNodeCardBuildProbe,
+                                             onPointerDown: (globalPosition) =>
+                                                 setState(() =>
+                                                     _nodeDragGlobalPosition =
+                                                         globalPosition),
+                                             onPointerUp: () =>
+                                                 setState(() =>
+                                                     _nodeDragGlobalPosition =
+                                                         null),
+                                             onPanUpdate: (globalPosition) {
+                                               final previous =
+                                                   _nodeDragGlobalPosition;
+                                               _nodeDragGlobalPosition =
+                                                   globalPosition;
+                                               if (previous == null) return;
+                                               final scale = _canvasScale(
+                                                 _transformationController.value,
+                                               );
+                                               _moveNode(
+                                                 node,
+                                                 (globalPosition - previous) /
+                                                     scale,
+                                               );
+                                             },
+                                             onPanEnd: () {
+                                               setState(() =>
+                                                   _nodeDragGlobalPosition =
+                                                       null);
+                                               _finishMove(node);
+                                             },
+                                             onPanCancel: () {
+                                               setState(() =>
+                                                   _nodeDragGlobalPosition =
+                                                       null);
+                                               _resetNodeGuideState();
+                                             },
+
+                                            onConnectionStart:
+                                                (globalPosition) =>
+                                                    _startConnectionDrag(
+                                                      node,
+                                                      globalPosition,
+                                                    ),
+                                            onConnectionUpdate:
+                                                _updateConnectionDrag,
+                                            onConnectionEnd:
+                                                _finishConnectionDrag,
+                                            onNodeUpdated: widget.onNodeUpdated,
+                                            onResizeChanged:
+                                                widget.onNodeResize == null ||
+                                                    widget.expandedNodeId ==
+                                                        node.id
+                                                ? null
+                                                : (change) => _applyNodeResize(
+                                                    node,
+                                                    change,
+                                                  ),
+                                            onSelect: () =>
+                                                unawaited(_selectNode(node)),
+                                            onOpen: () => unawaited(
+                                              selectAndFocusNode(node),
+                                            ),
+                                            onContextMenu: (globalPosition) =>
+                                                widget.onNodeContextMenu?.call(
+                                                  node,
+                                                  globalPosition,
+                                                ),
+                                            onTaskDoneChanged: (isDone) =>
+                                                widget.onTaskDoneChanged?.call(
+                                                  node,
+                                                  isDone,
+                                                ),
+                                            onTaskChecklistItemCompleted:
+                                                widget.onTaskChecklistItemCompleted ==
+                                                    null
+                                                ? null
+                                                : () => widget
+                                                      .onTaskChecklistItemCompleted
+                                                      ?.call(node),
+                                            onKanbanCardAdvanced:
+                                                widget.onKanbanCardAdvanced ==
+                                                    null
+                                                ? null
+                                                : (cardId) => widget
+                                                      .onKanbanCardAdvanced
+                                                      ?.call(node, cardId),
+                                            onHabitCompleted:
+                                                widget.onHabitCompleted == null
+                                                ? null
+                                                : () => widget.onHabitCompleted
+                                                      ?.call(node),
+                                            onGoalMilestoneAdvanced:
+                                                widget.onGoalMilestoneAdvanced ==
+                                                    null
+                                                ? null
+                                                : () => widget
+                                                      .onGoalMilestoneAdvanced
+                                                      ?.call(node),
+                                            onPlanStepAdvanced:
+                                                widget.onPlanStepAdvanced ==
+                                                    null
+                                                ? null
+                                                : () => widget
+                                                      .onPlanStepAdvanced
+                                                      ?.call(node),
+                                          ),
+                                          if (!_isPresentationMode)
+                                            _KeyboardConnectionPort(
+                                              key: ValueKey(
+                                                'mindmap-output-port-${node.id}',
+                                              ),
+                                              node: node,
+                                              position: _positionFor(node),
+                                              size: _nodeSizeFor(node),
+                                              origin: origin,
+                                              isInput: false,
+                                              onPressed: () =>
+                                                  _startKeyboardConnection(
+                                                    node,
+                                                  ),
+                                            ),
+                                          if (!_isPresentationMode)
+                                            _KeyboardConnectionPort(
+                                              key: ValueKey(
+                                                'mindmap-input-port-${node.id}',
+                                              ),
+                                              node: node,
+                                              position: _positionFor(node),
+                                              size: _nodeSizeFor(node),
+                                              origin: origin,
+                                              isInput: true,
+                                              onPressed: () => unawaited(
+                                                _finishKeyboardConnection(node),
+                                              ),
+                                            ),
+                                          ..._collabSelectionsForNode(
+                                            node,
+                                            collabState,
+                                            origin,
+                                          ),
+                                        ],
+                                        for (final entry
+                                            in collabState
+                                                .collaborators
+                                                .entries)
+                                          if (entry.value.cursorPosition !=
+                                              null)
+                                            CollaboratorCursorWidget(
+                                              name: entry.value.name,
+                                              color: entry.value.color,
+                                              position:
+                                                  entry.value.cursorPosition!,
+                                            ),
+                                        for (final ping in _activePings)
+                                          _buildPingRipple(ping),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (!_isPresentationMode &&
+                              !_isSearchOverlayCollapsed)
+                            Positioned.fill(
+                              child: _CanvasSearchOverlay(
+                                searchController: _searchController,
+                                searchFocusNode: _searchFocusNode,
+                                isSearchActive: isSearchActive,
+                                results: searchResults,
+                                activeResultIndex: _activeSearchResultIndex,
+                                selectedCategory: _searchCategory,
+                                selectedType: _searchTypeFilter,
+                                selectedReviewState: _reviewStateFilter,
+                                nextActionOnly: _nextActionOnly,
+                                isCollapsed: false,
+                                onClearSearch: _clearSearch,
+                                onCategorySelected: (category) => setState(() {
+                                  _searchCategory = category;
+                                  _activeSearchResultIndex = 0;
+                                }),
+                                onTypeSelected: _setSearchTypeFilter,
+                                onReviewStateSelected: _setReviewStateFilter,
+                                onNextActionOnlyChanged: _setNextActionOnly,
+                                onCollapsedChanged: _setSearchOverlayCollapsed,
+                                onPrevious: () => _cycleSearchResult(
+                                  searchResults,
+                                  backwards: true,
+                                ),
+                                onNext: () => _cycleSearchResult(searchResults),
+                                onResultSelected: (index) =>
+                                    _activateSearchResult(searchResults, index),
+                                leftInset: leftOverlayInset,
+                              ),
+                            ),
+                          if (_lassoStartLocal != null &&
+                              _lassoCurrentLocal != null)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _LassoSelectionPainter(
+                                    rect: Rect.fromPoints(
+                                      _lassoStartLocal!,
+                                      _lassoCurrentLocal!,
+                                    ),
+                                    accent: AppSemanticColors.of(
+                                      context,
+                                    ).accent,
+                                    fill: AppSemanticColors.of(
+                                      context,
+                                    ).accentMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (_selectedNodeIds.length +
+                                  _selectedCanvasObjectIds.length >
+                              1)
+                            Positioned(
+                              top: 86,
+                              right: 16,
+                              child: _MultiSelectToolbar(
+                                nodeCount: _selectedNodeIds.length,
+                                objectCount: _selectedCanvasObjectIds.length,
+                                canEditNodes: widget.onNodeUpdated != null,
+                                canArrange:
+                                    (_selectedNodeIds.isEmpty ||
+                                        widget.onNodeMoved != null) &&
+                                    (!_selectedCanvasObjects().any(
+                                          (object) => !object.isLocked,
+                                        ) ||
+                                        _canUpdateCanvasObjects) &&
+                                    ((_selectedNodeIds.isNotEmpty &&
+                                            widget.onNodeMoved != null) ||
+                                        (_selectedCanvasObjects().any(
+                                              (object) => !object.isLocked,
+                                            ) &&
+                                            _canUpdateCanvasObjects)),
+                                canUpdateObjects: _canUpdateCanvasObjects,
+                                canCreateObjects: _canCreateCanvasObjects,
+                                canGroupInFrame:
+                                    _canCreateCanvasObjects &&
+                                    widget.onNodeUpdated != null &&
+                                    _canUpdateCanvasObjects,
+                                canDelete:
+                                    (_selectedNodeIds.isNotEmpty &&
+                                        widget.onNodesDeleted != null) ||
+                                    (_selectedCanvasObjects().any(
+                                          (object) => !object.isLocked,
+                                        ) &&
+                                        _canDeleteCanvasObjects),
+                                onComplete: () =>
+                                    unawaited(_completeSelectedNodes()),
+                                onGroupInFrame: () =>
+                                    unawaited(groupSelectedEntities()),
+                                onObjectProperties: () =>
+                                    unawaited(_showCanvasObjectProperties()),
+                                onObjectLock: () => _runCanvasObjectAction(
+                                  _CanvasObjectAction.toggleLock,
+                                ),
+                                onObjectRotate: () =>
+                                    _rotateSelectedCanvasObjects(math.pi / 12),
+                                onObjectLayer: () =>
+                                    _moveCanvasObjectToLayer(front: true),
+                                onObjectGroup: _groupSelectedCanvasObjects,
+
+                                onStatusChanged: (status) =>
+                                    unawaited(_setSelectedStatus(status)),
+                                onPriorityChanged: (priority) =>
+                                    unawaited(_setSelectedPriority(priority)),
+                                onTag: () => unawaited(_tagSelectedNodes()),
+                                onProject: () =>
+                                    unawaited(_setSelectedProject()),
+                                onClearProject: () =>
+                                    unawaited(_clearSelectedProject()),
+                                onArea: () => unawaited(_setSelectedArea()),
+                                onClearArea: () =>
+                                    unawaited(_clearSelectedArea()),
+                                onClearTags: () =>
+                                    unawaited(_clearSelectedTags()),
+                                onDueDate: () =>
+                                    unawaited(_setSelectedDueDate()),
+                                onClearDueDate: () =>
+                                    unawaited(_clearSelectedDueDate()),
+                                onAlignHorizontal: () => unawaited(
+                                  _alignSelectedNodes(horizontal: true),
+                                ),
+                                onAlignVertical: () => unawaited(
+                                  _alignSelectedNodes(horizontal: false),
+                                ),
+                                onDistributeHorizontal: () => unawaited(
+                                  _distributeSelectedNodes(horizontal: true),
+                                ),
+                                onDistributeVertical: () => unawaited(
+                                  _distributeSelectedNodes(horizontal: false),
+                                ),
+                                onZoomToSelected: _zoomToSelected,
+                                onCopy: () =>
+                                    unawaited(_copySelectedEntities()),
+                                onPaste: () =>
+                                    unawaited(_pasteSelectedEntities()),
+                                onDuplicate: () =>
+                                    unawaited(_duplicateSelectedEntities()),
+                                onArchive: () =>
+                                    unawaited(_archiveSelectedNodes()),
+                                onDelete: () =>
+                                    unawaited(_deleteSelectedEntities()),
+                                onClear: _clearMultiSelection,
+                              ),
+                            ),
+                          if (_isPresentationMode)
+                            Positioned(
+                              bottom: 24,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Material(
+                                  elevation: 6,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                      .withValues(alpha: 0.9),
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Previous slide',
+                                          icon: const Icon(Icons.arrow_back),
+                                          onPressed: previousPresentationSlide,
                                         ),
-                                        if (!_isPresentationMode)
-                                          _KeyboardConnectionPort(
-                                            key: ValueKey(
-                                              'mindmap-output-port-${node.id}',
-                                            ),
-                                            node: node,
-                                            position: _positionFor(node),
-                                            size: _nodeSizeFor(node),
-                                            origin: origin,
-                                            isInput: false,
-                                            onPressed: () =>
-                                                _startKeyboardConnection(node),
-                                          ),
-                                        if (!_isPresentationMode)
-                                          _KeyboardConnectionPort(
-                                            key: ValueKey(
-                                              'mindmap-input-port-${node.id}',
-                                            ),
-                                            node: node,
-                                            position: _positionFor(node),
-                                            size: _nodeSizeFor(node),
-                                            origin: origin,
-                                            isInput: true,
-                                            onPressed: () => unawaited(
-                                              _finishKeyboardConnection(node),
-                                            ),
-                                          ),
-                                        ..._collabSelectionsForNode(
-                                          node,
-                                          collabState,
-                                          origin,
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Slide ${_presentationFrameIndex + 1} / ${math.max(1, _visibleGroups(widget.nodes).length)}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          tooltip: 'Next slide',
+                                          icon: const Icon(Icons.arrow_forward),
+                                          onPressed: nextPresentationSlide,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        IconButton(
+                                          tooltip: 'Exit presentation',
+                                          icon: const Icon(Icons.close),
+                                          onPressed: () =>
+                                              setPresentationMode(false),
                                         ),
                                       ],
-                                      for (final entry
-                                          in collabState.collaborators.entries)
-                                        if (entry.value.cursorPosition != null)
-                                          CollaboratorCursorWidget(
-                                            name: entry.value.name,
-                                            color: entry.value.color,
-                                            position:
-                                                entry.value.cursorPosition!,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (isFocusActive)
+                            Positioned(
+                              top: 86,
+                              left: leftOverlayInset,
+                              child: _FocusModeBanner(
+                                title: focusNode.title,
+                                visibleCount: filteredNodes.length,
+                                onClear: () =>
+                                    setState(() => _focusedNodeId = null),
+                              ),
+                            ),
+                          if (isSearchActive && searchResults.isEmpty)
+                            Center(
+                              child: _CanvasSearchEmptyState(
+                                query: _searchQuery.isEmpty
+                                    ? _searchTypeFilter?.label ?? 'filter'
+                                    : _searchQuery,
+                                onClearSearch: _clearSearch,
+                              ),
+                            ),
+
+                          if (!_isPresentationMode && showMiroToolRail)
+                            Positioned(
+                              left: 16,
+                              top: 16,
+                              child: _buildMiroToolRail(context),
+                            ),
+                          if (!_isPresentationMode &&
+                              showMiroToolRail &&
+                              _toolPopoverType != null)
+                            Positioned.fill(
+                              key: const ValueKey(
+                                'mindmap-canvas-tool-popover-position',
+                              ),
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: GestureDetector(
+                                      key: const ValueKey(
+                                        'mindmap-canvas-tool-popover-barrier',
+                                      ),
+                                      behavior: HitTestBehavior.translucent,
+                                      onTap: _closeToolSettings,
+                                    ),
+                                  ),
+                                  CompositedTransformFollower(
+                                    link: _toolLayerLinks[_toolPopoverType]!,
+                                    showWhenUnlinked: false,
+                                    targetAnchor: Alignment.centerRight,
+                                    followerAnchor: Alignment.centerLeft,
+                                    offset: const Offset(12, 0),
+                                    child: _buildToolSettings(
+                                      context,
+                                      _toolPopoverType!,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                          // Zoom & Grid Toolbar Overlay
+                          if (!_isPresentationMode)
+                            ValueListenableBuilder<Matrix4>(
+                              valueListenable: _transformationController,
+                              builder: (context, value, child) {
+                                return Positioned(
+                                  bottom: 16,
+                                  left: leftOverlayInset,
+                                  child: _buildCanvasToolbar(
+                                    context,
+                                    isSearchActive: isSearchActive,
+                                    filteredCount: filteredNodes.length,
+                                    showCreationTools: !showMiroToolRail,
+                                  ),
+                                );
+                              },
+                            ),
+
+                          // Mini-map Overlay
+                          if (!_isPresentationMode)
+                            ValueListenableBuilder<Matrix4>(
+                              valueListenable: _transformationController,
+                              builder: (context, value, child) {
+                                return Positioned(
+                                  key: const ValueKey('mindmap-minimap-anchor'),
+                                  bottom: 16,
+                                  right: 16,
+                                  child: AnimatedSize(
+                                    alignment: Alignment.bottomRight,
+                                    duration: const Duration(milliseconds: 180),
+                                    curve: Curves.easeOut,
+                                    child: AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 140,
+                                      ),
+                                      layoutBuilder: (current, previous) =>
+                                          Stack(
+                                            alignment: Alignment.bottomRight,
+                                            children: <Widget>[
+                                              ...previous,
+                                              ?current,
+                                            ],
                                           ),
-                                      for (final ping in _activePings)
-                                        _buildPingRipple(ping),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (!_isPresentationMode && !_isSearchOverlayCollapsed)
-                          Positioned.fill(
-                            child: _CanvasSearchOverlay(
-                              searchController: _searchController,
-                              searchFocusNode: _searchFocusNode,
-                              isSearchActive: isSearchActive,
-                              results: searchResults,
-                              activeResultIndex: _activeSearchResultIndex,
-                              selectedCategory: _searchCategory,
-                              selectedType: _searchTypeFilter,
-                              selectedReviewState: _reviewStateFilter,
-                              nextActionOnly: _nextActionOnly,
-                              isCollapsed: false,
-                              onClearSearch: _clearSearch,
-                              onCategorySelected: (category) => setState(() {
-                                _searchCategory = category;
-                                _activeSearchResultIndex = 0;
-                              }),
-                              onTypeSelected: _setSearchTypeFilter,
-                              onReviewStateSelected: _setReviewStateFilter,
-                              onNextActionOnlyChanged: _setNextActionOnly,
-                              onCollapsedChanged: _setSearchOverlayCollapsed,
-                              onPrevious: () => _cycleSearchResult(
-                                searchResults,
-                                backwards: true,
-                              ),
-                              onNext: () => _cycleSearchResult(searchResults),
-                              onResultSelected: (index) =>
-                                  _activateSearchResult(searchResults, index),
-                              leftInset: leftOverlayInset,
-                            ),
-                          ),
-                        if (_lassoStartLocal != null &&
-                            _lassoCurrentLocal != null)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: _LassoSelectionPainter(
-                                  rect: Rect.fromPoints(
-                                    _lassoStartLocal!,
-                                    _lassoCurrentLocal!,
-                                  ),
-                                  accent: AppSemanticColors.of(context).accent,
-                                  fill: AppSemanticColors.of(
-                                    context,
-                                  ).accentMuted,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (_selectedNodeIds.length +
-                                _selectedCanvasObjectIds.length >
-                            1)
-                          Positioned(
-                            top: 86,
-                            right: 16,
-                            child: _MultiSelectToolbar(
-                              nodeCount: _selectedNodeIds.length,
-                              objectCount: _selectedCanvasObjectIds.length,
-                              canEditNodes: widget.onNodeUpdated != null,
-                              canArrange:
-                                  (_selectedNodeIds.isEmpty ||
-                                      widget.onNodeMoved != null) &&
-                                  (!_selectedCanvasObjects().any(
-                                        (object) => !object.isLocked,
-                                      ) ||
-                                      _canUpdateCanvasObjects) &&
-                                  ((_selectedNodeIds.isNotEmpty &&
-                                          widget.onNodeMoved != null) ||
-                                      (_selectedCanvasObjects().any(
-                                            (object) => !object.isLocked,
-                                          ) &&
-                                          _canUpdateCanvasObjects)),
-                              canUpdateObjects: _canUpdateCanvasObjects,
-                              canCreateObjects: _canCreateCanvasObjects,
-                              canGroupInFrame:
-                                  _canCreateCanvasObjects &&
-                                  widget.onNodeUpdated != null &&
-                                  _canUpdateCanvasObjects,
-                              canDelete:
-                                  (_selectedNodeIds.isNotEmpty &&
-                                      widget.onNodesDeleted != null) ||
-                                  (_selectedCanvasObjects().any(
-                                        (object) => !object.isLocked,
-                                      ) &&
-                                      _canDeleteCanvasObjects),
-                              onComplete: () =>
-                                  unawaited(_completeSelectedNodes()),
-                              onGroupInFrame: () =>
-                                  unawaited(groupSelectedEntities()),
-                              onObjectProperties: () =>
-                                  unawaited(_showCanvasObjectProperties()),
-                              onObjectLock: () => _runCanvasObjectAction(
-                                _CanvasObjectAction.toggleLock,
-                              ),
-                              onObjectRotate: () =>
-                                  _rotateSelectedCanvasObjects(math.pi / 12),
-                              onObjectLayer: () =>
-                                  _moveCanvasObjectToLayer(front: true),
-                              onObjectGroup: _groupSelectedCanvasObjects,
-
-                              onStatusChanged: (status) =>
-                                  unawaited(_setSelectedStatus(status)),
-                              onPriorityChanged: (priority) =>
-                                  unawaited(_setSelectedPriority(priority)),
-                              onTag: () => unawaited(_tagSelectedNodes()),
-                              onProject: () => unawaited(_setSelectedProject()),
-                              onClearProject: () =>
-                                  unawaited(_clearSelectedProject()),
-                              onArea: () => unawaited(_setSelectedArea()),
-                              onClearArea: () =>
-                                  unawaited(_clearSelectedArea()),
-                              onClearTags: () =>
-                                  unawaited(_clearSelectedTags()),
-                              onDueDate: () => unawaited(_setSelectedDueDate()),
-                              onClearDueDate: () =>
-                                  unawaited(_clearSelectedDueDate()),
-                              onAlignHorizontal: () => unawaited(
-                                _alignSelectedNodes(horizontal: true),
-                              ),
-                              onAlignVertical: () => unawaited(
-                                _alignSelectedNodes(horizontal: false),
-                              ),
-                              onDistributeHorizontal: () => unawaited(
-                                _distributeSelectedNodes(horizontal: true),
-                              ),
-                              onDistributeVertical: () => unawaited(
-                                _distributeSelectedNodes(horizontal: false),
-                              ),
-                              onZoomToSelected: _zoomToSelected,
-                              onCopy: () => unawaited(_copySelectedEntities()),
-                              onPaste: () =>
-                                  unawaited(_pasteSelectedEntities()),
-                              onDuplicate: () =>
-                                  unawaited(_duplicateSelectedEntities()),
-                              onArchive: () =>
-                                  unawaited(_archiveSelectedNodes()),
-                              onDelete: () =>
-                                  unawaited(_deleteSelectedEntities()),
-                              onClear: _clearMultiSelection,
-                            ),
-                          ),
-                        if (_isPresentationMode)
-                          Positioned(
-                            bottom: 24,
-                            left: 0,
-                            right: 0,
-                            child: Center(
-                              child: Material(
-                                elevation: 6,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest
-                                    .withValues(alpha: 0.9),
-                                borderRadius: BorderRadius.circular(24),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        tooltip: 'Previous slide',
-                                        icon: const Icon(Icons.arrow_back),
-                                        onPressed: previousPresentationSlide,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Slide ${_presentationFrameIndex + 1} / ${math.max(1, _visibleGroups(widget.nodes).length)}',
-                                        style: Theme.of(
+                                      child: KeyedSubtree(
+                                        key: ValueKey<bool>(
+                                          _isMinimapCollapsed,
+                                        ),
+                                        child: _buildMinimap(
                                           context,
-                                        ).textTheme.titleSmall,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      IconButton(
-                                        tooltip: 'Next slide',
-                                        icon: const Icon(Icons.arrow_forward),
-                                        onPressed: nextPresentationSlide,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      IconButton(
-                                        tooltip: 'Exit presentation',
-                                        icon: const Icon(Icons.close),
-                                        onPressed: () =>
-                                            setPresentationMode(false),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (isFocusActive)
-                          Positioned(
-                            top: 86,
-                            left: leftOverlayInset,
-                            child: _FocusModeBanner(
-                              title: focusNode.title,
-                              visibleCount: filteredNodes.length,
-                              onClear: () =>
-                                  setState(() => _focusedNodeId = null),
-                            ),
-                          ),
-                        if (isSearchActive && searchResults.isEmpty)
-                          Center(
-                            child: _CanvasSearchEmptyState(
-                              query: _searchQuery.isEmpty
-                                  ? _searchTypeFilter?.label ?? 'filter'
-                                  : _searchQuery,
-                              onClearSearch: _clearSearch,
-                            ),
-                          ),
-
-                        if (!_isPresentationMode && showMiroToolRail)
-                          Positioned(
-                            left: 16,
-                            top: 16,
-                            child: _buildMiroToolRail(context),
-                          ),
-                        if (!_isPresentationMode &&
-                            showMiroToolRail &&
-                            _toolPopoverType != null)
-                          Positioned.fill(
-                            key: const ValueKey(
-                              'mindmap-canvas-tool-popover-position',
-                            ),
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: GestureDetector(
-                                    key: const ValueKey(
-                                      'mindmap-canvas-tool-popover-barrier',
-                                    ),
-                                    behavior: HitTestBehavior.translucent,
-                                    onTap: _closeToolSettings,
-                                  ),
-                                ),
-                                CompositedTransformFollower(
-                                  link: _toolLayerLinks[_toolPopoverType]!,
-                                  showWhenUnlinked: false,
-                                  targetAnchor: Alignment.centerRight,
-                                  followerAnchor: Alignment.centerLeft,
-                                  offset: const Offset(12, 0),
-                                  child: _buildToolSettings(
-                                    context,
-                                    _toolPopoverType!,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                        // Zoom & Grid Toolbar Overlay
-                        if (!_isPresentationMode)
-                          ValueListenableBuilder<Matrix4>(
-                            valueListenable: _transformationController,
-                            builder: (context, value, child) {
-                              return Positioned(
-                                bottom: 16,
-                                left: leftOverlayInset,
-                                child: _buildCanvasToolbar(
-                                  context,
-                                  isSearchActive: isSearchActive,
-                                  filteredCount: filteredNodes.length,
-                                  showCreationTools: !showMiroToolRail,
-                                ),
-                              );
-                            },
-                          ),
-
-                        // Mini-map Overlay
-                        if (!_isPresentationMode)
-                          ValueListenableBuilder<Matrix4>(
-                            valueListenable: _transformationController,
-                            builder: (context, value, child) {
-                              return Positioned(
-                                key: const ValueKey('mindmap-minimap-anchor'),
-                                bottom: 16,
-                                right: 16,
-                                child: AnimatedSize(
-                                  alignment: Alignment.bottomRight,
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOut,
-                                  child: AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 140),
-                                    layoutBuilder: (current, previous) => Stack(
-                                      alignment: Alignment.bottomRight,
-                                      children: <Widget>[...previous, ?current],
-                                    ),
-                                    child: KeyedSubtree(
-                                      key: ValueKey<bool>(_isMinimapCollapsed),
-                                      child: _buildMinimap(
-                                        context,
-                                        constraints.biggest,
+                                          constraints.biggest,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                       ],
+                                );
+                              },
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
-        ));
+        );
       },
     );
   }
@@ -9574,6 +9684,10 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _canvasObjectSnapReleasedY = false;
     }
     final movingNodes = _movingSelectionFor(node);
+    final movingObjects = _selectedNodeIds.contains(node.id) &&
+            _selectedCanvasObjectIds.isNotEmpty
+        ? _selectedCanvasObjects()
+        : const <CanvasObject>[];
     final movingIds = movingNodes.map((candidate) => candidate.id).toSet();
     for (final movingNode in movingNodes) {
       final raw = _nodeRawDragPositions.putIfAbsent(
@@ -9583,6 +9697,17 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _nodeRawDragPositions[movingNode.id] = CanvasPosition(
         raw.dx + delta.dx,
         raw.dy + delta.dy,
+      );
+    }
+    for (final movingObject in movingObjects) {
+      if (movingObject.isLocked) continue;
+      final raw = _canvasObjectRawDragGeometries.putIfAbsent(
+        movingObject.id,
+        () => _canvasObjectGeometry(movingObject),
+      );
+      _canvasObjectRawDragGeometries[movingObject.id] = raw.copyWith(
+        x: raw.x + delta.dx,
+        y: raw.y + delta.dy,
       );
     }
     final raw = _nodeRawDragPositions[node.id]!;
@@ -9702,6 +9827,14 @@ class MindmapCanvasState extends State<MindmapCanvas>
         position.dy + translation.dy,
       );
     }
+    for (final movingObject in movingObjects) {
+      if (movingObject.isLocked) continue;
+      final raw = _canvasObjectRawDragGeometries[movingObject.id]!;
+      _canvasObjectGeometryOverrides[movingObject.id] = raw.copyWith(
+        x: raw.x + translation.dx,
+        y: raw.y + translation.dy,
+      );
+    }
     _expandSceneToInclude(<Rect>[
       for (final movingNode in movingNodes)
         () {
@@ -9714,7 +9847,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
             nodeSize.height,
           );
         }(),
-    ]);
+    ], compensateViewport: false);
     setState(() {
       _canvasSmartGuides = guides.vertical != null || guides.horizontal != null
           ? guides
@@ -9765,10 +9898,35 @@ class MindmapCanvasState extends State<MindmapCanvas>
         }
       });
     }
+    final movingObjects = _selectedNodeIds.contains(node.id) &&
+            _selectedCanvasObjectIds.isNotEmpty
+        ? _selectedCanvasObjects()
+        : const <CanvasObject>[];
+    if (movingObjects.isNotEmpty) {
+      final objectUpdates = <CanvasObject>[
+        for (final movingObject in movingObjects)
+          if (!movingObject.isLocked)
+            if (_canvasObjectGeometryOverrides[movingObject.id]
+                case final geometry?)
+              movingObject.copyWith(
+                geometry: geometry,
+                updatedAt: DateTime.now(),
+              ),
+      ];
+      if (objectUpdates.isNotEmpty &&
+          widget.onCanvasObjectsUpdated != null) {
+        _canvasObjectRawDragGeometries.clear();
+        unawaited(Future.sync(
+          () => widget.onCanvasObjectsUpdated!(objectUpdates),
+        ));
+      }
+    }
     _resetNodeGuideState();
     _nodeDragGlobalPosition = null;
     unawaited(
-      _persistMovedNodesWithColumns(movingNodes, finalPositions).then((_) async {
+      _persistMovedNodesWithColumns(movingNodes, finalPositions).then((
+        _,
+      ) async {
         if (movingNodes.length == 1) {
           await _updateGroupMembershipAfterMove(
             movingNodes.single,
@@ -9804,8 +9962,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
       Rect? bounds;
       for (final member in entry.value) {
         final memberPosition = _positionFor(member);
-        final rect = Offset(memberPosition.dx, memberPosition.dy) &
-            _nodeSizeFor(member);
+        final rect =
+            Offset(memberPosition.dx, memberPosition.dy) & _nodeSizeFor(member);
         bounds = bounds == null ? rect : bounds.expandToInclude(rect);
       }
       final margin = entry.key == currentGroupId ? 48.0 : 28.0;
@@ -11764,7 +11922,9 @@ class _PositionedNodeGroup extends StatelessWidget {
                 color: accentColor.withValues(alpha: isCollapsed ? 0.16 : 0.04),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
-                  color: accentColor.withValues(alpha: isCollapsed ? 0.6 : 0.35),
+                  color: accentColor.withValues(
+                    alpha: isCollapsed ? 0.6 : 0.35,
+                  ),
                   width: 2,
                 ),
               ),
@@ -11837,18 +11997,13 @@ class _PositionedNodeGroup extends StatelessWidget {
                           child: Text(
                             '${nodes.length} items',
                             style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: Colors.white70,
-                                  fontSize: 10,
-                                ),
+                                ?.copyWith(color: Colors.white70, fontSize: 10),
                           ),
                         ),
                         const Spacer(),
                         if (!isPresentationMode) ...[
                           IconButton(
-                            key: ValueKey(
-                              'mindmap-group-collapse-$groupId',
-                            ),
+                            key: ValueKey('mindmap-group-collapse-$groupId'),
                             icon: Icon(
                               isCollapsed
                                   ? Icons.unfold_more
@@ -11904,7 +12059,8 @@ class _PositionedNodeGroup extends StatelessWidget {
                                 ),
                               ),
                               PopupMenuItem(
-                                value: 'layout_${meta.layout == 'column' ? 'free' : 'column'}',
+                                value:
+                                    'layout_${meta.layout == 'column' ? 'free' : 'column'}',
                                 child: Text(
                                   meta.layout == 'column'
                                       ? 'Layout: Free'
@@ -11968,7 +12124,6 @@ class _PositionedNodeGroup extends StatelessWidget {
     );
   }
 }
-
 
 class _PositionedCanvasMediaObject extends StatefulWidget {
   const _PositionedCanvasMediaObject({
@@ -16624,8 +16779,12 @@ class _ConnectionLinesPainter extends CustomPainter {
     }
   }
 
-  void _drawDashedPath(Canvas canvas, Path path, Paint paint,
-      ConnectionLinePattern pattern) {
+  void _drawDashedPath(
+    Canvas canvas,
+    Path path,
+    Paint paint,
+    ConnectionLinePattern pattern,
+  ) {
     if (pattern == ConnectionLinePattern.solid) {
       canvas.drawPath(path, paint);
       return;
@@ -16675,20 +16834,15 @@ class _ConnectionLinesPainter extends CustomPainter {
       text: label,
       style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500),
     );
-    final tp = TextPainter(
-      text: textSpan,
-      textDirection: TextDirection.ltr,
-    )..layout();
+    final tp = TextPainter(text: textSpan, textDirection: TextDirection.ltr)
+      ..layout();
     final pillW = tp.width + 10;
     final pillH = tp.height + 6;
     final pillRect = RRect.fromRectAndRadius(
       Rect.fromCenter(center: mid, width: pillW, height: pillH),
       const Radius.circular(6),
     );
-    canvas.drawRRect(
-      pillRect,
-      Paint()..color = const Color(0xFF1E1E1E),
-    );
+    canvas.drawRRect(pillRect, Paint()..color = const Color(0xFF1E1E1E));
     canvas.drawRRect(
       pillRect,
       Paint()
@@ -16724,8 +16878,12 @@ class _ConnectionLinesPainter extends CustomPainter {
         final style = _styleFor(node, relatedId);
 
         final lineColor = style.colorHex != null
-            ? Color(int.parse('FF${style.colorHex!.replaceFirst('#', '')}',
-                radix: 16))
+            ? Color(
+                int.parse(
+                  'FF${style.colorHex!.replaceFirst('#', '')}',
+                  radix: 16,
+                ),
+              )
             : Color.lerp(colorA, colorB, 0.5)!;
 
         final paint = Paint()
@@ -16761,9 +16919,12 @@ class _ConnectionLinesPainter extends CustomPainter {
             scp2 = Offset(cp2.dx + 1.8, cp2.dy - 1.2);
           }
           sketchPath.cubicTo(
-            scp1.dx, scp1.dy,
-            scp2.dx, scp2.dy,
-            pB.dx + 0.8, pB.dy - 0.8,
+            scp1.dx,
+            scp1.dy,
+            scp2.dx,
+            scp2.dy,
+            pB.dx + 0.8,
+            pB.dy - 0.8,
           );
           canvas.drawPath(sketchPath, sketchPaint);
         }
@@ -16783,7 +16944,8 @@ class _ConnectionLinesPainter extends CustomPainter {
             if (tangent != null) {
               final from = metric
                   .getTangentForOffset(
-                      (metric.length - 1).clamp(0, metric.length))
+                    (metric.length - 1).clamp(0, metric.length),
+                  )
                   ?.position;
               if (from != null) {
                 _drawArrowhead(canvas, pB, from, arrowPaint);
@@ -16797,9 +16959,9 @@ class _ConnectionLinesPainter extends CustomPainter {
             final metric = metrics.first;
             final tangent = metric.getTangentForOffset(0);
             if (tangent != null) {
-              final to =
-                  metric.getTangentForOffset(1.0.clamp(0, metric.length))
-                      ?.position;
+              final to = metric
+                  .getTangentForOffset(1.0.clamp(0, metric.length))
+                  ?.position;
               if (to != null) {
                 _drawArrowhead(canvas, pA, to, arrowPaint);
               }

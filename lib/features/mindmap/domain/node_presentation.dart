@@ -90,6 +90,8 @@ final class NodePresentationSpec {
       case NodeType.weather:
       case NodeType.fit:
       case NodeType.empty:
+      case NodeType.frame:
+      case NodeType.swatch:
         return const NodePresentationSpec._(
           defaultPreset: NodeSizePreset.standard,
           minWidth: 180,

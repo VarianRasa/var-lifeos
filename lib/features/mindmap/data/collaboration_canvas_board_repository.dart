@@ -58,6 +58,10 @@ final class CollaborationCanvasBoardRepository
   );
 
   @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey) =>
+      _base.getBoardsForDay(dayKey);
+
+  @override
   Future<CanvasBoard> saveBoard(CanvasBoard board) async {
     _ensureCanMutate(board.id);
     final saved = await _base.saveBoard(board);

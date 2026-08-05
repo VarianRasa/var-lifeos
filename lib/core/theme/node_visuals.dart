@@ -35,6 +35,8 @@ abstract final class NodeVisuals {
     NodeType.itinerary => Icons.travel_explore_outlined,
     NodeType.image => Icons.image_outlined,
     NodeType.video => Icons.videocam_outlined,
+    NodeType.frame => Icons.crop_free_outlined,
+    NodeType.swatch => Icons.palette_outlined,
   };
 
   static Color color(BuildContext context, NodeType type) {

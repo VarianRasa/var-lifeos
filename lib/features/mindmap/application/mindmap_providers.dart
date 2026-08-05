@@ -237,6 +237,23 @@ final dailyCanvasBoardProvider = FutureProvider.autoDispose
       );
     });
 
+final dailyCanvasBoardsProvider = FutureProvider.autoDispose
+    .family<List<CanvasBoard>, DateTime>((ref, day) async {
+      final normalizedDay = day.dateOnly;
+      final key = dayKey(normalizedDay);
+      final repository = ref.watch(canvasBoardRepositoryProvider);
+      final dayBoards = await repository.getBoardsForDay(key);
+      final primaryBoard = await ref.watch(dailyCanvasBoardProvider(normalizedDay).future);
+      
+      if (dayBoards.isEmpty) {
+        return [primaryBoard];
+      }
+      if (!dayBoards.any((b) => b.id == primaryBoard.id)) {
+        return [primaryBoard, ...dayBoards];
+      }
+      return dayBoards;
+    });
+
 final canvasBoardByIdProvider = FutureProvider.autoDispose
     .family<CanvasBoard?, String>((ref, boardId) {
       return ref.watch(canvasBoardRepositoryProvider).getBoard(boardId);

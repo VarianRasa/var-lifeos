@@ -828,6 +828,7 @@ final class CanvasBoard {
     String? parentBoardId,
     this.trashedAt,
     this.isArchived = false,
+    this.isPrimaryDayBoard = false,
     this.viewport = const CanvasViewport(),
     this.settings = const CanvasBoardSettings(),
     CanvasVotingSession? votingSession,
@@ -868,6 +869,7 @@ final class CanvasBoard {
       parentBoardId: json['parentBoardId'] as String?,
       trashedAt: _optionalDateTime(json['trashedAt']),
       isArchived: json['isArchived'] as bool? ?? false,
+      isPrimaryDayBoard: json['isPrimaryDayBoard'] as bool? ?? false,
       viewport: CanvasViewport.fromJson(json['viewport']),
       settings: CanvasBoardSettings.fromJson(json['settings']),
       votingSession: CanvasVotingSession.fromJson(json['votingSession']),
@@ -889,6 +891,7 @@ final class CanvasBoard {
     required DateTime day,
     required Iterable<MindmapNode> nodes,
     required DateTime now,
+    bool isPrimaryDayBoard = true,
   }) {
     final normalizedDay = day.dateOnly;
     return CanvasBoard(
@@ -896,6 +899,7 @@ final class CanvasBoard {
       kind: CanvasBoardKind.daily,
       title: dayKey(normalizedDay),
       day: normalizedDay,
+      isPrimaryDayBoard: isPrimaryDayBoard,
       createdAt: now,
       updatedAt: now,
       objects: <CanvasObject>[
@@ -960,6 +964,7 @@ final class CanvasBoard {
   final String? parentBoardId;
   final DateTime? trashedAt;
   final bool isArchived;
+  final bool isPrimaryDayBoard;
   final CanvasViewport viewport;
   final CanvasBoardSettings settings;
   final CanvasVotingSession votingSession;
@@ -983,6 +988,7 @@ final class CanvasBoard {
     DateTime? trashedAt,
     bool clearTrashedAt = false,
     bool? isArchived,
+    bool? isPrimaryDayBoard,
     CanvasViewport? viewport,
     CanvasBoardSettings? settings,
     CanvasVotingSession? votingSession,
@@ -1001,6 +1007,7 @@ final class CanvasBoard {
         : parentBoardId ?? this.parentBoardId,
     trashedAt: clearTrashedAt ? null : trashedAt ?? this.trashedAt,
     isArchived: isArchived ?? this.isArchived,
+    isPrimaryDayBoard: isPrimaryDayBoard ?? this.isPrimaryDayBoard,
     viewport: viewport ?? this.viewport,
     settings: settings ?? this.settings,
     votingSession: votingSession ?? this.votingSession,
@@ -1293,6 +1300,7 @@ final class CanvasBoard {
     if (parentBoardId != null) 'parentBoardId': parentBoardId,
     if (trashedAt != null) 'trashedAt': trashedAt!.toIso8601String(),
     'isArchived': isArchived,
+    'isPrimaryDayBoard': isPrimaryDayBoard,
     'viewport': viewport.toJson(),
     'settings': settings.toJson(),
     'votingSession': votingSession.toJson(),
@@ -1319,6 +1327,7 @@ final class CanvasBoard {
       other.parentBoardId == parentBoardId &&
       other.trashedAt == trashedAt &&
       other.isArchived == isArchived &&
+      other.isPrimaryDayBoard == isPrimaryDayBoard &&
       other.viewport == viewport &&
       other.settings == settings &&
       other.votingSession == votingSession &&
@@ -1339,6 +1348,7 @@ final class CanvasBoard {
     parentBoardId,
     trashedAt,
     isArchived,
+    isPrimaryDayBoard,
     viewport,
     settings,
     votingSession,

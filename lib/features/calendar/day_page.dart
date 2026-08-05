@@ -83,6 +83,7 @@ import 'application/node_inbox.dart';
 import 'application/workload_balancer.dart';
 import 'widgets/daily_cockpit_panel.dart';
 import 'widgets/daily_timeline_schedule.dart';
+import 'widgets/day_canvas_tab_header.dart';
 
 final class _CanvasMenuItem<T> {
   const _CanvasMenuItem({
@@ -486,6 +487,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   List<CanvasObject> _assistantPreviewObjects = const <CanvasObject>[];
   late final InlineNodeWorkspaceController _inlineWorkspaceController;
   String? _selectedNodeId;
+  String? _activeBoardId;
   final TextEditingController _quickCaptureController = TextEditingController();
   bool _isMissionMode = false;
   DateTime? _focusStartedAt;
@@ -1067,6 +1069,26 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  Future<void> _createDailySubBoard(DateTime day) async {
+    final normalizedDay = day.dateOnly;
+    final now = DateTime.now();
+    final newBoardId = 'day-board-${now.millisecondsSinceEpoch}';
+    final newBoard = CanvasBoard(
+      id: newBoardId,
+      title: 'Canvas Board',
+      kind: CanvasBoardKind.daily,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await ref.read(canvasBoardRepositoryProvider).saveBoard(newBoard);
+    ref.invalidate(dailyCanvasBoardsProvider(normalizedDay));
+    if (!mounted) return;
+    setState(() {
+      _activeBoardId = newBoardId;
+    });
+    _showSnackBar('New board created');
   }
 
   List<CanvasWorkshopStage> _dailyWorkshopAgenda(String template) {
@@ -3491,6 +3513,13 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     final dailyCanvasBoard = ref.watch(
       dailyCanvasBoardProvider(normalizedDate),
     );
+    final dailyCanvasBoards = ref.watch(
+      dailyCanvasBoardsProvider(normalizedDate),
+    );
+    final allDayBoards = dailyCanvasBoards.valueOrNull ??
+        (dailyCanvasBoard.valueOrNull != null ? [dailyCanvasBoard.valueOrNull!] : <CanvasBoard>[]);
+    final activeCanvasBoard = allDayBoards.where((b) => b.id == _activeBoardId).firstOrNull ??
+        dailyCanvasBoard.valueOrNull;
     final allNodes = ref.watch(allMindmapNodesProvider);
     final workspaceContexts = ref.watch(workspaceContextsProvider);
     final activeWorkspaceContext = _workspaceContextForKey(
@@ -4302,14 +4331,42 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                             }
                                           },
                                         )
-                                      : Stack(
-                                          children: [
-                                            Positioned.fill(
-                                              child: MindmapCanvas(
-                                                key: _canvasKey,
-                                                nodes: visibleCanvasNodes,
-                                                board: dailyCanvasBoard
-                                                    .valueOrNull,
+                                       : Stack(
+                                           children: [
+                                             if (allDayBoards.isNotEmpty)
+                                               Positioned(
+                                                 top: 0,
+                                                 left: 0,
+                                                 right: 0,
+                                                 height: 40,
+                                                 child: DayCanvasTabHeader(
+                                                   boards: allDayBoards,
+                                                   activeBoardId: activeCanvasBoard?.id,
+                                                   onSelectBoard: (String id) => setState(() => _activeBoardId = id),
+                                                   onAddBoard: () => unawaited(_createDailySubBoard(normalizedDate)),
+                                                   onAssistantRequested: activeCanvasBoard == null
+                                                       ? null
+                                                       : () => unawaited(
+                                                           _openDailyCanvasAssistant(
+                                                             activeCanvasBoard,
+                                                             visibleCanvasNodes,
+                                                             collabState.currentRole?.canWriteNodes ?? true,
+                                                           ),
+                                                         ),
+                                                   onVotingRequested: activeCanvasBoard == null
+                                                       ? null
+                                                       : () => _showSnackBar('Voting session active'),
+                                                   onWorkshopRequested: activeCanvasBoard == null
+                                                       ? null
+                                                       : () => _showSnackBar('Workshop session active'),
+                                                 ),
+                                               ),
+                                             Positioned.fill(
+                                               top: allDayBoards.isNotEmpty ? 40 : 0,
+                                               child: MindmapCanvas(
+                                                 key: _canvasKey,
+                                                 nodes: visibleCanvasNodes,
+                                                 board: activeCanvasBoard,
                                                 workshopSession:
                                                     dailyCanvasBoard
                                                         .valueOrNull
@@ -6355,6 +6412,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         '## Trip\n\nDestination:\nStart date:\nEnd date:\n\n## Agenda\n- ',
       NodeType.image => '## Image\n\nSource:\nAlt text:\nCaption:',
       NodeType.video => '## Video\n\nSource:\nCaption:\nDuration:',
+      NodeType.frame => '## Frame\n\nNotes:',
+      _ => '',
     };
 
     final node = MindmapNode.create(

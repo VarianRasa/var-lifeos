@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
+import 'package:var_app/features/mindmap/data/canvas_board_repositories.dart';
 import 'package:var_app/features/mindmap/domain/canvas_board.dart';
 import 'package:var_app/features/mindmap/domain/canvas_position.dart';
 import 'package:var_app/features/mindmap/domain/canvas_workshop.dart';
@@ -854,6 +855,43 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('canvas board supports isPrimaryDayBoard property and repository getBoardsForDay query', () async {
+    final day = DateTime(2026, 8, 5);
+    final board1 = CanvasBoard(
+      id: 'b1',
+      kind: CanvasBoardKind.daily,
+      title: 'Main',
+      day: day,
+      isPrimaryDayBoard: true,
+      createdAt: DateTime(2026, 8, 5, 10),
+      updatedAt: DateTime(2026, 8, 5, 10),
+    );
+    final board2 = CanvasBoard(
+      id: 'b2',
+      kind: CanvasBoardKind.daily,
+      title: 'Brainstorm',
+      day: day,
+      isPrimaryDayBoard: false,
+      createdAt: DateTime(2026, 8, 5, 11),
+      updatedAt: DateTime(2026, 8, 5, 11),
+    );
+
+    expect(board1.isPrimaryDayBoard, isTrue);
+    expect(board2.isPrimaryDayBoard, isFalse);
+
+    final json1 = board1.toJson();
+    expect(json1['isPrimaryDayBoard'], isTrue);
+    final restored1 = CanvasBoard.fromJson(json1);
+    expect(restored1.isPrimaryDayBoard, isTrue);
+
+    final repo = InMemoryCanvasBoardRepository();
+    await repo.saveBoard(board1);
+    await repo.saveBoard(board2);
+
+    final boardsForDay = await repo.getBoardsForDay('2026-08-05');
+    expect(boardsForDay.map((b) => b.id), containsAll(<String>['b1', 'b2']));
   });
 
   test('canvas board persists bounded activity history', () {

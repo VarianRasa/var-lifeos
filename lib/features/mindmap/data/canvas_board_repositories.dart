@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:sembast/sembast.dart';
 
+import '../../../core/utils/date_utils.dart';
 import '../domain/canvas_board.dart';
 import '../domain/canvas_board_repository.dart';
 
@@ -42,6 +43,17 @@ final class InMemoryCanvasBoardRepository implements CanvasBoardRepository {
             .where((board) => board.workspaceName == workspaceName)
             .where((board) => includeArchived || !board.isArchived)
             .where((board) => includeTrashed || !board.isTrashed)
+            .toList()
+          ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
+    return boards;
+  }
+
+  @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKeyString) async {
+    final boards =
+        _boards.values
+            .where((board) => board.day != null && dayKey(board.day!) == dayKeyString)
+            .where((board) => !board.isTrashed)
             .toList()
           ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
     return boards;
@@ -209,6 +221,27 @@ final class SembastCanvasBoardRepository implements CanvasBoardRepository {
       if (board == null ||
           (!includeArchived && board.isArchived) ||
           (!includeTrashed && board.isTrashed)) {
+        continue;
+      }
+      boards.add(board);
+    }
+    return boards;
+  }
+
+  @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey) async {
+    final db = await _db;
+    final records = await _boardStore.find(
+      db,
+      finder: Finder(
+        filter: Filter.equals('day', dayKey),
+        sortOrders: <SortOrder>[SortOrder('updatedAt', false)],
+      ),
+    );
+    final boards = <CanvasBoard>[];
+    for (final record in records) {
+      final board = await getBoard(record.key);
+      if (board == null || board.isTrashed) {
         continue;
       }
       boards.add(board);

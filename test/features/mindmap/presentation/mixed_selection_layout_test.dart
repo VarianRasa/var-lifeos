@@ -486,6 +486,34 @@ void main() {
     expect(find.byTooltip('Arrange selected'), findsOneWidget);
   });
 
+  testWidgets('mixed multi-selection drags nodes and native objects together', (
+    WidgetTester tester,
+  ) async {
+    final harness = _Harness(
+      nodes: [
+        _node('node-a', const CanvasPosition(100, 100)),
+      ],
+      objects: [
+        _shape('obj-a', x: 300, y: 100, width: 100, height: 50),
+      ],
+    );
+    await tester.pumpWidget(harness.build());
+    await tester.pumpAndSettle();
+    await harness.selectAll();
+    await tester.pump();
+
+    expect(find.text('1 node + 1 object selected'), findsOneWidget);
+
+    final nodeFinder = find.text('node-a');
+    expect(nodeFinder, findsOneWidget);
+
+    await tester.drag(nodeFinder, const Offset(50, 50));
+    await tester.pumpAndSettle();
+
+    expect(harness.nodes.first.position.dx, greaterThan(100));
+    expect(harness.board.objects.first.geometry.x, greaterThan(300));
+  });
+
   testWidgets('Group in frame requires every selected membership path', (
     tester,
   ) async {

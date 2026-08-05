@@ -136,6 +136,7 @@ abstract final class InlineNodeWorkspacePolicy {
         NodeType.mood => mood,
         NodeType.weather => weather,
         NodeType.fit => fit,
+        NodeType.frame || NodeType.swatch => standard,
         NodeType.link ||
         NodeType.timer ||
         NodeType.checklist => _clampedExistingDefault(type),

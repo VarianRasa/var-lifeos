@@ -192,6 +192,10 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
       'An image reference with source, accessible alt text, and caption.',
     NodeType.video =>
       'A video reference with source, playback metadata, and caption.',
+    NodeType.frame =>
+      'A visual container frame to group and organize multiple nodes together.',
+    NodeType.swatch =>
+      'A color swatch and moodboard palette card for design projects.',
   };
 
   @override

@@ -97,6 +97,13 @@ class LocalClipperServer {
         final payload = CapturePayload(
           text: body['text'] as String?,
           urls: ((body['urls'] as List?) ?? []).cast<String>(),
+          metadata: {
+            if (body['previewStyle'] != null)
+              'previewStyle': body['previewStyle'],
+            if (body['x'] != null) 'x': body['x'],
+            if (body['y'] != null) 'y': body['y'],
+            if (body['imageUrl'] != null) 'imageUrl': body['imageUrl'],
+          },
         );
 
         final destination = CaptureDestination(

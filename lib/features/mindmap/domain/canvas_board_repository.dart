@@ -15,6 +15,8 @@ abstract interface class CanvasBoardRepository {
     bool includeTrashed = false,
   });
 
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey);
+
   Future<CanvasBoard> saveBoard(CanvasBoard board);
 
   Future<void> saveBoardsAtomically(Iterable<CanvasBoard> boards);

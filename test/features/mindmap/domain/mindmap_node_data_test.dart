@@ -74,7 +74,7 @@ void main() {
   });
 
   test('dataWithConnectionMetadata updates data map', () {
-    final meta = const ConnectionMetadata(
+    const meta = ConnectionMetadata(
       startNodeId: 'n1',
       startPoint: Offset(5, 15),
       endNodeId: 'n2',

@@ -435,6 +435,10 @@ final class _BeforeCompareSaveRepository implements CanvasBoardRepository {
   );
 
   @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey) =>
+      _delegate.getBoardsForDay(dayKey);
+
+  @override
   Future<CanvasBoard> saveBoard(CanvasBoard board) =>
       _delegate.saveBoard(board);
 

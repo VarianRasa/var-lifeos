@@ -1675,6 +1675,10 @@ final class _TrackingCanvasBoardRepository implements CanvasBoardRepository {
   );
 
   @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey) =>
+      _base.getBoardsForDay(dayKey);
+
+  @override
   Future<CanvasBoard> saveBoard(CanvasBoard board) async {
     savedBoardIds.add(board.id);
     return _base.saveBoard(board);

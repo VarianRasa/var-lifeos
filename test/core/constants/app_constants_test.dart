@@ -19,6 +19,8 @@ void main() {
         NodeType.itinerary,
         NodeType.image,
         NodeType.video,
+        NodeType.frame,
+        NodeType.swatch,
       ]);
     },
   );

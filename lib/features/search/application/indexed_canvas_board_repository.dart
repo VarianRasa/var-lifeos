@@ -44,6 +44,10 @@ final class IndexedCanvasBoardRepository implements CanvasBoardRepository {
   );
 
   @override
+  Future<List<CanvasBoard>> getBoardsForDay(String dayKey) =>
+      _base.getBoardsForDay(dayKey);
+
+  @override
   Future<CanvasBoard> saveBoard(CanvasBoard board) async {
     final saved = await _base.saveBoard(board);
     await _indexBoard(saved);
