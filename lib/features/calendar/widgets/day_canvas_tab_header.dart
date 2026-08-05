@@ -7,9 +7,14 @@ class DayCanvasTabHeader extends StatelessWidget {
     required this.activeBoardId,
     required this.onSelectBoard,
     required this.onAddBoard,
+    this.onOpenDashboard,
     this.onAssistantRequested,
     this.onVotingRequested,
     this.onWorkshopRequested,
+    this.onTemplatesRequested,
+    this.onActivityHistoryRequested,
+    this.onExportRequested,
+    this.votingVotesLeft,
     super.key,
   });
 
@@ -17,9 +22,14 @@ class DayCanvasTabHeader extends StatelessWidget {
   final String? activeBoardId;
   final ValueChanged<String> onSelectBoard;
   final VoidCallback onAddBoard;
+  final VoidCallback? onOpenDashboard;
   final VoidCallback? onAssistantRequested;
   final VoidCallback? onVotingRequested;
   final VoidCallback? onWorkshopRequested;
+  final VoidCallback? onTemplatesRequested;
+  final VoidCallback? onActivityHistoryRequested;
+  final VoidCallback? onExportRequested;
+  final int? votingVotesLeft;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +42,16 @@ class DayCanvasTabHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
+          if (onOpenDashboard != null)
+            IconButton(
+              icon: Icon(
+                Icons.dashboard_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'All Boards Dashboard',
+              onPressed: onOpenDashboard,
+            ),
           Expanded(
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
@@ -45,8 +65,12 @@ class DayCanvasTabHeader extends StatelessWidget {
                     board.title.isEmpty ? 'Canvas ${index + 1}' : board.title,
                     style: TextStyle(
                       fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      color: isSelected ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                      color: isSelected
+                          ? colorScheme.onPrimary
+                          : colorScheme.onSurfaceVariant,
                     ),
                   ),
                   selected: isSelected,
@@ -57,27 +81,91 @@ class DayCanvasTabHeader extends StatelessWidget {
               },
             ),
           ),
+          if (votingVotesLeft != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$votingVotesLeft votes left',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ),
           if (onAssistantRequested != null)
             IconButton(
-              icon: Icon(Icons.auto_awesome_outlined, size: 18, color: colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.auto_awesome_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
               tooltip: 'Canvas AI Assistant',
               onPressed: onAssistantRequested,
             ),
           if (onVotingRequested != null)
             IconButton(
-              icon: Icon(Icons.how_to_vote_outlined, size: 18, color: colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.how_to_vote_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
               tooltip: 'Live Voting',
               onPressed: onVotingRequested,
             ),
           if (onWorkshopRequested != null)
             IconButton(
-              icon: Icon(Icons.present_to_all_outlined, size: 18, color: colorScheme.onSurfaceVariant),
-              tooltip: 'Workshop Presenter',
+              icon: Icon(
+                Icons.present_to_all_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Workshop Facilitator',
               onPressed: onWorkshopRequested,
+            ),
+          if (onTemplatesRequested != null)
+            IconButton(
+              icon: Icon(
+                Icons.dashboard_customize_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Board Templates',
+              onPressed: onTemplatesRequested,
+            ),
+          if (onActivityHistoryRequested != null)
+            IconButton(
+              icon: Icon(
+                Icons.history_rounded,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Activity History',
+              onPressed: onActivityHistoryRequested,
+            ),
+          if (onExportRequested != null)
+            IconButton(
+              icon: Icon(
+                Icons.file_download_outlined,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'Export/Import Board',
+              onPressed: onExportRequested,
             ),
           const SizedBox(width: 4),
           IconButton(
-            icon: Icon(Icons.add, size: 18, color: colorScheme.onSurfaceVariant),
+            icon: Icon(
+              Icons.add,
+              size: 18,
+              color: colorScheme.onSurfaceVariant,
+            ),
             tooltip: 'Add Board',
             onPressed: onAddBoard,
           ),

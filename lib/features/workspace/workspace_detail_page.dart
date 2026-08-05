@@ -233,11 +233,6 @@ class _WorkspaceDetailPageState extends ConsumerState<WorkspaceDetailPage> {
                   label: Text('Gantt'),
                   icon: Icon(Icons.waterfall_chart_outlined),
                 ),
-                ButtonSegment(
-                  value: _WorkspaceView.canvas,
-                  label: Text('Canvas'),
-                  icon: Icon(Icons.dashboard_customize_outlined),
-                ),
               ],
               selected: {_view},
               onSelectionChanged: (selected) {
@@ -983,12 +978,10 @@ class _WorkspaceCanvasViewState extends ConsumerState<_WorkspaceCanvasView> {
   }
 
   void _selectManagedBoard(CanvasBoard board) {
-    setState(() {
-      _selectedBoardId = board.id;
-      _currentBoard = board;
-      _pendingReconciliationSignature = null;
-      _history.clear();
-    });
+    final boardDay = board.day ?? DateTime.now();
+    context.go(
+      '/calendar/${dayKey(boardDay)}?board=${Uri.encodeQueryComponent(board.id)}',
+    );
   }
 
   void _openNestedBoard(CanvasBoard board, CanvasObject reference) {

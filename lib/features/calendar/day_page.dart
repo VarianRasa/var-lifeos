@@ -449,12 +449,14 @@ class DayPage extends ConsumerStatefulWidget {
   const DayPage({
     required this.date,
     this.highlightNodeId,
+    this.initialBoardId,
     this.mediaFileExporter,
     super.key,
   });
 
   final DateTime date;
   final String? highlightNodeId;
+  final String? initialBoardId;
   final MediaFileExporter? mediaFileExporter;
 
   @override
@@ -533,6 +535,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _activeBoardId = widget.initialBoardId;
     WidgetsBinding.instance.addObserver(this);
     _inlineWorkspaceController = ref.read(
       inlineNodeWorkspaceControllerProvider.notifier,
@@ -1079,6 +1082,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
       id: newBoardId,
       title: 'Canvas Board',
       kind: CanvasBoardKind.daily,
+      day: normalizedDay,
       createdAt: now,
       updatedAt: now,
     );
@@ -1119,6 +1123,299 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
       ),
     );
     ref.invalidate(dailyCanvasBoardProvider(widget.date.dateOnly));
+  }
+
+  CanvasBoard _withDailyVotingSession(
+    CanvasBoard board,
+    CanvasVotingSession session,
+    DateTime now,
+  ) => board.copyWith(
+    votingSession: session,
+    objects: <CanvasObject>[
+      for (final object in board.objects)
+        object.voteCount == session.votesForObject(object.id)
+            ? object
+            : object.withVoteCount(
+                session.votesForObject(object.id),
+                updatedAt: now,
+              ),
+    ],
+    updatedAt: now,
+  );
+
+  Future<void> _showDailyVotingResults(CanvasBoard board) => showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      final ranked =
+          board.objects
+              .where((object) => object.type != CanvasObjectType.connector)
+              .toList()
+            ..sort(
+              (left, right) => board.votingSession
+                  .votesForObject(right.id)
+                  .compareTo(board.votingSession.votesForObject(left.id)),
+            );
+      return AlertDialog(
+        title: const Text('Voting results'),
+        content: SizedBox(
+          width: 420,
+          child: ranked.isEmpty
+              ? const Text('No canvas objects to rank.')
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: ranked.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final object = ranked[index];
+                    return ListTile(
+                      leading: CircleAvatar(child: Text('${index + 1}')),
+                      title: Text(object.type.name),
+                      trailing: Text(
+                        '${board.votingSession.votesForObject(object.id)} votes',
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      );
+    },
+  );
+
+  Future<void> _openDailyVotingDialog(CanvasBoard board) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!board.votingSession.isActive)
+              ListTile(
+                leading: const Icon(Icons.how_to_vote_outlined),
+                title: const Text('Start voting'),
+                onTap: () => Navigator.pop(sheetContext, 'start'),
+              ),
+            if (board.votingSession.isActive)
+              ListTile(
+                leading: const Icon(Icons.stop_circle_outlined),
+                title: const Text('End voting'),
+                onTap: () => Navigator.pop(sheetContext, 'end'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.bar_chart_outlined),
+              title: const Text('Show results'),
+              onTap: () => Navigator.pop(sheetContext, 'results'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.restart_alt),
+              title: const Text('Reset voting'),
+              onTap: () => Navigator.pop(sheetContext, 'reset'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    if (action == 'results') {
+      await _showDailyVotingResults(board);
+      return;
+    }
+    final now = DateTime.now();
+    final session = switch (action) {
+      'start' => board.votingSession.start(maxVotes: 3, anonymous: false),
+      'end' => board.votingSession.end(),
+      'reset' => board.votingSession.reset(),
+      _ => board.votingSession,
+    };
+    await _saveWorkshopBoard(
+      board,
+      _withDailyVotingSession(board, session, now),
+    );
+  }
+
+  Future<void> _openDailyWorkshopMenu(CanvasBoard board) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!board.workshopSession.isActive) ...[
+              for (final option in const <(String, String)>[
+                ('brainstorm', 'Start brainstorm'),
+                ('retrospective', 'Start retrospective'),
+                ('decision', 'Start decision'),
+              ])
+                ListTile(
+                  leading: const Icon(Icons.groups_outlined),
+                  title: Text(option.$2),
+                  onTap: () => Navigator.pop(sheetContext, option.$1),
+                ),
+            ] else ...[
+              ListTile(
+                leading: Icon(
+                  board.workshopSession.status == CanvasWorkshopStatus.paused
+                      ? Icons.play_arrow
+                      : Icons.pause,
+                ),
+                title: Text(
+                  board.workshopSession.status == CanvasWorkshopStatus.paused
+                      ? 'Resume workshop'
+                      : 'Pause workshop',
+                ),
+                onTap: () => Navigator.pop(
+                  sheetContext,
+                  board.workshopSession.status == CanvasWorkshopStatus.paused
+                      ? 'resume'
+                      : 'pause',
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.skip_next),
+                title: const Text('Advance stage'),
+                onTap: () => Navigator.pop(sheetContext, 'advance'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.visibility_outlined),
+                title: const Text('Reveal contributions'),
+                onTap: () => Navigator.pop(sheetContext, 'reveal'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.stop_circle_outlined),
+                title: const Text('End workshop'),
+                onTap: () => Navigator.pop(sheetContext, 'end'),
+              ),
+            ],
+            if (board.workshopSession.summary != null)
+              ListTile(
+                leading: const Icon(Icons.summarize_outlined),
+                title: const Text('Show summary'),
+                onTap: () => Navigator.pop(sheetContext, 'summary'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (action != null) {
+      await _handleDailyWorkshopAction(board, action);
+    }
+  }
+
+  Future<void> _showDailyActivityHistory(CanvasBoard board) => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text('Activity history — ${board.title}'),
+      content: SizedBox(
+        width: 420,
+        height: 380,
+        child: board.activity.isEmpty
+            ? const Center(child: Text('No activity logged yet.'))
+            : ListView.separated(
+                itemCount: board.activity.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final item = board.activity[index];
+                  return ListTile(
+                    leading: const Icon(Icons.history_outlined),
+                    title: Text(item.summary),
+                    subtitle: Text(
+                      '${item.occurredAt.hour}:${item.occurredAt.minute.toString().padLeft(2, '0')}',
+                    ),
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _openDailyBoardTemplates(CanvasBoard board) async {
+    final template = await showModalBottomSheet<CanvasProjectTemplate>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.architecture_outlined),
+              title: const Text('Project planning'),
+              onTap: () => Navigator.pop(
+                sheetContext,
+                CanvasProjectTemplate.projectPlan,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.view_kanban_outlined),
+              title: const Text('Kanban workflow'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, CanvasProjectTemplate.kanban),
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology_outlined),
+              title: const Text('Brainstorming'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, CanvasProjectTemplate.brainstorm),
+            ),
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Moodboard'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, CanvasProjectTemplate.moodboard),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (template == null || !mounted) return;
+    final now = DateTime.now();
+    final updated = board.addProjectTemplate(template, now: now);
+    await ref.read(canvasBoardRepositoryProvider).saveBoard(updated);
+    ref.invalidate(dailyCanvasBoardsProvider(widget.date.dateOnly));
+    _showSnackBar('Template applied');
+  }
+
+  Future<void> _exportDailyBoard(CanvasBoard board) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Board Actions — ${board.title}'),
+        content: Text(
+          'Objects count: ${board.objects.length}\nCreated: ${board.createdAt.toIso8601String().split('T').first}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'duplicate'),
+            child: const Text('Duplicate Board'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'export'),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    if (result == 'duplicate' && mounted) {
+      final now = DateTime.now();
+      final duplicated = board.copyWith(
+        title: '${board.title} (Copy)',
+        updatedAt: now,
+      );
+      await ref.read(canvasBoardRepositoryProvider).saveBoard(duplicated);
+      ref.invalidate(dailyCanvasBoardsProvider(widget.date.dateOnly));
+      setState(() => _activeBoardId = duplicated.id);
+      _showSnackBar('Board duplicated');
+    }
   }
 
   Future<void> _startDailyWorkshop(CanvasBoard board, String template) =>
@@ -3516,9 +3813,24 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     final dailyCanvasBoards = ref.watch(
       dailyCanvasBoardsProvider(normalizedDate),
     );
-    final allDayBoards = dailyCanvasBoards.valueOrNull ??
-        (dailyCanvasBoard.valueOrNull != null ? [dailyCanvasBoard.valueOrNull!] : <CanvasBoard>[]);
-    final activeCanvasBoard = allDayBoards.where((b) => b.id == _activeBoardId).firstOrNull ??
+    final linkedBoard = widget.initialBoardId == null
+        ? null
+        : ref
+              .watch(canvasBoardByIdProvider(widget.initialBoardId!))
+              .valueOrNull;
+    final allDayBoards = <CanvasBoard>[
+      ...dailyCanvasBoards.valueOrNull ??
+          (dailyCanvasBoard.valueOrNull == null
+              ? const <CanvasBoard>[]
+              : <CanvasBoard>[dailyCanvasBoard.valueOrNull!]),
+      if (linkedBoard != null &&
+          !(dailyCanvasBoards.valueOrNull ?? const <CanvasBoard>[]).any(
+            (board) => board.id == linkedBoard.id,
+          ))
+        linkedBoard,
+    ];
+    final activeCanvasBoard =
+        allDayBoards.where((board) => board.id == _activeBoardId).firstOrNull ??
         dailyCanvasBoard.valueOrNull;
     final allNodes = ref.watch(allMindmapNodesProvider);
     final workspaceContexts = ref.watch(workspaceContextsProvider);
@@ -4169,6 +4481,76 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                           Expanded(
                             child: Column(
                               children: [
+                                if (_viewMode == _DayViewMode.canvas &&
+                                    allDayBoards.isNotEmpty)
+                                  DayCanvasTabHeader(
+                                    boards: allDayBoards,
+                                    activeBoardId: activeCanvasBoard?.id,
+                                    onSelectBoard: (String id) =>
+                                        setState(() => _activeBoardId = id),
+                                    onAddBoard: () => unawaited(
+                                      _createDailySubBoard(normalizedDate),
+                                    ),
+                                    onAssistantRequested:
+                                        activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _openDailyCanvasAssistant(
+                                              activeCanvasBoard,
+                                              visibleCanvasNodes,
+                                              collabState
+                                                      .currentRole
+                                                      ?.canWriteNodes ??
+                                                  true,
+                                            ),
+                                          ),
+                                    onVotingRequested: activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _openDailyVotingDialog(
+                                              activeCanvasBoard,
+                                            ),
+                                          ),
+                                    onWorkshopRequested:
+                                        activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _openDailyWorkshopMenu(
+                                              activeCanvasBoard,
+                                            ),
+                                          ),
+                                    onTemplatesRequested:
+                                        activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _openDailyBoardTemplates(
+                                              activeCanvasBoard,
+                                            ),
+                                          ),
+                                    onActivityHistoryRequested:
+                                        activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _showDailyActivityHistory(
+                                              activeCanvasBoard,
+                                            ),
+                                          ),
+                                    onExportRequested: activeCanvasBoard == null
+                                        ? null
+                                        : () => unawaited(
+                                            _exportDailyBoard(
+                                              activeCanvasBoard,
+                                            ),
+                                          ),
+                                    votingVotesLeft:
+                                        activeCanvasBoard
+                                                ?.votingSession
+                                                .isActive ==
+                                            true
+                                        ? activeCanvasBoard!.votingSession
+                                              .remainingVotesFor('local')
+                                        : null,
+                                  ),
                                 Expanded(
                                   child: _viewMode == _DayViewMode.timeline
                                       ? DailyTimelineSchedule(
@@ -4331,42 +4713,13 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                             }
                                           },
                                         )
-                                       : Stack(
-                                           children: [
-                                             if (allDayBoards.isNotEmpty)
-                                               Positioned(
-                                                 top: 0,
-                                                 left: 0,
-                                                 right: 0,
-                                                 height: 40,
-                                                 child: DayCanvasTabHeader(
-                                                   boards: allDayBoards,
-                                                   activeBoardId: activeCanvasBoard?.id,
-                                                   onSelectBoard: (String id) => setState(() => _activeBoardId = id),
-                                                   onAddBoard: () => unawaited(_createDailySubBoard(normalizedDate)),
-                                                   onAssistantRequested: activeCanvasBoard == null
-                                                       ? null
-                                                       : () => unawaited(
-                                                           _openDailyCanvasAssistant(
-                                                             activeCanvasBoard,
-                                                             visibleCanvasNodes,
-                                                             collabState.currentRole?.canWriteNodes ?? true,
-                                                           ),
-                                                         ),
-                                                   onVotingRequested: activeCanvasBoard == null
-                                                       ? null
-                                                       : () => _showSnackBar('Voting session active'),
-                                                   onWorkshopRequested: activeCanvasBoard == null
-                                                       ? null
-                                                       : () => _showSnackBar('Workshop session active'),
-                                                 ),
-                                               ),
-                                             Positioned.fill(
-                                               top: allDayBoards.isNotEmpty ? 40 : 0,
-                                               child: MindmapCanvas(
-                                                 key: _canvasKey,
-                                                 nodes: visibleCanvasNodes,
-                                                 board: activeCanvasBoard,
+                                      : Stack(
+                                          children: [
+                                            Positioned.fill(
+                                              child: MindmapCanvas(
+                                                key: _canvasKey,
+                                                nodes: visibleCanvasNodes,
+                                                board: activeCanvasBoard,
                                                 workshopSession:
                                                     dailyCanvasBoard
                                                         .valueOrNull
@@ -4458,8 +4811,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                 onCanvasVoteChanged:
                                                     (objects, delta) async {
                                                       final board =
-                                                          dailyCanvasBoard
-                                                              .valueOrNull;
+                                                          activeCanvasBoard;
                                                       if (board == null ||
                                                           !board
                                                               .votingSession
@@ -5173,7 +5525,117 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     ),
                                               ),
                                             ),
-                                            if (dailyCanvasBoard.valueOrNull
+                                            if (activeCanvasBoard
+                                                case final board?)
+                                              if (board
+                                                      .workshopSession
+                                                      .activeStage
+                                                  case final stage?)
+                                                Positioned(
+                                                  key: const ValueKey(
+                                                    'workspace-workshop-stage-banner',
+                                                  ),
+                                                  top: 12,
+                                                  left: 12,
+                                                  right: 260,
+                                                  child: Align(
+                                                    alignment:
+                                                        Alignment.topCenter,
+                                                    child: Card(
+                                                      margin: EdgeInsets.zero,
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 12,
+                                                              vertical: 8,
+                                                            ),
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            Icon(
+                                                              stage.contributionsPrivate &&
+                                                                      !board
+                                                                          .workshopSession
+                                                                          .revealedStageIds
+                                                                          .contains(
+                                                                            stage.id,
+                                                                          )
+                                                                  ? Icons
+                                                                        .visibility_off_outlined
+                                                                  : Icons
+                                                                        .flag_outlined,
+                                                              size: 18,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 8,
+                                                            ),
+                                                            Flexible(
+                                                              child: Column(
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  Text(
+                                                                    'Stage ${board.workshopSession.activeStageIndex + 1}/${board.workshopSession.agenda.length}: ${stage.title}',
+                                                                    style: Theme.of(
+                                                                      context,
+                                                                    ).textTheme.labelLarge,
+                                                                  ),
+                                                                  if (stage
+                                                                      .instructions
+                                                                      .isNotEmpty)
+                                                                    Text(
+                                                                      stage
+                                                                          .instructions,
+                                                                      maxLines:
+                                                                          1,
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                    ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                            if (board
+                                                                .workshopSession
+                                                                .awaitingAdvance) ...[
+                                                              const SizedBox(
+                                                                width: 12,
+                                                              ),
+                                                              FilledButton.tonal(
+                                                                key: const ValueKey(
+                                                                  'workspace-workshop-confirm-advance',
+                                                                ),
+                                                                onPressed: () => unawaited(
+                                                                  _handleDailyWorkshopAction(
+                                                                    board,
+                                                                    board
+                                                                            .workshopSession
+                                                                            .isLastStage
+                                                                        ? 'end'
+                                                                        : 'advance',
+                                                                  ),
+                                                                ),
+                                                                child: Text(
+                                                                  board
+                                                                          .workshopSession
+                                                                          .isLastStage
+                                                                      ? 'End workshop'
+                                                                      : 'Next stage',
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                            if (activeCanvasBoard
                                                 case final board?)
                                               Positioned(
                                                 top: 16,

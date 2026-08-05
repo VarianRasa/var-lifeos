@@ -61,6 +61,7 @@ GoRouter createAppRouter({String? initialLocation}) {
                 pageBuilder: (context, state) {
                   final date = _parseDateParam(state.pathParameters['date']);
                   final highlight = state.uri.queryParameters['highlight'];
+                  final boardId = state.uri.queryParameters['board'];
                   final panel = AppRoute.fromPanel(
                     state.uri.queryParameters['panel'],
                   );
@@ -69,6 +70,7 @@ GoRouter createAppRouter({String? initialLocation}) {
                     child: _DayWithPanel(
                       date: date,
                       highlightNodeId: highlight,
+                      initialBoardId: boardId,
                       panel: panel,
                     ),
                   );
@@ -124,6 +126,16 @@ GoRouter createAppRouter({String? initialLocation}) {
               GoRoute(
                 path: ':type/:name',
                 name: 'workspace_detail',
+                redirect: (context, state) {
+                  if (state.uri.queryParameters['view'] != 'canvas') {
+                    return null;
+                  }
+                  final boardId = state.uri.queryParameters['board'];
+                  final boardQuery = boardId == null
+                      ? ''
+                      : '?board=${Uri.encodeQueryComponent(boardId)}';
+                  return '/calendar/${dayKey(DateTime.now())}$boardQuery';
+                },
                 pageBuilder: (context, state) {
                   final type = state.pathParameters['type'] ?? 'project';
                   final name = Uri.decodeComponent(
@@ -134,8 +146,7 @@ GoRouter createAppRouter({String? initialLocation}) {
                     child: WorkspaceDetailPage(
                       typeName: type,
                       name: name,
-                      initialCanvas:
-                          state.uri.queryParameters['view'] == 'canvas',
+                      initialCanvas: false,
                       initialBoardId: state.uri.queryParameters['board'],
                     ),
                   );
@@ -191,10 +202,16 @@ String _legacyPanelLocation(GoRouterState state, AppRoute panel, String today) {
 }
 
 class _DayWithPanel extends StatelessWidget {
-  const _DayWithPanel({required this.date, this.highlightNodeId, this.panel});
+  const _DayWithPanel({
+    required this.date,
+    this.highlightNodeId,
+    this.initialBoardId,
+    this.panel,
+  });
 
   final DateTime date;
   final String? highlightNodeId;
+  final String? initialBoardId;
   final AppRoute? panel;
 
   @override
@@ -202,7 +219,11 @@ class _DayWithPanel extends StatelessWidget {
     return Stack(
       children: [
         Positioned.fill(
-          child: DayPage(date: date, highlightNodeId: highlightNodeId),
+          child: DayPage(
+            date: date,
+            highlightNodeId: highlightNodeId,
+            initialBoardId: initialBoardId,
+          ),
         ),
         if (panel case final panel?)
           Positioned.fill(
