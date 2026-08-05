@@ -9292,7 +9292,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final origin = _sceneOrigin;
     final target = origin + Offset(saved.x, saved.y);
     _didSetInitialTransform = true;
-    _transformationController.value =
+    final initialMatrix =
         Matrix4.translationValues(
                   viewport.width / 2 - target.dx * scale,
                   viewport.height / 2 - target.dy * scale,
@@ -9300,6 +9300,12 @@ class MindmapCanvasState extends State<MindmapCanvas>
                 ) *
                 Matrix4.diagonal3Values(scale, scale, 1)
             as Matrix4;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _transformationController.value = initialMatrix;
+      }
+    });
   }
 
   CanvasPosition _positionFor(MindmapNode node) {
