@@ -1095,6 +1095,88 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     _showSnackBar('New board created');
   }
 
+  Future<void> _renameDailyBoard(CanvasBoard board) async {
+    final controller = TextEditingController(text: board.title);
+    final title = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename Board'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Board name',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (title == null || title.isEmpty || title == board.title) return;
+
+    await ref
+        .read(canvasBoardRepositoryProvider)
+        .saveBoard(board.copyWith(title: title, updatedAt: DateTime.now()));
+    ref.invalidate(dailyCanvasBoardsProvider(board.day!.dateOnly));
+    if (!mounted) return;
+    _showSnackBar('Board renamed');
+  }
+
+  Future<void> _deleteDailyBoard(
+    CanvasBoard board,
+    List<CanvasBoard> dayBoards,
+  ) async {
+    if (board.isPrimaryDayBoard) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Board'),
+        content: Text(
+          'Delete "${board.title}"? All content on this board will be removed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    await ref.read(canvasBoardRepositoryProvider).deleteBoard(board.id);
+    ref.invalidate(dailyCanvasBoardsProvider(board.day!.dateOnly));
+    if (!mounted) return;
+
+    if (_activeBoardId == board.id) {
+      for (final candidate in dayBoards) {
+        if (candidate.isPrimaryDayBoard) {
+          setState(() => _activeBoardId = candidate.id);
+          break;
+        }
+      }
+    }
+    _showSnackBar('Board deleted');
+  }
+
   List<CanvasWorkshopStage> _dailyWorkshopAgenda(String template) {
     const durations = <int>[60, 180, 60, 120, 120, 60];
     final agenda = _workshop.agendaTemplate(template);
@@ -4490,6 +4572,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                         setState(() => _activeBoardId = id),
                                     onAddBoard: () => unawaited(
                                       _createDailySubBoard(normalizedDate),
+                                    ),
+                                    onRenameBoard: (board) =>
+                                        unawaited(_renameDailyBoard(board)),
+                                    onDeleteBoard: (board) => unawaited(
+                                      _deleteDailyBoard(board, allDayBoards),
                                     ),
                                     onAssistantRequested:
                                         activeCanvasBoard == null
