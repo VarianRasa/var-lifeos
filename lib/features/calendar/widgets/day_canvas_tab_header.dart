@@ -7,6 +7,8 @@ class DayCanvasTabHeader extends StatelessWidget {
     required this.activeBoardId,
     required this.onSelectBoard,
     required this.onAddBoard,
+    this.onRenameBoard,
+    this.onDeleteBoard,
     this.onOpenDashboard,
     this.onAssistantRequested,
     this.onVotingRequested,
@@ -22,6 +24,8 @@ class DayCanvasTabHeader extends StatelessWidget {
   final String? activeBoardId;
   final ValueChanged<String> onSelectBoard;
   final VoidCallback onAddBoard;
+  final ValueChanged<CanvasBoard>? onRenameBoard;
+  final ValueChanged<CanvasBoard>? onDeleteBoard;
   final VoidCallback? onOpenDashboard;
   final VoidCallback? onAssistantRequested;
   final VoidCallback? onVotingRequested;
@@ -30,6 +34,54 @@ class DayCanvasTabHeader extends StatelessWidget {
   final VoidCallback? onActivityHistoryRequested;
   final VoidCallback? onExportRequested;
   final int? votingVotesLeft;
+
+  void _showTabMenu(
+    BuildContext context,
+    Offset globalPosition,
+    CanvasBoard board,
+  ) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = RelativeRect.fromRect(
+      globalPosition & const Size(40, 40),
+      Offset.zero & overlay.size,
+    );
+
+    final isPrimary = board.isPrimaryDayBoard;
+
+    showMenu<String>(
+      context: context,
+      position: position,
+      items: [
+        const PopupMenuItem<String>(
+          value: 'rename',
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Rename'),
+            ],
+          ),
+        ),
+        if (!isPrimary)
+          const PopupMenuItem<String>(
+            value: 'delete',
+            child: Row(
+              children: [
+                Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                SizedBox(width: 8),
+                Text('Delete', style: TextStyle(color: Colors.redAccent)),
+              ],
+            ),
+          ),
+      ],
+    ).then((value) {
+      if (value == 'rename') {
+        onRenameBoard?.call(board);
+      } else if (value == 'delete') {
+        onDeleteBoard?.call(board);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,23 +112,29 @@ class DayCanvasTabHeader extends StatelessWidget {
               itemBuilder: (context, index) {
                 final board = boards[index];
                 final isSelected = board.id == activeBoardId;
-                return ChoiceChip(
-                  label: Text(
-                    board.title.isEmpty ? 'Canvas ${index + 1}' : board.title,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                      color: isSelected
-                          ? colorScheme.onPrimary
-                          : colorScheme.onSurfaceVariant,
+                return GestureDetector(
+                  onSecondaryTapDown: (details) =>
+                      _showTabMenu(context, details.globalPosition, board),
+                  onLongPressStart: (details) =>
+                      _showTabMenu(context, details.globalPosition, board),
+                  child: ChoiceChip(
+                    label: Text(
+                      board.title.isEmpty ? 'Canvas ${index + 1}' : board.title,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? colorScheme.onPrimary
+                            : colorScheme.onSurfaceVariant,
+                      ),
                     ),
+                    selected: isSelected,
+                    selectedColor: colorScheme.primary,
+                    backgroundColor: colorScheme.surfaceContainerLow,
+                    onSelected: (_) => onSelectBoard(board.id),
                   ),
-                  selected: isSelected,
-                  selectedColor: colorScheme.primary,
-                  backgroundColor: colorScheme.surfaceContainerLow,
-                  onSelected: (_) => onSelectBoard(board.id),
                 );
               },
             ),
