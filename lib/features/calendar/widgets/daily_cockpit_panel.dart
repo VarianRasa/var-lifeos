@@ -30,21 +30,9 @@ class DailyCockpitPanel extends StatelessWidget {
         .toList();
     final isOverloaded = openTasks.length >= 6;
 
-    final journalNode = nodes.firstWhere(
-      (n) => n.type == NodeType.journal,
-      orElse: () => MindmapNode(
-        id: '',
-        type: NodeType.journal,
-        title: '',
-        day: day,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
-    );
-    final journalData =
-        journalNode.data['journal'] as Map<String, Object?>? ?? const {};
-    final mood = journalData['mood'] as num?;
-    final energy = journalData['energy'] as num?;
+    if (!isOverloaded) {
+      return const SizedBox.shrink();
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -55,70 +43,6 @@ class DailyCockpitPanel extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.wb_sunny_outlined,
-                      color: theme.colorScheme.primary,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 6),
-                    Text('Sunny, 28°C', style: theme.textTheme.bodySmall),
-                  ],
-                ),
-                Row(
-                  children: [
-                    if (inboxCount > 0) ...[
-                      ActionChip(
-                        avatar: const Icon(Icons.inbox_outlined, size: 14),
-                        label: Text(
-                          'Inbox $inboxCount',
-                          style: theme.textTheme.labelSmall,
-                        ),
-                        onPressed: onInboxPressed,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    if (somedayCount > 0) ...[
-                      ActionChip(
-                        avatar: const Icon(Icons.next_plan_outlined, size: 14),
-                        label: Text(
-                          'Someday $somedayCount',
-                          style: theme.textTheme.labelSmall,
-                        ),
-                        onPressed: onSomedayPressed,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Icon(
-                      Icons.favorite_border,
-                      color: theme.colorScheme.error,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      mood != null
-                          ? 'Mood: ${mood.toInt()}/5'
-                          : (energy != null
-                                ? 'Energy: ${energy.toInt()}/5'
-                                : 'Mood: -'),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: (mood != null || energy != null)
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
             if (isOverloaded) ...[
               const SizedBox(height: 6),
               Container(
