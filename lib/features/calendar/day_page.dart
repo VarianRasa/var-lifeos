@@ -24,6 +24,7 @@ import '../../core/theme/app_design_tokens.dart';
 import '../../core/theme/node_visuals.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/layout/desktop_window_chrome.dart';
 import '../../shared/widgets/error_message.dart';
 import '../command/domain/quick_create_command_parser.dart';
 import '../mindmap/application/canvas_workshop_controller.dart';
@@ -539,6 +540,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _activeBoardId = widget.initialBoardId;
+    desktopMenuController.addListener(_handleDesktopMenuAction);
     WidgetsBinding.instance.addObserver(this);
     _inlineWorkspaceController = ref.read(
       inlineNodeWorkspaceControllerProvider.notifier,
@@ -580,8 +582,34 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     _loadViewPreferences();
   }
 
+  void _handleDesktopMenuAction() {
+    final action = desktopMenuController.action;
+    if (action == null || !mounted || _viewMode != _DayViewMode.canvas) return;
+    setState(() {
+      switch (action) {
+        case DesktopMenuAction.toggleTopHeader:
+          _isFloatingTopBarVisible = !_isFloatingTopBarVisible;
+        case DesktopMenuAction.toggleRibbonToolbar:
+          _isFloatingRibbonVisible = !_isFloatingRibbonVisible;
+        case DesktopMenuAction.toggleBoardTabs:
+          _isFloatingBoardTabsVisible = !_isFloatingBoardTabsVisible;
+        case DesktopMenuAction.toggleAllCanvasControls:
+          final anyVisible =
+              _isFloatingTopBarVisible ||
+              _isFloatingRibbonVisible ||
+              _isFloatingBoardTabsVisible;
+          _isFloatingTopBarVisible = !anyVisible;
+          _isFloatingRibbonVisible = !anyVisible;
+          _isFloatingBoardTabsVisible = !anyVisible;
+        default:
+          break;
+      }
+    });
+  }
+
   @override
   void dispose() {
+    desktopMenuController.removeListener(_handleDesktopMenuAction);
     WidgetsBinding.instance.removeObserver(this);
     _focusTicker?.cancel();
     _quickCaptureController.dispose();
