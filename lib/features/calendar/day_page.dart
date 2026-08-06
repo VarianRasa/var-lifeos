@@ -504,6 +504,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   bool _isDayTabsCollapsed = true;
   final bool _isDayTabsHidden = false;
   bool _isFloatingTopBarVisible = true;
+  bool _isTopBarCollapsed = false;
+  Offset _topBarOffset = const Offset(12, 12);
   bool _isFloatingBoardTabsVisible = true;
   bool _isBlankBoardHidden = false;
   bool _isCanvasAddNodeMenuOpen = false;
@@ -5461,41 +5463,19 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     ),
                                               ),
                                             ),
-                                             if (_isFloatingTopBarVisible)
-                                               Positioned(
-                                                 top: 12,
-                                                 right: 12,
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 12,
-                                                        vertical: 6,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .surface
-                                                        .withValues(
-                                                          alpha: 0.90,
-                                                        ),
+                                            if (_isFloatingTopBarVisible)
+                                              Positioned(
+                                                top: _topBarOffset.dy,
+                                                right: _topBarOffset.dx,
+                                                child: Card(
+                                                  elevation: 8,
+                                                  shadowColor: Colors.black45,
+                                                  shape: RoundedRectangleBorder(
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                           16,
                                                         ),
-                                                    boxShadow: [
-                                                      BoxShadow(
-                                                        color: Colors.black
-                                                            .withValues(
-                                                              alpha: 0.25,
-                                                            ),
-                                                        blurRadius: 10,
-                                                        offset: const Offset(
-                                                          0,
-                                                          4,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                    border: Border.all(
+                                                    side: BorderSide(
                                                       color: Theme.of(context)
                                                           .colorScheme
                                                           .outlineVariant
@@ -5504,94 +5484,165 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                           ),
                                                     ),
                                                   ),
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      if (MediaQuery.sizeOf(
-                                                            context,
-                                                          ).width >=
-                                                          1100) ...[
-                                                        CollaborationRoomBar(
-                                                          nodes:
-                                                              nodes
-                                                                  .valueOrNull ??
-                                                              const <
-                                                                MindmapNode
-                                                              >[],
-                                                          followingId:
-                                                              _followingCollaboratorId,
-                                                          onFollowChanged: (id) {
-                                                            setState(
-                                                              () =>
-                                                                  _followingCollaboratorId =
-                                                                      id,
-                                                            );
-                                                            _canvasKey
-                                                                .currentState
-                                                                ?.followCollaborator(
-                                                                  id,
-                                                                );
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surface
+                                                      .withValues(alpha: 0.92),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                          vertical: 4,
+                                                        ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        GestureDetector(
+                                                          behavior:
+                                                              HitTestBehavior
+                                                                  .opaque,
+                                                          onPanUpdate: (details) {
+                                                            setState(() {
+                                                              _topBarOffset = Offset(
+                                                                (_topBarOffset
+                                                                            .dx -
+                                                                        details
+                                                                            .delta
+                                                                            .dx)
+                                                                    .clamp(
+                                                                      0.0,
+                                                                      1000.0,
+                                                                    ),
+                                                                (_topBarOffset
+                                                                            .dy +
+                                                                        details
+                                                                            .delta
+                                                                            .dy)
+                                                                    .clamp(
+                                                                      0.0,
+                                                                      1000.0,
+                                                                    ),
+                                                              );
+                                                            });
                                                           },
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 12,
-                                                        ),
-                                                      ],
-                                                      _DayViewModeToggle(
-                                                        mode: _viewMode,
-                                                        onChanged: (value) =>
-                                                            _setViewMode(value),
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      _DayContextSwitcher(
-                                                        filter: _contextFilter,
-                                                        workspaceContext:
-                                                            activeWorkspaceContext,
-                                                        workspaceContexts:
-                                                            workspaceContexts
-                                                                .valueOrNull,
-                                                        onChanged:
-                                                            _setContextFilter,
-                                                        onWorkspaceChanged:
-                                                            _setWorkspaceContextFilter,
-                                                      ),
-                                                      const SizedBox(width: 12),
-                                                      IconButton(
-                                                        tooltip:
-                                                            'Copy day markdown',
-                                                        onPressed: () => unawaited(
-                                                          _copyDayMarkdown(
-                                                            normalizedDate,
-                                                            allNodes.valueOrNull ??
-                                                                const <
-                                                                  MindmapNode
-                                                                >[],
+                                                          child: MouseRegion(
+                                                            cursor:
+                                                                SystemMouseCursors
+                                                                    .move,
+                                                            child: Padding(
+                                                              padding:
+                                                                  const EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        4,
+                                                                  ),
+                                                              child: Icon(
+                                                                Icons
+                                                                    .drag_indicator_rounded,
+                                                                size: 18,
+                                                                color: Theme.of(
+                                                                  context,
+                                                                ).colorScheme.outline,
+                                                              ),
+                                                            ),
                                                           ),
                                                         ),
-                                                        icon: const Icon(
-                                                          Icons
-                                                              .ios_share_outlined,
-                                                          size: 18,
+                                                        if (!_isTopBarCollapsed) ...[
+                                                          if (MediaQuery.sizeOf(
+                                                                context,
+                                                              ).width >=
+                                                              1100) ...[
+                                                            CollaborationRoomBar(
+                                                              nodes:
+                                                                  nodes
+                                                                      .valueOrNull ??
+                                                                  const <
+                                                                    MindmapNode
+                                                                  >[],
+                                                              followingId:
+                                                                  _followingCollaboratorId,
+                                                              onFollowChanged: (id) {
+                                                                setState(
+                                                                  () =>
+                                                                      _followingCollaboratorId =
+                                                                          id,
+                                                                );
+                                                                _canvasKey
+                                                                    .currentState
+                                                                    ?.followCollaborator(
+                                                                      id,
+                                                                    );
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 8,
+                                                            ),
+                                                          ],
+                                                          _DayViewModeToggle(
+                                                            mode: _viewMode,
+                                                            onChanged: (value) =>
+                                                                _setViewMode(
+                                                                  value,
+                                                                ),
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          _DayContextSwitcher(
+                                                            filter:
+                                                                _contextFilter,
+                                                            workspaceContext:
+                                                                activeWorkspaceContext,
+                                                            workspaceContexts:
+                                                                workspaceContexts
+                                                                    .valueOrNull,
+                                                            onChanged:
+                                                                _setContextFilter,
+                                                            onWorkspaceChanged:
+                                                                _setWorkspaceContextFilter,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 8,
+                                                          ),
+                                                          IconButton(
+                                                            tooltip:
+                                                                'Copy day markdown',
+                                                            onPressed: () => unawaited(
+                                                              _copyDayMarkdown(
+                                                                normalizedDate,
+                                                                allNodes.valueOrNull ??
+                                                                    const <
+                                                                      MindmapNode
+                                                                    >[],
+                                                              ),
+                                                            ),
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .ios_share_outlined,
+                                                              size: 18,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                        IconButton(
+                                                          tooltip:
+                                                              _isTopBarCollapsed
+                                                              ? 'Expand controls'
+                                                              : 'Collapse controls',
+                                                          icon: Icon(
+                                                            _isTopBarCollapsed
+                                                                ? Icons
+                                                                      .chevron_left_rounded
+                                                                : Icons
+                                                                      .chevron_right_rounded,
+                                                            size: 20,
+                                                          ),
+                                                          onPressed: () => setState(
+                                                            () => _isTopBarCollapsed =
+                                                                !_isTopBarCollapsed,
+                                                          ),
                                                         ),
-                                                      ),
-                                                      IconButton(
-                                                        tooltip:
-                                                            _isFloatingTopBarVisible
-                                                            ? 'Collapse Topbar'
-                                                            : 'Expand Topbar',
-                                                        icon: const Icon(
-                                                          Icons
-                                                              .keyboard_arrow_up_rounded,
-                                                          size: 18,
-                                                        ),
-                                                        onPressed: () => setState(
-                                                          () =>
-                                                              _isFloatingTopBarVisible =
-                                                                  false,
-                                                        ),
-                                                      ),
-                                                    ],
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),

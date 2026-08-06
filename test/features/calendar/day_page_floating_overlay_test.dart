@@ -29,26 +29,25 @@ void main() {
     },
   );
 
-  testWidgets(
-    'DesktopMenuAction triggers toggle floating controls state',
-    (WidgetTester tester) async {
-      final today = DateTime.now();
-      await tester.pumpWidget(
-        ProviderScope(
-          child: MaterialApp(home: DayPage(date: today)),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+  testWidgets('DesktopMenuAction triggers toggle floating controls state', (
+    WidgetTester tester,
+  ) async {
+    final today = DateTime.now();
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(home: DayPage(date: today)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-      desktopMenuController.invoke(DesktopMenuAction.toggleTopHeader);
-      await tester.pump();
+    desktopMenuController.invoke(DesktopMenuAction.toggleTopHeader);
+    await tester.pump();
 
-      desktopMenuController.invoke(DesktopMenuAction.toggleBoardTabs);
-      await tester.pump();
+    desktopMenuController.invoke(DesktopMenuAction.toggleBoardTabs);
+    await tester.pump();
 
-      desktopMenuController.invoke(DesktopMenuAction.toggleAllCanvasControls);
-      await tester.pump();
-    },
-  );
+    desktopMenuController.invoke(DesktopMenuAction.toggleAllCanvasControls);
+    await tester.pump();
+  });
 }

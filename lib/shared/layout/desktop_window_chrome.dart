@@ -330,7 +330,6 @@ class _DesktopMenuBar extends StatelessWidget {
             'View',
             {
               'Toggle Top Header Bar': DesktopMenuAction.toggleTopHeader,
-              'Toggle Ribbon Toolbar': DesktopMenuAction.toggleRibbonToolbar,
               'Toggle Board Tabs': DesktopMenuAction.toggleBoardTabs,
               'Hide/Show All Controls':
                   DesktopMenuAction.toggleAllCanvasControls,
@@ -431,8 +430,7 @@ extension on DesktopMenuAction {
     DesktopMenuAction.today => 'Ctrl+T',
     DesktopMenuAction.commandPalette => 'Ctrl+K',
     DesktopMenuAction.toggleTopHeader => 'Ctrl+Alt+1',
-    DesktopMenuAction.toggleRibbonToolbar => 'Ctrl+Alt+2',
-    DesktopMenuAction.toggleBoardTabs => 'Ctrl+Alt+3',
+    DesktopMenuAction.toggleBoardTabs => 'Ctrl+Alt+2',
     DesktopMenuAction.toggleAllCanvasControls => 'Ctrl+Shift+H',
     DesktopMenuAction.closePanel => 'Esc',
     _ => null,
