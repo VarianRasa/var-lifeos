@@ -503,7 +503,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   bool _isDayTabsCollapsed = true;
   final bool _isDayTabsHidden = false;
   final bool _isRibbonToolbarCollapsed = false;
-  final bool _isFloatingTopBarVisible = true;
+  bool _isFloatingTopBarVisible = true;
   bool _isFloatingRibbonVisible = true;
   bool _isFloatingBoardTabsVisible = true;
   bool _isBlankBoardHidden = false;
@@ -4022,7 +4022,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                 );
               },
             ),
-            appBar: _isFloatingTopBarVisible
+            appBar: _viewMode != _DayViewMode.canvas && _isFloatingTopBarVisible
                 ? AppBar(
                     automaticallyImplyLeading: false,
                     titleSpacing: 16,
@@ -5624,6 +5624,211 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                         change,
                                                       ),
                                                     ),
+                                              ),
+                                            ),
+                                            Positioned(
+                                              top: 12,
+                                              left: 12,
+                                              right: 12,
+                                              child: Align(
+                                                alignment: Alignment.topCenter,
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    if (_isFloatingTopBarVisible)
+                                                      Container(
+                                                        margin:
+                                                            const EdgeInsets.only(
+                                                              bottom: 8,
+                                                            ),
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 12,
+                                                              vertical: 6,
+                                                            ),
+                                                        decoration: BoxDecoration(
+                                                          color:
+                                                              Theme.of(context)
+                                                                  .colorScheme
+                                                                  .surface
+                                                                  .withValues(
+                                                                    alpha: 0.90,
+                                                                  ),
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                16,
+                                                              ),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: Colors
+                                                                  .black
+                                                                  .withValues(
+                                                                    alpha: 0.25,
+                                                                  ),
+                                                              blurRadius: 10,
+                                                              offset:
+                                                                  const Offset(
+                                                                    0,
+                                                                    4,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                          border: Border.all(
+                                                            color:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .outlineVariant
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          0.5,
+                                                                    ),
+                                                          ),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            Consumer(
+                                                              builder: (context, ref, child) {
+                                                                final titleMap =
+                                                                    ref.watch(
+                                                                      workspaceTitleProvider,
+                                                                    );
+                                                                final titleKey =
+                                                                    '${WorkspaceContextType.daily.name}_${dayKey(normalizedDate)}';
+                                                                final customTitle =
+                                                                    titleMap[titleKey];
+                                                                final displayTitle =
+                                                                    (customTitle !=
+                                                                            null &&
+                                                                        customTitle
+                                                                            .isNotEmpty)
+                                                                    ? customTitle
+                                                                    : dayKey(
+                                                                        normalizedDate,
+                                                                      );
+                                                                return _InlineWorkspaceTitle(
+                                                                  customTitle:
+                                                                      customTitle,
+                                                                  displayTitle:
+                                                                      displayTitle,
+                                                                  onTitleChanged: (String title) => ref
+                                                                      .read(
+                                                                        workspaceTitleProvider
+                                                                            .notifier,
+                                                                      )
+                                                                      .setTitle(
+                                                                        WorkspaceContextType
+                                                                            .daily,
+                                                                        dayKey(
+                                                                          normalizedDate,
+                                                                        ),
+                                                                        title,
+                                                                      ),
+                                                                );
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 12,
+                                                            ),
+                                                            if (MediaQuery.sizeOf(
+                                                                  context,
+                                                                ).width >=
+                                                                1100) ...[
+                                                              CollaborationRoomBar(
+                                                                nodes:
+                                                                    nodes
+                                                                        .valueOrNull ??
+                                                                    const <
+                                                                      MindmapNode
+                                                                    >[],
+                                                                followingId:
+                                                                    _followingCollaboratorId,
+                                                                onFollowChanged: (id) {
+                                                                  setState(
+                                                                    () =>
+                                                                        _followingCollaboratorId =
+                                                                            id,
+                                                                  );
+                                                                  _canvasKey
+                                                                      .currentState
+                                                                      ?.followCollaborator(
+                                                                        id,
+                                                                      );
+                                                                },
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 12,
+                                                              ),
+                                                            ],
+                                                            _DayViewModeToggle(
+                                                              mode: _viewMode,
+                                                              onChanged: (value) =>
+                                                                  _setViewMode(
+                                                                    value,
+                                                                  ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 12,
+                                                            ),
+                                                            _DayContextSwitcher(
+                                                              filter:
+                                                                  _contextFilter,
+                                                              workspaceContext:
+                                                                  activeWorkspaceContext,
+                                                              workspaceContexts:
+                                                                  workspaceContexts
+                                                                      .valueOrNull,
+                                                              onChanged:
+                                                                  _setContextFilter,
+                                                              onWorkspaceChanged:
+                                                                  _setWorkspaceContextFilter,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 12,
+                                                            ),
+                                                            IconButton(
+                                                              tooltip:
+                                                                  'Copy day markdown',
+                                                              onPressed: () => unawaited(
+                                                                _copyDayMarkdown(
+                                                                  normalizedDate,
+                                                                  allNodes.valueOrNull ??
+                                                                      const <
+                                                                        MindmapNode
+                                                                      >[],
+                                                                ),
+                                                              ),
+                                                              icon: const Icon(
+                                                                Icons
+                                                                    .ios_share_outlined,
+                                                                size: 18,
+                                                              ),
+                                                            ),
+                                                            IconButton(
+                                                              tooltip:
+                                                                  _isFloatingTopBarVisible
+                                                                  ? 'Collapse Topbar'
+                                                                  : 'Expand Topbar',
+                                                              icon: const Icon(
+                                                                Icons
+                                                                    .keyboard_arrow_up_rounded,
+                                                                size: 18,
+                                                              ),
+                                                              onPressed: () =>
+                                                                  setState(
+                                                                    () => _isFloatingTopBarVisible =
+                                                                        false,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                             if (activeCanvasBoard
