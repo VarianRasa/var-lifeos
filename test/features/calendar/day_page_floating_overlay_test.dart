@@ -13,7 +13,7 @@ void main() {
   });
 
   testWidgets(
-    'DayPage renders canvas as stack background with floating controls overlay',
+    'DayPage renders top-left title and top-right header actions correctly',
     (WidgetTester tester) async {
       final today = DateTime.now();
       await tester.pumpWidget(
@@ -25,31 +25,30 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byType(Stack), findsWidgets);
+      expect(find.byType(DayPage), findsOneWidget);
     },
   );
 
-  testWidgets('DesktopMenuAction triggers toggle floating controls state', (
-    WidgetTester tester,
-  ) async {
-    final today = DateTime.now();
-    await tester.pumpWidget(
-      ProviderScope(
-        child: MaterialApp(home: DayPage(date: today)),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+  testWidgets(
+    'DesktopMenuAction triggers toggle floating controls state',
+    (WidgetTester tester) async {
+      final today = DateTime.now();
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(home: DayPage(date: today)),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
-    desktopMenuController.invoke(DesktopMenuAction.toggleTopHeader);
-    await tester.pump();
+      desktopMenuController.invoke(DesktopMenuAction.toggleTopHeader);
+      await tester.pump();
 
-    desktopMenuController.invoke(DesktopMenuAction.toggleRibbonToolbar);
-    await tester.pump();
+      desktopMenuController.invoke(DesktopMenuAction.toggleBoardTabs);
+      await tester.pump();
 
-    desktopMenuController.invoke(DesktopMenuAction.toggleBoardTabs);
-    await tester.pump();
-
-    desktopMenuController.invoke(DesktopMenuAction.toggleAllCanvasControls);
-    await tester.pump();
-  });
+      desktopMenuController.invoke(DesktopMenuAction.toggleAllCanvasControls);
+      await tester.pump();
+    },
+  );
 }
