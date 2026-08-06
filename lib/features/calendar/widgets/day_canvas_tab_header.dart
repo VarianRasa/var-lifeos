@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:var_app/features/mindmap/domain/canvas_board.dart';
+import 'package:var_app/features/mindmap/domain/canvas_workshop.dart';
 
 class DayCanvasTabHeader extends StatelessWidget {
   const DayCanvasTabHeader({
@@ -13,6 +14,9 @@ class DayCanvasTabHeader extends StatelessWidget {
     this.onAssistantRequested,
     this.onVotingRequested,
     this.onWorkshopRequested,
+    this.onWorkshopAction,
+    this.workshopSession,
+    this.workshopTimeString,
     this.onTemplatesRequested,
     this.onActivityHistoryRequested,
     this.onExportRequested,
@@ -30,6 +34,9 @@ class DayCanvasTabHeader extends StatelessWidget {
   final VoidCallback? onAssistantRequested;
   final VoidCallback? onVotingRequested;
   final VoidCallback? onWorkshopRequested;
+  final ValueChanged<String>? onWorkshopAction;
+  final CanvasWorkshopSession? workshopSession;
+  final String? workshopTimeString;
   final VoidCallback? onTemplatesRequested;
   final VoidCallback? onActivityHistoryRequested;
   final VoidCallback? onExportRequested;
@@ -177,7 +184,87 @@ class DayCanvasTabHeader extends StatelessWidget {
               tooltip: 'Live Voting',
               onPressed: onVotingRequested,
             ),
-          if (onWorkshopRequested != null)
+          if (onWorkshopAction != null && workshopSession != null) ...[
+            if (workshopSession!.isActive && workshopTimeString != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, right: 2),
+                child: Text(
+                  workshopTimeString!,
+                  key: const ValueKey('day-workshop-timer'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.primary,
+                  ),
+                ),
+              ),
+            PopupMenuButton<String>(
+              key: const ValueKey('day-workshop-menu'),
+              tooltip: 'Workshop controls',
+              icon: Icon(
+                workshopSession!.isActive
+                    ? Icons.groups
+                    : Icons.groups_outlined,
+                size: 18,
+                color: workshopSession!.isActive
+                    ? colorScheme.primary
+                    : colorScheme.onSurfaceVariant,
+              ),
+              onSelected: onWorkshopAction,
+              itemBuilder: (context) => [
+                if (!workshopSession!.isActive) ...[
+                  const PopupMenuItem(
+                    value: 'brainstorm',
+                    child: Text('Start brainstorm'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'retrospective',
+                    child: Text('Start retrospective'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'decision',
+                    child: Text('Start decision'),
+                  ),
+                ],
+                PopupMenuItem(
+                  value: workshopSession!.status == CanvasWorkshopStatus.paused
+                      ? 'resume'
+                      : 'pause',
+                  enabled: workshopSession!.isActive,
+                  child: Text(
+                    workshopSession!.status == CanvasWorkshopStatus.paused
+                        ? 'Resume'
+                        : 'Pause',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'advance',
+                  enabled:
+                      workshopSession!.isActive &&
+                      !workshopSession!.isLastStage,
+                  child: const Text('Advance stage'),
+                ),
+                PopupMenuItem(
+                  value: 'reveal',
+                  enabled:
+                      workshopSession!.isActive &&
+                      workshopSession!.activeStage?.contributionsPrivate ==
+                          true,
+                  child: const Text('Reveal contributions'),
+                ),
+                PopupMenuItem(
+                  value: 'end',
+                  enabled: workshopSession!.isActive,
+                  child: const Text('End workshop'),
+                ),
+                PopupMenuItem(
+                  value: 'summary',
+                  enabled: workshopSession!.summary != null,
+                  child: const Text('Show summary'),
+                ),
+              ],
+            ),
+          ] else if (onWorkshopRequested != null)
             IconButton(
               icon: Icon(
                 Icons.present_to_all_outlined,

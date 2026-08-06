@@ -4457,6 +4457,22 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                               activeCanvasBoard,
                                             ),
                                           ),
+                                    onWorkshopAction: activeCanvasBoard == null
+                                        ? null
+                                        : (action) => unawaited(
+                                            _handleDailyWorkshopAction(
+                                              activeCanvasBoard,
+                                              action,
+                                            ),
+                                          ),
+                                    workshopSession:
+                                        activeCanvasBoard?.workshopSession,
+                                    workshopTimeString:
+                                        activeCanvasBoard != null
+                                        ? _dailyWorkshopTime(
+                                            activeCanvasBoard.workshopSession,
+                                          )
+                                        : null,
                                     onTemplatesRequested:
                                         activeCanvasBoard == null
                                         ? null
@@ -5756,161 +5772,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     ),
                                                   ),
                                                 ),
-                                            if (activeCanvasBoard
-                                                case final board?)
-                                              Positioned(
-                                                top: 16,
-                                                right:
-                                                    MediaQuery.sizeOf(
-                                                          context,
-                                                        ).width <
-                                                        1100
-                                                    ? 72
-                                                    : 16,
-                                                child: Card(
-                                                  margin: EdgeInsets.zero,
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      if (board
-                                                          .workshopSession
-                                                          .isActive)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                left: 12,
-                                                              ),
-                                                          child: Text(
-                                                            _dailyWorkshopTime(
-                                                              board
-                                                                  .workshopSession,
-                                                            ),
-                                                            key: const ValueKey(
-                                                              'day-workshop-timer',
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      PopupMenuButton<String>(
-                                                        key: const ValueKey(
-                                                          'day-workshop-menu',
-                                                        ),
-                                                        tooltip:
-                                                            'Workshop controls',
-                                                        icon: Icon(
-                                                          board
-                                                                  .workshopSession
-                                                                  .isActive
-                                                              ? Icons.groups
-                                                              : Icons
-                                                                    .groups_outlined,
-                                                        ),
-                                                        onSelected: (action) =>
-                                                            unawaited(
-                                                              _handleDailyWorkshopAction(
-                                                                board,
-                                                                action,
-                                                              ),
-                                                            ),
-                                                        itemBuilder: (context) => [
-                                                          if (!board
-                                                              .workshopSession
-                                                              .isActive) ...[
-                                                            const PopupMenuItem(
-                                                              value:
-                                                                  'brainstorm',
-                                                              child: Text(
-                                                                'Start brainstorm',
-                                                              ),
-                                                            ),
-                                                            const PopupMenuItem(
-                                                              value:
-                                                                  'retrospective',
-                                                              child: Text(
-                                                                'Start retrospective',
-                                                              ),
-                                                            ),
-                                                            const PopupMenuItem(
-                                                              value: 'decision',
-                                                              child: Text(
-                                                                'Start decision',
-                                                              ),
-                                                            ),
-                                                          ],
-                                                          PopupMenuItem(
-                                                            value:
-                                                                board
-                                                                        .workshopSession
-                                                                        .status ==
-                                                                    CanvasWorkshopStatus
-                                                                        .paused
-                                                                ? 'resume'
-                                                                : 'pause',
-                                                            enabled: board
-                                                                .workshopSession
-                                                                .isActive,
-                                                            child: Text(
-                                                              board.workshopSession.status ==
-                                                                      CanvasWorkshopStatus
-                                                                          .paused
-                                                                  ? 'Resume'
-                                                                  : 'Pause',
-                                                            ),
-                                                          ),
-                                                          PopupMenuItem(
-                                                            value: 'advance',
-                                                            enabled:
-                                                                board
-                                                                    .workshopSession
-                                                                    .isActive &&
-                                                                !board
-                                                                    .workshopSession
-                                                                    .isLastStage,
-                                                            child: const Text(
-                                                              'Advance stage',
-                                                            ),
-                                                          ),
-                                                          PopupMenuItem(
-                                                            value: 'reveal',
-                                                            enabled:
-                                                                board
-                                                                    .workshopSession
-                                                                    .isActive &&
-                                                                board
-                                                                        .workshopSession
-                                                                        .activeStage
-                                                                        ?.contributionsPrivate ==
-                                                                    true,
-                                                            child: const Text(
-                                                              'Reveal contributions',
-                                                            ),
-                                                          ),
-                                                          PopupMenuItem(
-                                                            value: 'end',
-                                                            enabled: board
-                                                                .workshopSession
-                                                                .isActive,
-                                                            child: const Text(
-                                                              'End workshop',
-                                                            ),
-                                                          ),
-                                                          PopupMenuItem(
-                                                            value: 'summary',
-                                                            enabled:
-                                                                board
-                                                                    .workshopSession
-                                                                    .summary !=
-                                                                null,
-                                                            child: const Text(
-                                                              'Show summary',
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
                                             if (MediaQuery.sizeOf(
                                                   context,
                                                 ).width <
