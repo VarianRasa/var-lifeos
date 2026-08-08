@@ -51,7 +51,6 @@ import '../mindmap/domain/inline_node_workspace_policy.dart';
 import '../mindmap/domain/kanban_board.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_attachment.dart';
-import '../mindmap/domain/node_presentation.dart';
 import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/node_type_payloads.dart';
 import '../mindmap/domain/node_ui_state_codec.dart';
@@ -497,7 +496,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
   String? _focusNodeId;
   String? _followingCollaboratorId;
   int? _focusTargetMinutes;
-  bool _focusTargetNotified = false;
   Timer? _focusTicker;
   String? _workshopMaintenanceSignature;
   static const CanvasWorkshopController _workshop = CanvasWorkshopController();
@@ -660,39 +658,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
           _tableSortModeFromName(storedTableSortMode) ?? _tableSortMode;
       _isLifeExplorerExpanded =
           storedLifeExplorerExpanded ?? _isLifeExplorerExpanded;
-    });
-  }
-
-  Future<void> _setSelectedNodePreset(
-    MindmapNode node,
-    NodeSizePreset preset,
-  ) async {
-    await _serializeNodeMutation(node.id, () async {
-      if (_inlineEditingNodeIds.contains(node.id) &&
-          !await _finishSelectedNodeEdit(node)) {
-        return;
-      }
-      final latest = await ref.read(mindmapRepositoryProvider).getNode(node.id);
-      if (latest == null) return;
-      final current = NodeUiStateCodec.read(latest);
-      final updated = latest
-          .copyWithUiState(
-            NodeUiState(
-              sizePreset: preset,
-              width: current.width,
-              height: current.height,
-              collapsedSections: current.collapsedSections,
-              editorVersion: current.editorVersion,
-            ),
-          )
-          .copyWith(updatedAt: DateTime.now());
-      if (mounted) {
-        setState(() => _inlineSaveStatuses[node.id] = NodeSaveStatus.saving);
-      }
-      await ref.read(mindmapMutationControllerProvider).saveNode(updated);
-      if (mounted && _selectedNodeId == node.id) {
-        setState(() => _inlineSaveStatuses[node.id] = NodeSaveStatus.saved);
-      }
     });
   }
 
@@ -893,17 +858,38 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     final normalizedDay = day.dateOnly;
     final repository = ref.read(canvasBoardRepositoryProvider);
     final boardId = dailyCanvasBoardId(normalizedDay);
-    final before = (await repository.getBoard(boardId))?.objectById(object.id);
-    await repository.saveObjects(boardId, <CanvasObject>[object]);
-    if (before != null && before != object) {
-      _pushUndo(
-        _UndoEntry(
-          kind: _UndoKind.canvasUpdate,
-          nodeId: object.id,
-          canvasBefore: before,
-          canvasAfter: object,
-        ),
+    final board = await repository.getBoard(boardId);
+    if (board == null) {
+      final nodes = await ref
+          .read(mindmapRepositoryProvider)
+          .listNodes(day: normalizedDay);
+      final initialBoard = CanvasBoard.daily(
+        day: normalizedDay,
+        nodes: nodes,
+        now: DateTime.now(),
       );
+      final replacements = <String, CanvasObject>{object.id: object};
+      final mergedObjects = <CanvasObject>[
+        for (final o in initialBoard.objects) replacements[o.id] ?? o,
+        if (!initialBoard.objects.any((existing) => existing.id == object.id))
+          object,
+      ];
+      await repository.saveBoard(
+        initialBoard.copyWith(objects: mergedObjects),
+      );
+    } else {
+      final before = board.objectById(object.id);
+      await repository.saveObjects(boardId, <CanvasObject>[object]);
+      if (before != null && before != object) {
+        _pushUndo(
+          _UndoEntry(
+            kind: _UndoKind.canvasUpdate,
+            nodeId: object.id,
+            canvasBefore: before,
+            canvasAfter: object,
+          ),
+        );
+      }
     }
     ref.invalidate(dailyCanvasBoardProvider(normalizedDay));
   }
@@ -981,20 +967,43 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     final repository = ref.read(canvasBoardRepositoryProvider);
     final boardId = dailyCanvasBoardId(normalizedDay);
     final board = await repository.getBoard(boardId);
-    final before = objects
-        .map((object) => board?.objectById(object.id))
-        .nonNulls
-        .toList();
-    await repository.saveObjects(boardId, objects);
-    if (before.isNotEmpty) {
-      _pushUndo(
-        _UndoEntry(
-          kind: _UndoKind.canvasBatch,
-          nodeId: objects.first.id,
-          canvasBeforeBatch: before,
-          canvasAfterBatch: objects,
-        ),
+    if (board == null) {
+      final nodes = await ref
+          .read(mindmapRepositoryProvider)
+          .listNodes(day: normalizedDay);
+      final initialBoard = CanvasBoard.daily(
+        day: normalizedDay,
+        nodes: nodes,
+        now: DateTime.now(),
       );
+      final replacements = <String, CanvasObject>{
+        for (final o in objects) o.id: o,
+      };
+      final existingIds = initialBoard.objects.map((o) => o.id).toSet();
+      final mergedObjects = <CanvasObject>[
+        for (final o in initialBoard.objects) replacements[o.id] ?? o,
+        for (final o in objects)
+          if (!existingIds.contains(o.id)) o,
+      ];
+      await repository.saveBoard(
+        initialBoard.copyWith(objects: mergedObjects),
+      );
+    } else {
+      final before = objects
+          .map((object) => board.objectById(object.id))
+          .nonNulls
+          .toList();
+      await repository.saveObjects(boardId, objects);
+      if (before.isNotEmpty) {
+        _pushUndo(
+          _UndoEntry(
+            kind: _UndoKind.canvasBatch,
+            nodeId: objects.first.id,
+            canvasBeforeBatch: before,
+            canvasAfterBatch: objects,
+          ),
+        );
+      }
     }
     ref.invalidate(dailyCanvasBoardProvider(normalizedDay));
   }
@@ -1616,10 +1625,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         });
     _nodeMutationQueues[nodeId] = next;
     return next;
-  }
-
-  void _beginSelectedNodeEdit(MindmapNode node) {
-    _canvasKey.currentState?.beginInlineEdit(node.id);
   }
 
   Future<bool> _finishSelectedNodeEdit(MindmapNode node) async {
@@ -2649,18 +2654,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
       '${VideoPayload.fromNode(node).attachmentId}|${VideoPayload.fromNode(node).url}',
     _ => '',
   };
-
-  bool _hasSafeMediaUrl(MindmapNode node) {
-    final source = switch (node.type) {
-      NodeType.image => ImagePayload.fromNode(node).url,
-      NodeType.video => VideoPayload.fromNode(node).url,
-      _ => '',
-    };
-    final uri = Uri.tryParse(source);
-    return uri != null &&
-        const {'http', 'https'}.contains(uri.scheme) &&
-        uri.host.isNotEmpty;
-  }
 
   Future<void> _openMediaSource(MindmapNode node) async {
     final source = switch (node.type) {
@@ -3733,23 +3726,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _runCanvasAction(CanvasContextAction action) async {
-    if ((action == CanvasContextAction.exportJson ||
-            action == CanvasContextAction.exportPng) &&
-        !await _flushInlineWorkspace()) {
-      return;
-    }
-    if (action == CanvasContextAction.exportJson ||
-        action == CanvasContextAction.exportPng) {
-      await ref.read(nodesForDayProvider(widget.date.dateOnly).future);
-      if (!mounted) return;
-      setState(() {});
-      await WidgetsBinding.instance.endOfFrame;
-    }
-    await _canvasKey.currentState?.runContextAction(action);
-    if (mounted) setState(() {});
-  }
-
   Future<void> _showMobileToolsSheet(
     MindmapNode? node,
     DateTime normalizedDate,
@@ -3848,32 +3824,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showSelectedNodeTools(MindmapNode node) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      builder: (sheetContext) => SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: _SelectedNodeMissionActions(
-          node: node,
-          actions: _selectedNodeActions(node),
-          isMission: isTodayMission(node),
-          isFocusRunning: _focusNodeId == node.id && _focusStartedAt != null,
-          isCollapsed: false,
-          focusElapsed: _focusElapsed,
-          focusRemaining: _focusRemaining,
-          onToggleCollapsed: () => Navigator.of(sheetContext).pop(),
-          onToggleMission: () => _toggleTodayMission(node),
-          onStartFocus: () => _startFocusSession(node),
-          onStartPomodoro: (minutes) =>
-              _startFocusSession(node, targetMinutes: minutes),
-          onStartCustomFocus: () => _showCustomFocusDialog(node),
-          onStopFocus: () => _stopFocusSession(node),
         ),
       ),
     );
@@ -4242,96 +4192,113 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                       );
 
                 final isShortScreen = MediaQuery.sizeOf(context).height < 500;
+                final isMobileCompact = MediaQuery.sizeOf(context).width < 600;
                 return Column(
                   children: [
-                    if (!isShortScreen &&
-                        (_viewMode != _DayViewMode.canvas ||
-                            MediaQuery.sizeOf(context).width < 840))
-                      _DayToolsBar(
-                        stats: missionStats,
-                        planningSuggestions: planningSuggestions,
-                        miniInsights: miniInsights,
-                        selectedDay: normalizedDate,
-                        isMissionMode: _isMissionMode,
-                        isFocusRunning: _focusStartedAt != null,
-                        focusElapsed: _focusElapsed,
-                        focusRemaining: _focusRemaining,
-                        inboxCount: inboxNodes.length,
-                        onShowStatus: () => _showDayStatusSheet(missionStats),
-                        onShowPlan: () =>
-                            _showDayPlanSheet(planningSuggestions),
-                        onShowPulse: () => _showDayPulseSheet(
-                          insights: miniInsights,
-                          selectedDay: normalizedDate,
-                        ),
-                        onToggleMissionMode: missionNodes.isEmpty
-                            ? null
-                            : () => setState(
-                                () => _isMissionMode = !_isMissionMode,
-                              ),
-                        onStopFocus:
-                            _focusStartedAt == null || missionNodes.isEmpty
-                            ? null
-                            : () => _stopFocusSession(
-                                missionNodes.firstWhere(
-                                  (node) => node.id == _focusNodeId,
-                                  orElse: () => missionNodes.first,
-                                ),
-                              ),
-                        onInboxPressed: inboxNodes.isEmpty
-                            ? null
-                            : () => _showInboxSheet(
-                                context,
-                                inboxNodes,
-                                normalizedDate,
-                              ),
-                        onQuickCapture: _showQuickCaptureSheet,
-                      ),
-                    if (!isShortScreen)
-                      DailyCockpitPanel(
-                        day: normalizedDate,
-                        nodes: value,
-                        onRescheduleRequested: (overloadedTasks) async {
-                          final balancePlan = buildWorkloadBalancePlan(
-                            candidateDays: List.generate(
-                              7,
-                              (i) => DateTime.now().add(Duration(days: i)),
-                            ),
-                            nodes: value,
-                          );
-                          final mutation = ref.read(
-                            mindmapMutationControllerProvider,
-                          );
-                          for (final move in balancePlan.moves) {
-                            if (move.fromDay.isSameDay(normalizedDate)) {
-                              await mutation.rescheduleNode(
-                                move.node,
-                                day: move.toDay,
-                              );
-                            }
-                          }
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Berhasil memindahkan ${balancePlan.moves.length} task!',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    if (_viewMode == _DayViewMode.canvas &&
-                        MediaQuery.sizeOf(context).width < 840)
-                      _MindmapMobileToolbar(
+                    if (isMobileCompact)
+                      _MobileCompactHeader(
+                        key: const Key('mobile-compact-header'),
                         selectedNode: selectedNode,
+                        viewMode: _viewMode,
+                        onViewModeChanged: (mode) => setState(() => _viewMode = mode),
+                        onQuickCapture: _showQuickCaptureSheet,
                         onTools: () => _showMobileToolsSheet(
                           selectedNode,
                           normalizedDate,
                           ref,
                           canvasNodes,
                         ),
-                      ),
+                      )
+                    else ...[
+                      if (!isShortScreen &&
+                          (_viewMode != _DayViewMode.canvas ||
+                              MediaQuery.sizeOf(context).width < 840))
+                        _DayToolsBar(
+                          stats: missionStats,
+                          planningSuggestions: planningSuggestions,
+                          miniInsights: miniInsights,
+                          selectedDay: normalizedDate,
+                          isMissionMode: _isMissionMode,
+                          isFocusRunning: _focusStartedAt != null,
+                          focusElapsed: _focusElapsed,
+                          focusRemaining: _focusRemaining,
+                          inboxCount: inboxNodes.length,
+                          onShowStatus: () => _showDayStatusSheet(missionStats),
+                          onShowPlan: () =>
+                              _showDayPlanSheet(planningSuggestions),
+                          onShowPulse: () => _showDayPulseSheet(
+                            insights: miniInsights,
+                            selectedDay: normalizedDate,
+                          ),
+                          onToggleMissionMode: missionNodes.isEmpty
+                              ? null
+                              : () => setState(
+                                  () => _isMissionMode = !_isMissionMode,
+                                ),
+                          onStopFocus:
+                              _focusStartedAt == null || missionNodes.isEmpty
+                              ? null
+                              : () => _stopFocusSession(
+                                  missionNodes.firstWhere(
+                                    (node) => node.id == _focusNodeId,
+                                    orElse: () => missionNodes.first,
+                                  ),
+                                ),
+                          onInboxPressed: inboxNodes.isEmpty
+                              ? null
+                              : () => _showInboxSheet(
+                                  context,
+                                  inboxNodes,
+                                  normalizedDate,
+                                ),
+                          onQuickCapture: _showQuickCaptureSheet,
+                        ),
+                      if (!isShortScreen)
+                        DailyCockpitPanel(
+                          day: normalizedDate,
+                          nodes: value,
+                          onRescheduleRequested: (overloadedTasks) async {
+                            final balancePlan = buildWorkloadBalancePlan(
+                              candidateDays: List.generate(
+                                7,
+                                (i) => DateTime.now().add(Duration(days: i)),
+                              ),
+                              nodes: value,
+                            );
+                            final mutation = ref.read(
+                              mindmapMutationControllerProvider,
+                            );
+                            for (final move in balancePlan.moves) {
+                              if (move.fromDay.isSameDay(normalizedDate)) {
+                                await mutation.rescheduleNode(
+                                  move.node,
+                                  day: move.toDay,
+                                );
+                              }
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Berhasil memindahkan ${balancePlan.moves.length} task!',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      if (_viewMode == _DayViewMode.canvas &&
+                          MediaQuery.sizeOf(context).width < 840)
+                        _MindmapMobileToolbar(
+                          selectedNode: selectedNode,
+                          onTools: () => _showMobileToolsSheet(
+                            selectedNode,
+                            normalizedDate,
+                            ref,
+                            canvasNodes,
+                          ),
+                        ),
+                    ],
                     Expanded(
                       child: Row(
                         children: [
@@ -7255,81 +7222,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     });
   }
 
-  List<_SelectedNodeAction> _selectedNodeActions(MindmapNode node) {
-    return [
-      if (!node.isDone)
-        _SelectedNodeAction(
-          icon: Icons.check_circle_outline,
-          label: 'Mark done',
-          onPressed: () => unawaited(_markSelectedNodeDone(node)),
-        ),
-      if (node.type != NodeType.task)
-        _SelectedNodeAction(
-          icon: Icons.check_box_outlined,
-          label: 'Convert to task',
-          onPressed: () => unawaited(_convertSelectedNodeToTask(node)),
-        ),
-      _SelectedNodeAction(
-        icon: Icons.event_available_outlined,
-        label: 'Schedule',
-        onPressed: () => unawaited(_scheduleSelectedNode(node)),
-      ),
-      if (node.checklist.isEmpty)
-        _SelectedNodeAction(
-          icon: Icons.playlist_add_check_outlined,
-          label: 'Split checklist',
-          onPressed: () => unawaited(_splitSelectedNodeIntoChecklist(node)),
-        ),
-      _SelectedNodeAction(
-        icon: Icons.add_task_outlined,
-        label: 'Follow-up',
-        onPressed: () => unawaited(_createSelectedNodeFollowUp(node)),
-      ),
-      _SelectedNodeAction(
-        icon: Icons.hub_outlined,
-        label: 'Link related',
-        onPressed: () => unawaited(_showNodeLinkPicker(node)),
-      ),
-      _SelectedNodeAction(
-        icon: Icons.next_plan_outlined,
-        label: 'Tomorrow',
-        onPressed: () => unawaited(_moveSelectedNodeToTomorrow(node)),
-      ),
-      _SelectedNodeAction(
-        icon: Icons.rate_review_outlined,
-        label: 'Review note',
-        onPressed: () => unawaited(_createSelectedNodeReviewNote(node)),
-      ),
-    ];
-  }
-
-  Future<void> _saveSelectedNodeAction(
-    MindmapNode before,
-    MindmapNode after,
-    String message, {
-    DateTime? extraDay,
-  }) async {
-    final actionPatch = InlineNodeDraftPatch.between(before, after);
-    await _withLatestNodeAfterFlush(before.id, (latest) async {
-      final updated = actionPatch.mergeInto(latest, DateTime.now());
-      _pushUndo(
-        _UndoEntry(
-          kind: _UndoKind.save,
-          nodeId: latest.id,
-          before: latest,
-          after: updated,
-        ),
-      );
-      await ref.read(mindmapRepositoryProvider).saveNode(updated);
-      invalidateMindmapState(
-        ref,
-        day: latest.day,
-        extraDay: extraDay ?? updated.day,
-      );
-      if (mounted) _showSnackBar(message);
-    });
-  }
-
   Future<bool> _withLatestNodeAfterFlush(
     String nodeId,
     Future<void> Function(MindmapNode latest) action,
@@ -7349,56 +7241,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         .flush(nodeId);
     if (!saved && mounted) _showSnackBar('Save draft before continuing');
     return saved;
-  }
-
-  Future<void> _convertSelectedNodeToTask(MindmapNode node) async {
-    await _saveSelectedNodeAction(
-      node,
-      node.copyWith(type: NodeType.task, updatedAt: DateTime.now()),
-      'Converted to task',
-    );
-  }
-
-  Future<void> _scheduleSelectedNode(MindmapNode node) async {
-    final pickedDay = await showDatePicker(
-      context: context,
-      initialDate: node.day,
-      firstDate: DateTime(node.day.year - 1),
-      lastDate: DateTime(node.day.year + 3),
-    );
-    if (pickedDay == null) return;
-    await _saveSelectedNodeAction(
-      node,
-      node.copyWith(
-        day: pickedDay.dateOnly,
-        dueDate: pickedDay.dateOnly,
-        updatedAt: DateTime.now(),
-      ),
-      'Scheduled to ${dayKey(pickedDay)}',
-      extraDay: pickedDay.dateOnly,
-    );
-  }
-
-  Future<void> _splitSelectedNodeIntoChecklist(MindmapNode node) async {
-    await _withLatestNodeAfterFlush(node.id, (latest) async {
-      final lines = latest.body
-          .split('\n')
-          .map((line) => line.replaceFirst(RegExp(r'^[-*]\s*'), '').trim())
-          .where((line) => line.isNotEmpty)
-          .take(8)
-          .toList();
-      final titles = lines.isEmpty ? [latest.title] : lines;
-      final updated = latest.copyWith(
-        checklist: [
-          for (final title in titles)
-            TaskChecklistItem(id: const Uuid().v4(), title: title),
-        ],
-        updatedAt: DateTime.now(),
-      );
-      await ref.read(mindmapRepositoryProvider).saveNode(updated);
-      invalidateMindmapState(ref, day: latest.day);
-      if (mounted) _showSnackBar('Checklist created');
-    });
   }
 
   Future<void> _createSelectedNodeFollowUp(MindmapNode node) async {
@@ -7434,187 +7276,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _moveSelectedNodeToTomorrow(MindmapNode node) async {
-    final tomorrow = node.day.add(const Duration(days: 1)).dateOnly;
-    await _saveSelectedNodeAction(
-      node,
-      node.copyWith(
-        day: tomorrow,
-        dueDate: tomorrow,
-        updatedAt: DateTime.now(),
-      ),
-      'Moved to tomorrow',
-      extraDay: tomorrow,
-    );
-  }
-
-  Future<void> _markSelectedNodeDone(MindmapNode node) async {
-    await _saveSelectedNodeAction(
-      node,
-      node.copyWith(
-        isDone: true,
-        status: NodeStatus.done,
-        progress: 1,
-        updatedAt: DateTime.now(),
-      ),
-      'Marked done',
-    );
-  }
-
-  Future<void> _createSelectedNodeReviewNote(MindmapNode node) async {
-    await _withLatestNodeAfterFlush(node.id, (latest) async {
-      final now = DateTime.now();
-      final review = MindmapNode.create(
-        id: const Uuid().v4(),
-        type: NodeType.journal,
-        title: 'Review: ${latest.title}',
-        day: latest.day,
-        body:
-            '## Review\n\n- What happened?\n- What changed?\n- Next action?\n',
-        position: CanvasPosition(
-          latest.position.dx + 260,
-          latest.position.dy + 160,
-        ),
-        tags: const ['review'],
-        relatedNodeIds: [latest.id],
-        now: now,
-      );
-      _pushUndo(
-        _UndoEntry(kind: _UndoKind.create, nodeId: review.id, after: review),
-      );
-      await ref.read(mindmapRepositoryProvider).saveNode(review);
-      invalidateMindmapState(ref, day: latest.day);
-      if (mounted) _showSnackBar('Review note created');
-    });
-  }
-
-  Future<void> _showNodeLinkPicker(MindmapNode node) async {
-    final nodes = (ref.read(nodesForDayProvider(node.day)).valueOrNull ?? [])
-        .where((candidate) => candidate.id != node.id && !candidate.isArchived)
-        .toList();
-    if (nodes.isEmpty) {
-      _showSnackBar('No nodes to link');
-      return;
-    }
-    final picked = await showModalBottomSheet<MindmapNode>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const ListTile(
-              leading: Icon(Icons.hub_outlined),
-              title: Text('Link related node'),
-            ),
-            for (final candidate in nodes.take(12))
-              ListTile(
-                leading: Icon(NodeVisuals.icon(candidate.type)),
-                title: Text(candidate.title),
-                subtitle: Text(candidate.type.label),
-                onTap: () => Navigator.of(context).pop(candidate),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (picked == null) return;
-    final related = {...node.relatedNodeIds, picked.id}.toList();
-    await _saveSelectedNodeAction(
-      node,
-      node.copyWith(relatedNodeIds: related, updatedAt: DateTime.now()),
-      'Linked related node',
-    );
-  }
-
-  Future<void> _showCustomFocusDialog(MindmapNode node) async {
-    final controller = TextEditingController(text: '30');
-    final minutes = await showDialog<int>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Custom focus'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Minutes',
-              hintText: '30',
-            ),
-            onSubmitted: (_) {
-              final value = int.tryParse(controller.text.trim());
-              Navigator.of(context).pop(value);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final value = int.tryParse(controller.text.trim());
-                Navigator.of(context).pop(value);
-              },
-              child: const Text('Start'),
-            ),
-          ],
-        );
-      },
-    );
-    _disposeTextControllerAfterRouteFrame(controller);
-    if (minutes == null || minutes <= 0) return;
-    _startFocusSession(node, targetMinutes: minutes);
-  }
-
-  void _startFocusSession(MindmapNode node, {int? targetMinutes}) {
-    _focusTicker?.cancel();
-    setState(() {
-      _focusStartedAt = DateTime.now();
-      _focusNodeId = node.id;
-      _focusTargetMinutes = targetMinutes;
-      _focusTargetNotified = false;
-    });
-    _focusTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      final remaining = _focusRemaining;
-      if (remaining == Duration.zero && !_focusTargetNotified) {
-        _focusTargetNotified = true;
-        _showSnackBar('Focus block complete');
-      }
-      setState(() {});
-    });
-  }
-
-  Future<void> _toggleTodayMission(MindmapNode node) async {
-    final willAdd = !isTodayMission(node);
-    if (willAdd) {
-      final dayNodes = ref.read(nodesForDayProvider(node.day)).valueOrNull;
-      if (dayNodes != null && !canAddTodayMission(dayNodes, node)) {
-        if (mounted) _showSnackBar('Mission limit reached (3 nodes)');
-        return;
-      }
-    }
-    final repository = ref.read(mindmapRepositoryProvider);
-    final updated = markTodayMission(node, isMission: willAdd);
-    _pushUndo(
-      _UndoEntry(
-        kind: _UndoKind.save,
-        nodeId: node.id,
-        before: node,
-        after: updated,
-      ),
-    );
-    await repository.saveNode(updated);
-    invalidateMindmapState(ref, day: node.day);
-    if (mounted) {
-      _showSnackBar(
-        isTodayMission(updated) ? 'Added to mission' : 'Removed from mission',
-      );
-    }
-  }
-
   Future<void> _stopFocusSession(MindmapNode node) async {
     final startedAt = _focusStartedAt;
     if (startedAt == null) return;
@@ -7629,7 +7290,6 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
       _focusStartedAt = null;
       _focusNodeId = null;
       _focusTargetMinutes = null;
-      _focusTargetNotified = false;
     });
     if (updated == node) return;
     final repository = ref.read(mindmapRepositoryProvider);
@@ -9015,7 +8675,6 @@ class _DayNavButton extends StatelessWidget {
 
 class _DayToolsBar extends StatelessWidget {
   const _DayToolsBar({
-    this.embedded = false,
     required this.stats,
     required this.planningSuggestions,
     required this.miniInsights,
@@ -9034,7 +8693,6 @@ class _DayToolsBar extends StatelessWidget {
     required this.onQuickCapture,
   });
 
-  final bool embedded;
   final _DailyMissionStats stats;
   final List<_DailyPlanningSuggestion> planningSuggestions;
   final List<DayMiniInsight> miniInsights;
@@ -9063,10 +8721,8 @@ class _DayToolsBar extends StatelessWidget {
         .firstOrNull
         ?.score;
     return Container(
-      height: embedded ? 40 : 56,
-      margin: embedded
-          ? EdgeInsets.zero
-          : const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      height: MediaQuery.sizeOf(context).width < 600 ? 42 : 50,
+      margin: EdgeInsets.fromLTRB(MediaQuery.sizeOf(context).width < 600 ? 6 : 12, MediaQuery.sizeOf(context).width < 600 ? 4 : 8, MediaQuery.sizeOf(context).width < 600 ? 6 : 12, 0),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface.withValues(alpha: 0.78),
         shape: RoundedRectangleBorder(
@@ -9080,9 +8736,9 @@ class _DayToolsBar extends StatelessWidget {
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(
-          horizontal: embedded ? 8 : 10,
-          vertical: embedded ? 4 : 8,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 8,
         ),
         child: Row(
           children: [
@@ -9198,197 +8854,6 @@ String _formatFocusDuration(Duration duration) {
   final hours = duration.inHours;
   if (hours <= 0) return '$minutes:$seconds';
   return '$hours:$minutes:$seconds';
-}
-
-final class _SelectedNodeAction {
-  const _SelectedNodeAction({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-}
-
-class _SelectedNodeMissionActions extends StatelessWidget {
-  const _SelectedNodeMissionActions({
-    required this.node,
-    required this.actions,
-    required this.isMission,
-    required this.isFocusRunning,
-    required this.isCollapsed,
-    required this.focusElapsed,
-    required this.focusRemaining,
-    required this.onToggleCollapsed,
-    required this.onToggleMission,
-    required this.onStartFocus,
-    required this.onStartPomodoro,
-    required this.onStartCustomFocus,
-    required this.onStopFocus,
-  });
-
-  final MindmapNode? node;
-  final List<_SelectedNodeAction> actions;
-  final bool isMission;
-  final bool isFocusRunning;
-  final bool isCollapsed;
-  final Duration focusElapsed;
-  final Duration? focusRemaining;
-  final VoidCallback onToggleCollapsed;
-  final VoidCallback onToggleMission;
-  final VoidCallback onStartFocus;
-  final ValueChanged<int> onStartPomodoro;
-  final VoidCallback onStartCustomFocus;
-  final VoidCallback onStopFocus;
-
-  @override
-  Widget build(BuildContext context) {
-    final currentNode = node;
-    if (currentNode == null) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    final minutes = totalFocusMinutes(currentNode);
-    final nextAction = nextFocusAction(currentNode);
-    final activeToolCount = actions.length + (isFocusRunning ? 3 : 6);
-    if (isCollapsed) {
-      return Material(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(
-          alpha: 0.38,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-          child: Row(
-            children: [
-              Icon(
-                Icons.tune_rounded,
-                size: 18,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '$activeToolCount tools hidden',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge,
-                ),
-              ),
-              TextButton.icon(
-                onPressed: onToggleCollapsed,
-                icon: const Icon(Icons.expand_more_rounded, size: 18),
-                label: const Text('Show'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.construction_rounded,
-                  size: 16,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text('Node tools', style: theme.textTheme.labelLarge),
-                ),
-                IconButton.outlined(
-                  tooltip: 'Hide node tools',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onToggleCollapsed,
-                  icon: const Icon(Icons.expand_less_rounded, size: 18),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                FilterChip(
-                  avatar: Icon(
-                    isMission ? Icons.flag : Icons.outlined_flag,
-                    size: 16,
-                  ),
-                  label: Text(isMission ? 'Mission' : 'Add mission'),
-                  selected: isMission,
-                  onSelected: (_) => onToggleMission(),
-                ),
-                Chip(
-                  avatar: const Icon(Icons.next_plan_outlined, size: 16),
-                  label: Text(
-                    nextAction,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                ),
-                ActionChip(
-                  avatar: Icon(
-                    isFocusRunning
-                        ? Icons.timer_off_outlined
-                        : Icons.timer_outlined,
-                    size: 16,
-                  ),
-                  label: Text(isFocusRunning ? 'Stop focus' : 'Start focus'),
-                  onPressed: isFocusRunning ? onStopFocus : onStartFocus,
-                ),
-                if (!isFocusRunning) ...[
-                  ActionChip(
-                    avatar: const Icon(Icons.av_timer_outlined, size: 16),
-                    label: const Text('25/5'),
-                    onPressed: () => onStartPomodoro(25),
-                  ),
-                  ActionChip(
-                    avatar: const Icon(Icons.av_timer_outlined, size: 16),
-                    label: const Text('50/10'),
-                    onPressed: () => onStartPomodoro(50),
-                  ),
-                  ActionChip(
-                    avatar: const Icon(Icons.tune_outlined, size: 16),
-                    label: const Text('Custom'),
-                    onPressed: onStartCustomFocus,
-                  ),
-                ],
-                Chip(
-                  avatar: const Icon(Icons.timelapse_outlined, size: 16),
-                  label: Text('${minutes}m focus'),
-                  visualDensity: VisualDensity.compact,
-                ),
-                for (final action in actions)
-                  ActionChip(
-                    avatar: Icon(action.icon, size: 16),
-                    label: Text(action.label),
-                    onPressed: action.onPressed,
-                  ),
-                if (isFocusRunning)
-                  Chip(
-                    avatar: const Icon(Icons.timer_outlined, size: 16),
-                    label: Text(
-                      focusRemaining == null
-                          ? _formatFocusDuration(focusElapsed)
-                          : '${_formatFocusDuration(focusRemaining!)} left',
-                    ),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _DayEmptyStateCockpit extends StatelessWidget {
@@ -11877,491 +11342,6 @@ final class _UndoEntry {
   final CanvasBoard? canvasBoardAfter;
 }
 
-class _MindmapDocumentCanvasToolbar extends StatelessWidget {
-  const _MindmapDocumentCanvasToolbar({
-    required this.selectedNode,
-    required this.homeTools,
-    required this.selectedTab,
-    required this.selectedNodePreset,
-    required this.selectedNodeSaveStatus,
-    required this.isSelectedNodeEditing,
-    required this.canExportSelectedMedia,
-    required this.canOpenSelectedMedia,
-    required this.onTabChanged,
-    required this.isExplorerVisible,
-    required this.canUndo,
-    required this.canRedo,
-    required this.onToggleExplorer,
-    required this.onAddNode,
-    required this.onCreateType,
-    required this.onCanvasAction,
-    required this.isGridVisible,
-    required this.isSnapEnabled,
-    required this.isMinimapVisible,
-    required this.areCompletedVisible,
-    required this.onUndo,
-    required this.onRedo,
-    required this.onFitCanvas,
-    required this.onToggleGrid,
-    required this.onToggleSnap,
-    required this.onToggleMinimap,
-    required this.onResetZoom,
-    required this.onNodeTools,
-    required this.onEditNode,
-    required this.onDoneEditing,
-    required this.onPresetChanged,
-    required this.onReplaceMedia,
-    required this.onExportMedia,
-    required this.onOpenMedia,
-    required this.onClearSelection,
-  });
-
-  final MindmapNode? selectedNode;
-  final Widget homeTools;
-  final _MindmapRibbonTab selectedTab;
-  final NodeSizePreset? selectedNodePreset;
-  final NodeSaveStatus selectedNodeSaveStatus;
-  final bool isSelectedNodeEditing;
-  final bool canExportSelectedMedia;
-  final bool canOpenSelectedMedia;
-  final ValueChanged<_MindmapRibbonTab> onTabChanged;
-  final bool isExplorerVisible;
-  final bool canUndo;
-  final bool canRedo;
-  final VoidCallback onToggleExplorer;
-  final ValueChanged<Offset> onAddNode;
-  final ValueChanged<NodeType> onCreateType;
-  final ValueChanged<CanvasContextAction> onCanvasAction;
-  final bool isGridVisible;
-  final bool isSnapEnabled;
-  final bool isMinimapVisible;
-  final bool areCompletedVisible;
-  final VoidCallback onUndo;
-  final VoidCallback onRedo;
-  final VoidCallback onFitCanvas;
-  final VoidCallback onToggleGrid;
-  final VoidCallback onToggleSnap;
-  final VoidCallback onToggleMinimap;
-  final VoidCallback onResetZoom;
-  final VoidCallback? onNodeTools;
-  final VoidCallback? onEditNode;
-  final VoidCallback? onDoneEditing;
-  final ValueChanged<NodeSizePreset>? onPresetChanged;
-  final VoidCallback? onReplaceMedia;
-  final VoidCallback? onExportMedia;
-  final VoidCallback? onOpenMedia;
-  final VoidCallback? onClearSelection;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.surface,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: colors.outlineVariant)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SegmentedButton<_MindmapRibbonTab>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                    value: _MindmapRibbonTab.home,
-                    label: Text('Home', key: ValueKey('ribbon-tab-home')),
-                  ),
-                  ButtonSegment(
-                    value: _MindmapRibbonTab.insert,
-                    label: Text('Insert', key: ValueKey('ribbon-tab-insert')),
-                  ),
-                  ButtonSegment(
-                    value: _MindmapRibbonTab.node,
-                    label: Text('Node', key: ValueKey('ribbon-tab-node')),
-                  ),
-                  ButtonSegment(
-                    value: _MindmapRibbonTab.canvas,
-                    label: Text('Canvas', key: ValueKey('ribbon-tab-canvas')),
-                  ),
-                  ButtonSegment(
-                    value: _MindmapRibbonTab.view,
-                    label: Text('View', key: ValueKey('ribbon-tab-view')),
-                  ),
-                ],
-                selected: {selectedTab},
-                onSelectionChanged: (selection) =>
-                    onTabChanged(selection.first),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Divider(height: 1, color: colors.outlineVariant),
-            const SizedBox(height: 8),
-            SizedBox(
-              key: const ValueKey('ribbon-active-tools'),
-              height: 48,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Row(children: _toolsForSelectedTab(context)),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _toolsForSelectedTab(BuildContext context) {
-    final node = selectedNode;
-    return switch (selectedTab) {
-      _MindmapRibbonTab.home => [
-        SizedBox(height: 40, child: homeTools),
-        const _ToolbarSeparator(),
-        IconButton(
-          tooltip: 'Undo (Ctrl+Z)',
-          onPressed: canUndo ? onUndo : null,
-          icon: const Icon(Icons.undo),
-        ),
-        IconButton(
-          tooltip: 'Redo (Ctrl+Shift+Z)',
-          onPressed: canRedo ? onRedo : null,
-          icon: const Icon(Icons.redo),
-        ),
-      ],
-      _MindmapRibbonTab.insert => [
-        Builder(
-          builder: (buttonContext) => FilledButton.tonalIcon(
-            key: const ValueKey('ribbon-all-types'),
-            onPressed: () {
-              final renderObject = buttonContext.findRenderObject();
-              if (renderObject is! RenderBox || !renderObject.hasSize) return;
-              final topLeft = renderObject.localToGlobal(Offset.zero);
-              onAddNode(
-                Offset(topLeft.dx, topLeft.dy + renderObject.size.height + 8),
-              );
-            },
-            icon: const Icon(Icons.add_box_outlined, size: 18),
-            label: const Text('All types'),
-          ),
-        ),
-        const SizedBox(width: 6),
-        for (final type in const [
-          NodeType.task,
-          NodeType.note,
-          NodeType.plan,
-          NodeType.goal,
-          NodeType.habit,
-          NodeType.kanban,
-        ])
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: ActionChip(
-              avatar: Icon(NodeVisuals.icon(type), size: 16),
-              label: Text(type.label),
-              onPressed: () => onCreateType(type),
-            ),
-          ),
-      ],
-      _MindmapRibbonTab.node =>
-        node == null
-            ? [
-                const Icon(Icons.touch_app_outlined),
-                const SizedBox(width: 8),
-                const Text('Select a node to show node tools'),
-              ]
-            : [
-                Chip(
-                  avatar: Icon(NodeVisuals.icon(node.type), size: 16),
-                  label: Text(node.type.label),
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 6),
-                SegmentedButton<NodeSizePreset>(
-                  key: const ValueKey('ribbon-node-size-presets'),
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(
-                      value: NodeSizePreset.auto,
-                      label: Text('Auto'),
-                    ),
-                    ButtonSegment(
-                      value: NodeSizePreset.compact,
-                      label: Text('Compact'),
-                    ),
-                    ButtonSegment(
-                      value: NodeSizePreset.standard,
-                      label: Text('Standard'),
-                    ),
-                    ButtonSegment(
-                      value: NodeSizePreset.large,
-                      label: Text('Large'),
-                    ),
-                    ButtonSegment(
-                      value: NodeSizePreset.wide,
-                      label: Text('Wide'),
-                    ),
-                  ],
-                  selected: {selectedNodePreset ?? NodeSizePreset.auto},
-                  onSelectionChanged: (selection) =>
-                      onPresetChanged?.call(selection.first),
-                ),
-                const SizedBox(width: 6),
-                Semantics(
-                  key: const ValueKey('ribbon-node-save-status'),
-                  label: 'Inline save status',
-                  value: selectedNodeSaveStatus.name,
-                  liveRegion: true,
-                  child: Chip(
-                    avatar: Icon(
-                      _saveStatusIcon(selectedNodeSaveStatus),
-                      size: 16,
-                    ),
-                    label: Text(_saveStatusLabel(selectedNodeSaveStatus)),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                FilledButton.tonalIcon(
-                  key: const ValueKey('ribbon-node-edit-toggle'),
-                  onPressed: isSelectedNodeEditing ? onDoneEditing : onEditNode,
-                  icon: Icon(
-                    isSelectedNodeEditing
-                        ? Icons.check_rounded
-                        : Icons.edit_outlined,
-                    size: 18,
-                  ),
-                  label: Text(isSelectedNodeEditing ? 'Done' : 'Edit'),
-                ),
-                const SizedBox(width: 6),
-                OutlinedButton.icon(
-                  key: const ValueKey('ribbon-node-actions'),
-                  onPressed: onNodeTools,
-                  icon: const Icon(Icons.construction_outlined, size: 18),
-                  label: const Text('Actions'),
-                ),
-                if (node.type == NodeType.image ||
-                    node.type == NodeType.video) ...[
-                  const SizedBox(width: 6),
-                  OutlinedButton.icon(
-                    key: const ValueKey('ribbon-media-replace'),
-                    onPressed: onReplaceMedia,
-                    icon: const Icon(Icons.swap_horiz, size: 18),
-                    label: const Text('Replace'),
-                  ),
-                  const SizedBox(width: 6),
-                  Tooltip(
-                    message: canExportSelectedMedia
-                        ? 'Export local attachment'
-                        : 'Export requires a local attachment',
-                    child: Semantics(
-                      button: true,
-                      enabled: canExportSelectedMedia,
-                      child: OutlinedButton.icon(
-                        key: const ValueKey('ribbon-media-export'),
-                        onPressed: canExportSelectedMedia
-                            ? onExportMedia
-                            : null,
-                        icon: const Icon(Icons.download_outlined, size: 18),
-                        label: const Text('Export'),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Tooltip(
-                    message: canOpenSelectedMedia
-                        ? 'Open safe external URL'
-                        : 'Open requires a valid http or https URL',
-                    child: Semantics(
-                      button: true,
-                      enabled: canOpenSelectedMedia,
-                      child: OutlinedButton.icon(
-                        key: const ValueKey('ribbon-media-open'),
-                        onPressed: canOpenSelectedMedia ? onOpenMedia : null,
-                        icon: const Icon(Icons.open_in_new, size: 18),
-                        label: const Text('Open'),
-                      ),
-                    ),
-                  ),
-                ],
-                IconButton(
-                  key: const ValueKey('ribbon-clear-node-selection'),
-                  tooltip: 'Clear selection',
-                  onPressed: onClearSelection,
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-      _MindmapRibbonTab.canvas => [
-        _RibbonAction(
-          icon: Icons.fit_screen_outlined,
-          label: 'Fit',
-          onPressed: onFitCanvas,
-        ),
-        FilterChip(
-          selected: isGridVisible,
-          avatar: const Icon(Icons.grid_on_outlined, size: 16),
-          label: const Text('Grid'),
-          onSelected: (_) => onToggleGrid(),
-        ),
-        const SizedBox(width: 6),
-        FilterChip(
-          selected: isSnapEnabled,
-          avatar: const Icon(Icons.grid_4x4, size: 16),
-          label: const Text('Snap'),
-          onSelected: (_) => onToggleSnap(),
-        ),
-        const SizedBox(width: 6),
-        _RibbonAction(
-          icon: Icons.center_focus_strong,
-          label: '100%',
-          onPressed: onResetZoom,
-        ),
-        _RibbonAction(
-          icon: Icons.auto_fix_high,
-          label: 'Tidy',
-          onPressed: () => onCanvasAction(CanvasContextAction.tidyLayout),
-        ),
-        _CanvasMoreMenu(onSelected: onCanvasAction),
-      ],
-      _MindmapRibbonTab.view => [
-        _ToolbarTextButton(
-          icon: isExplorerVisible
-              ? Icons.view_sidebar_outlined
-              : Icons.menu_open_outlined,
-          label: 'Explorer',
-          tooltip: 'Show or hide Life Explorer (Ctrl+B)',
-          selected: isExplorerVisible,
-          onPressed: onToggleExplorer,
-        ),
-        const SizedBox(width: 6),
-        FilterChip(
-          selected: isMinimapVisible,
-          avatar: const Icon(Icons.map_outlined, size: 16),
-          label: const Text('Minimap'),
-          onSelected: (_) => onToggleMinimap(),
-        ),
-        const SizedBox(width: 6),
-        FilterChip(
-          selected: areCompletedVisible,
-          avatar: const Icon(Icons.task_alt, size: 16),
-          label: const Text('Completed'),
-          onSelected: (_) =>
-              onCanvasAction(CanvasContextAction.toggleCompleted),
-        ),
-        const SizedBox(width: 6),
-        _RibbonAction(
-          icon: Icons.terminal,
-          label: 'Commands',
-          onPressed: () => onCanvasAction(CanvasContextAction.commandPalette),
-        ),
-      ],
-    };
-  }
-
-  IconData _saveStatusIcon(NodeSaveStatus status) => switch (status) {
-    NodeSaveStatus.idle => Icons.circle_outlined,
-    NodeSaveStatus.dirty => Icons.edit_note_outlined,
-    NodeSaveStatus.saving => Icons.sync,
-    NodeSaveStatus.saved => Icons.cloud_done_outlined,
-    NodeSaveStatus.error => Icons.error_outline,
-  };
-
-  String _saveStatusLabel(NodeSaveStatus status) => switch (status) {
-    NodeSaveStatus.idle => 'Idle',
-    NodeSaveStatus.dirty => 'Unsaved',
-    NodeSaveStatus.saving => 'Saving',
-    NodeSaveStatus.saved => 'Saved',
-    NodeSaveStatus.error => 'Save error',
-  };
-}
-
-class _CanvasMoreMenu extends StatelessWidget {
-  const _CanvasMoreMenu({required this.onSelected});
-
-  final ValueChanged<CanvasContextAction> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<CanvasContextAction>(
-      tooltip: 'More canvas tools',
-      onSelected: onSelected,
-      itemBuilder: (context) => const [
-        PopupMenuItem(
-          value: CanvasContextAction.radialLayout,
-          child: Text('Mindmap layout'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.typeLayout,
-          child: Text('Group by type'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.timelineLayout,
-          child: Text('Timeline layout'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.groupSelection,
-          child: Text('Group selection'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.ungroupSelection,
-          child: Text('Ungroup selection'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.cycleBackground,
-          child: Text('Change background'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.importClipboard,
-          child: Text('Import clipboard'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.exportJson,
-          child: Text('Copy canvas JSON'),
-        ),
-        PopupMenuItem(
-          value: CanvasContextAction.exportPng,
-          child: Text('Export PNG'),
-        ),
-      ],
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 10),
-        child: Row(
-          children: [Icon(Icons.more_horiz), SizedBox(width: 6), Text('More')],
-        ),
-      ),
-    );
-  }
-}
-
-class _RibbonAction extends StatelessWidget {
-  const _RibbonAction({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: OutlinedButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        label: Text(label),
-      ),
-    );
-  }
-}
-
 class _DayQuickCreateFab extends StatefulWidget {
   const _DayQuickCreateFab({required this.onSelectType, required this.onMore});
 
@@ -12476,54 +11456,69 @@ class _DayQuickCreateFabState extends State<_DayQuickCreateFab>
   );
 }
 
-class _ToolbarTextButton extends StatelessWidget {
-  const _ToolbarTextButton({
-    required this.icon,
-    required this.label,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
+class _MobileCompactHeader extends StatelessWidget {
+  const _MobileCompactHeader({
+    required this.selectedNode,
+    required this.viewMode,
+    required this.onViewModeChanged,
+    required this.onQuickCapture,
+    required this.onTools,
+    super.key,
   });
 
-  final IconData icon;
-  final String label;
-  final String tooltip;
-  final bool selected;
-  final VoidCallback onPressed;
+  final MindmapNode? selectedNode;
+  final _DayViewMode viewMode;
+  final ValueChanged<_DayViewMode> onViewModeChanged;
+  final VoidCallback onQuickCapture;
+  final VoidCallback onTools;
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: TextButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        label: Text(label),
-        style: TextButton.styleFrom(
-          backgroundColor: selected
-              ? Theme.of(context).colorScheme.secondaryContainer
-              : null,
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      elevation: 1,
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                selectedNode?.title.trim().isNotEmpty == true
+                    ? selectedNode!.title
+                    : 'Mindmap',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.bolt_outlined, size: 20),
+              tooltip: 'Quick capture',
+              onPressed: onQuickCapture,
+            ),
+            IconButton(
+              key: const Key('mobile-tools-button'),
+              icon: const Icon(Icons.tune, size: 20),
+              tooltip: 'Tools',
+              onPressed: onTools,
+            ),
+          ],
         ),
       ),
     );
   }
 }
-
-class _ToolbarSeparator extends StatelessWidget {
-  const _ToolbarSeparator();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 28,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      color: Theme.of(context).colorScheme.outlineVariant,
-    );
-  }
-}
-
-enum _MindmapRibbonTab { home, insert, node, canvas, view }
 
 class _MindmapMobileToolbar extends StatelessWidget {
   const _MindmapMobileToolbar({
