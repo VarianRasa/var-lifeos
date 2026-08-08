@@ -7660,7 +7660,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                 return Positioned(
                                   key: const ValueKey('mindmap-minimap-anchor'),
                                   bottom: 16,
-                                  right: 16,
+                                  right: MediaQuery.sizeOf(context).width < 840 ? 64 : 16,
                                   child: AnimatedSize(
                                     alignment: Alignment.bottomRight,
                                     duration: const Duration(milliseconds: 180),
