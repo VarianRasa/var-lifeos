@@ -1347,26 +1347,36 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   }
 
   Future<void> _showDayPreviewSheet(DateTime day) async {
+    final today = ref.read(currentDateProvider);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: SizedBox(
-              height: MediaQuery.sizeOf(context).height * 0.72,
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
               child: _DayPreviewPanel(
                 day: day,
-                today: ref.read(currentDateProvider),
-                onClose: () => Navigator.of(context).pop(),
+                today: today,
+                onClose: () => Navigator.of(sheetContext).pop(),
                 onAddNode: () => _addNodeForDay(day),
                 onApplyTemplate: () => _showTemplatePicker(day),
                 onClearSearch: _clearCalendarSearch,
-                onOpenDay: () => goToDay(context, day),
-                onOpenNode: (nodeId) =>
-                    goToDay(context, day, highlightNodeId: nodeId),
+                onOpenDay: () {
+                  Navigator.of(sheetContext).pop();
+                  if (mounted) {
+                    goToDay(context, day);
+                  }
+                },
+                onOpenNode: (nodeId) {
+                  Navigator.of(sheetContext).pop();
+                  if (mounted) {
+                    goToDay(context, day, highlightNodeId: nodeId);
+                  }
+                },
               ),
             ),
           ),
