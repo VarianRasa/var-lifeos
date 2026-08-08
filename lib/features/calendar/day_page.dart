@@ -3732,8 +3732,9 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     WidgetRef ref,
     List<MindmapNode> canvasNodes,
   ) async {
+    final parentContext = context;
     await showModalBottomSheet<void>(
-      context: context,
+      context: parentContext,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetContext) => DefaultTabController(
@@ -3770,11 +3771,13 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                           title: const Text('New node'),
                           onTap: () {
                             Navigator.of(sheetContext).pop();
-                            _showCanvasProductivityNodeMenu(
-                              ref,
-                              normalizedDate,
-                              canvasNodes,
-                            );
+                            if (mounted) {
+                              _showCanvasProductivityNodeMenu(
+                                ref,
+                                normalizedDate,
+                                canvasNodes,
+                              );
+                            }
                           },
                         ),
                         ListTile(

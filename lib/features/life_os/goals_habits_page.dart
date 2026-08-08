@@ -63,22 +63,26 @@ class _GoalsHabitsPageState extends ConsumerState<GoalsHabitsPage>
                       color: theme.colorScheme.primary,
                     ),
                     const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Goals & Habits Hub',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Goals & Habits Hub',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Track long-term objectives, milestones, and habit consistency.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                          Text(
+                            'Track long-term objectives, milestones, and habit consistency.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
