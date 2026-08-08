@@ -3742,6 +3742,15 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
           heightFactor: 0.82,
           child: Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Day Tools & Status',
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
               const TabBar(
                 isScrollable: true,
                 tabs: [
@@ -4202,18 +4211,18 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                         viewMode: _viewMode,
                         onViewModeChanged: (mode) => setState(() => _viewMode = mode),
                         onQuickCapture: _showQuickCaptureSheet,
+                        boards: allDayBoards,
+                        activeBoardId: activeCanvasBoard?.id,
+                        onSelectBoard: (id) => setState(() => _activeBoardId = id),
                         onTools: () => _showMobileToolsSheet(
                           selectedNode,
                           normalizedDate,
                           ref,
                           canvasNodes,
                         ),
-                      )
-                    else ...[
-                      if (!isShortScreen &&
-                          (_viewMode != _DayViewMode.canvas ||
-                              MediaQuery.sizeOf(context).width < 840))
-                        _DayToolsBar(
+                      ),
+                    if (!isShortScreen && !isMobileCompact)
+                      _DayToolsBar(
                           stats: missionStats,
                           planningSuggestions: planningSuggestions,
                           miniInsights: miniInsights,
@@ -4253,8 +4262,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                 ),
                           onQuickCapture: _showQuickCaptureSheet,
                         ),
-                      if (!isShortScreen)
-                        DailyCockpitPanel(
+                    if (!isShortScreen && !isMobileCompact)
+                      DailyCockpitPanel(
                           day: normalizedDate,
                           nodes: value,
                           onRescheduleRequested: (overloadedTasks) async {
@@ -4287,18 +4296,18 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                             }
                           },
                         ),
-                      if (_viewMode == _DayViewMode.canvas &&
-                          MediaQuery.sizeOf(context).width < 840)
-                        _MindmapMobileToolbar(
-                          selectedNode: selectedNode,
-                          onTools: () => _showMobileToolsSheet(
-                            selectedNode,
-                            normalizedDate,
-                            ref,
-                            canvasNodes,
-                          ),
+                    if (_viewMode == _DayViewMode.canvas &&
+                        MediaQuery.sizeOf(context).width < 840 &&
+                        !isMobileCompact)
+                      _MindmapMobileToolbar(
+                        selectedNode: selectedNode,
+                        onTools: () => _showMobileToolsSheet(
+                          selectedNode,
+                          normalizedDate,
+                          ref,
+                          canvasNodes,
                         ),
-                    ],
+                      ),
                     Expanded(
                       child: Row(
                         children: [
@@ -4380,10 +4389,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                           Expanded(
                             child: Column(
                               children: [
-                                if (_viewMode == _DayViewMode.canvas &&
-                                    allDayBoards.isNotEmpty &&
-                                    _isFloatingBoardTabsVisible)
-                                  DayCanvasTabHeader(
+                                 if (_viewMode == _DayViewMode.canvas &&
+                                     allDayBoards.isNotEmpty &&
+                                     _isFloatingBoardTabsVisible &&
+                                     MediaQuery.sizeOf(context).width >= 600)
+                                   DayCanvasTabHeader(
                                     boards: allDayBoards,
                                     activeBoardId: activeCanvasBoard?.id,
                                     onSelectBoard: (String id) =>
@@ -5446,8 +5456,9 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     ),
                                               ),
                                             ),
-                                            if (_isFloatingTopBarVisible)
-                                              Positioned(
+                                             if (_isFloatingTopBarVisible &&
+                                                 MediaQuery.sizeOf(context).width >= 600)
+                                               Positioned(
                                                 top: _topBarOffset.dy,
                                                 right: _topBarOffset.dx,
                                                 child: Card(
@@ -11463,6 +11474,9 @@ class _MobileCompactHeader extends StatelessWidget {
     required this.onViewModeChanged,
     required this.onQuickCapture,
     required this.onTools,
+    this.boards = const [],
+    this.activeBoardId,
+    this.onSelectBoard,
     super.key,
   });
 
@@ -11471,10 +11485,24 @@ class _MobileCompactHeader extends StatelessWidget {
   final ValueChanged<_DayViewMode> onViewModeChanged;
   final VoidCallback onQuickCapture;
   final VoidCallback onTools;
+  final List<CanvasBoard> boards;
+  final String? activeBoardId;
+  final ValueChanged<String>? onSelectBoard;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final activeBoard = boards.firstWhere(
+      (b) => b.id == activeBoardId,
+      orElse: () => boards.firstOrNull ?? CanvasBoard(
+        id: 'default',
+        kind: CanvasBoardKind.daily,
+        title: 'Main Board',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    );
+
     return Material(
       color: theme.colorScheme.surface,
       elevation: 1,
@@ -11490,26 +11518,87 @@ class _MobileCompactHeader extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Expanded(
-              child: Text(
-                selectedNode?.title.trim().isNotEmpty == true
-                    ? selectedNode!.title
-                    : 'Mindmap',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+            if (boards.length > 1)
+              PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
+                tooltip: 'Select Board',
+                onSelected: (id) => onSelectBoard?.call(id),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      activeBoard.title.isEmpty ? 'Main Board' : activeBoard.title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 18),
+                  ],
+                ),
+                itemBuilder: (context) => [
+                  for (final board in boards)
+                    PopupMenuItem(
+                      value: board.id,
+                      child: Text(board.title.isEmpty ? 'Main Board' : board.title),
+                    ),
+                ],
+              )
+            else
+              Expanded(
+                child: Text(
+                  selectedNode?.title.trim().isNotEmpty == true
+                      ? selectedNode!.title
+                      : (activeBoard.title.isEmpty ? 'Mindmap' : activeBoard.title),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+            const Spacer(),
+            SegmentedButton<_DayViewMode>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: WidgetStateProperty.all(EdgeInsets.zero),
+              ),
+              segments: const [
+                ButtonSegment<_DayViewMode>(
+                  value: _DayViewMode.canvas,
+                  icon: Icon(Icons.schema_outlined, size: 16),
+                ),
+                ButtonSegment<_DayViewMode>(
+                  value: _DayViewMode.board,
+                  icon: Icon(Icons.dashboard_outlined, size: 16),
+                ),
+                ButtonSegment<_DayViewMode>(
+                  value: _DayViewMode.table,
+                  icon: Icon(Icons.table_chart_outlined, size: 16),
+                ),
+              ],
+              selected: {viewMode},
+              onSelectionChanged: (selected) {
+                if (selected.isNotEmpty) {
+                  onViewModeChanged(selected.first);
+                }
+              },
             ),
+            const SizedBox(width: 4),
             IconButton(
-              icon: const Icon(Icons.bolt_outlined, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.bolt_outlined, size: 18),
               tooltip: 'Quick capture',
               onPressed: onQuickCapture,
             ),
             IconButton(
               key: const Key('mobile-tools-button'),
-              icon: const Icon(Icons.tune, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.tune, size: 18),
               tooltip: 'Tools',
               onPressed: onTools,
             ),

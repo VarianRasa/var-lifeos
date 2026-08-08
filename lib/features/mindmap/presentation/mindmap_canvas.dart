@@ -60,6 +60,9 @@ import '../domain/node_ui_state_codec.dart';
 import '../domain/plan_progress.dart';
 import '../domain/project_plan.dart';
 import '../domain/task_checklist_progress.dart';
+import 'board_template_gallery_dialog.dart';
+import 'canvas_export_dialog.dart';
+import 'canvas_presentation_mode_dialog.dart';
 import 'canvas_tool_popover.dart';
 import 'collaborator_cursor_widget.dart';
 import 'node_editors/audio_recording_storage.dart';
@@ -710,6 +713,8 @@ enum CanvasContextAction {
   exportJson,
   exportPng,
   exportPdf,
+  exportDialog,
+  templateGallery,
   commandPalette,
   togglePresentation,
 }
@@ -1203,6 +1208,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
     CanvasContextAction.importClipboard,
     CanvasContextAction.exportJson,
     CanvasContextAction.exportPng,
+    CanvasContextAction.exportPdf,
+    CanvasContextAction.exportDialog,
+    CanvasContextAction.templateGallery,
     CanvasContextAction.commandPalette,
     CanvasContextAction.togglePresentation,
   ];
@@ -1299,10 +1307,82 @@ class MindmapCanvasState extends State<MindmapCanvas>
         } catch (error) {
           widget.onStatusMessage?.call('Canvas PDF export failed: $error');
         }
+      case CanvasContextAction.exportDialog:
+        await showDialog<void>(
+          context: context,
+          builder: (context) => CanvasExportDialog(
+            title: widget.board?.title ?? 'Canvas',
+            onExportPdf: () =>
+                unawaited(runContextAction(CanvasContextAction.exportPdf)),
+            onExportPng: () =>
+                unawaited(runContextAction(CanvasContextAction.exportPng)),
+          ),
+        );
+      case CanvasContextAction.templateGallery:
+        await showDialog<void>(
+          context: context,
+          builder: (context) => BoardTemplateGalleryDialog(
+            onSelectTemplate: (template) {
+              final board = widget.board;
+              final callback = widget.onCanvasObjectsCreated;
+              if (board == null || callback == null) {
+                widget.onStatusMessage?.call(
+                  'Template gallery requires an editable board.',
+                );
+                return;
+              }
+              final existingIds = board.objects
+                  .map((object) => object.id)
+                  .toSet();
+              final updated = board.addProjectTemplate(
+                template,
+                now: DateTime.now(),
+              );
+              final additions = updated.objects
+                  .where((object) => !existingIds.contains(object.id))
+                  .toList();
+              unawaited(Future<void>.sync(() => callback(additions)));
+              widget.onStatusMessage?.call('Template loaded: ${template.name}');
+            },
+          ),
+        );
       case CanvasContextAction.commandPalette:
         _openCommandPalette();
       case CanvasContextAction.togglePresentation:
-        setPresentationMode(!_isPresentationMode);
+        final frames = <CanvasPresentationFrame>[];
+        if (widget.board != null) {
+          for (final obj in widget.board!.objects) {
+            if (obj.type == CanvasObjectType.frame) {
+              final label =
+                  (obj.payload['label'] ??
+                          obj.payload['title'] ??
+                          obj.payload['text'] ??
+                          'Frame ${obj.id}')
+                      .toString();
+              final content =
+                  (obj.payload['content'] ??
+                          obj.payload['summary'] ??
+                          obj.payload['text'] ??
+                          '')
+                      .toString();
+              frames.add(
+                CanvasPresentationFrame(
+                  id: obj.id,
+                  title: label,
+                  contentSummary: content,
+                ),
+              );
+            }
+          }
+        }
+        if (frames.isNotEmpty) {
+          await showDialog<void>(
+            context: context,
+            builder: (context) => CanvasPresentationModeDialog(frames: frames),
+          );
+        } else {
+          setPresentationMode(!_isPresentationMode);
+        }
       case CanvasContextAction.createNode:
       case CanvasContextAction.quickTask:
       case CanvasContextAction.quickNote:
@@ -3970,11 +4050,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
     final movingObjects = _canvasObjectsMovingWith(object);
     final extraSelectedNodes =
         _selectedCanvasObjectIds.contains(object.id) &&
-                _selectedNodeIds.isNotEmpty
-            ? widget.nodes
-                .where((n) => _selectedNodeIds.contains(n.id))
-                .toList(growable: false)
-            : const <MindmapNode>[];
+            _selectedNodeIds.isNotEmpty
+        ? widget.nodes
+              .where((n) => _selectedNodeIds.contains(n.id))
+              .toList(growable: false)
+        : const <MindmapNode>[];
     final movingNodes = <MindmapNode>[
       if (object.type == CanvasObjectType.frame)
         ...widget.nodes.where(
@@ -4466,11 +4546,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
     }
     final extraSelectedNodes =
         _selectedCanvasObjectIds.contains(object.id) &&
-                _selectedNodeIds.isNotEmpty
-            ? widget.nodes
-                .where((n) => _selectedNodeIds.contains(n.id))
-                .toList(growable: false)
-            : const <MindmapNode>[];
+            _selectedNodeIds.isNotEmpty
+        ? widget.nodes
+              .where((n) => _selectedNodeIds.contains(n.id))
+              .toList(growable: false)
+        : const <MindmapNode>[];
     final movingNodes = <MindmapNode>[
       if (object.type == CanvasObjectType.frame)
         ...widget.nodes.where(
@@ -7129,41 +7209,45 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                             onBuilt: widget.onNodeCardBuilt,
                                             onBuildProbe:
                                                 widget.onNodeCardBuildProbe,
-                                             onPointerDown: (globalPosition) =>
-                                                 setState(() =>
-                                                     _nodeDragGlobalPosition =
-                                                         globalPosition),
-                                             onPointerUp: () =>
-                                                 setState(() =>
-                                                     _nodeDragGlobalPosition =
-                                                         null),
-                                             onPanUpdate: (globalPosition) {
-                                               final previous =
-                                                   _nodeDragGlobalPosition;
-                                               _nodeDragGlobalPosition =
-                                                   globalPosition;
-                                               if (previous == null) return;
-                                               final scale = _canvasScale(
-                                                 _transformationController.value,
-                                               );
-                                               _moveNode(
-                                                 node,
-                                                 (globalPosition - previous) /
-                                                     scale,
-                                               );
-                                             },
-                                             onPanEnd: () {
-                                               setState(() =>
-                                                   _nodeDragGlobalPosition =
-                                                       null);
-                                               _finishMove(node);
-                                             },
-                                             onPanCancel: () {
-                                               setState(() =>
-                                                   _nodeDragGlobalPosition =
-                                                       null);
-                                               _resetNodeGuideState();
-                                             },
+                                            onPointerDown: (globalPosition) =>
+                                                setState(
+                                                  () =>
+                                                      _nodeDragGlobalPosition =
+                                                          globalPosition,
+                                                ),
+                                            onPointerUp: () => setState(
+                                              () => _nodeDragGlobalPosition =
+                                                  null,
+                                            ),
+                                            onPanUpdate: (globalPosition) {
+                                              final previous =
+                                                  _nodeDragGlobalPosition;
+                                              _nodeDragGlobalPosition =
+                                                  globalPosition;
+                                              if (previous == null) return;
+                                              final scale = _canvasScale(
+                                                _transformationController.value,
+                                              );
+                                              _moveNode(
+                                                node,
+                                                (globalPosition - previous) /
+                                                    scale,
+                                              );
+                                            },
+                                            onPanEnd: () {
+                                              setState(
+                                                () => _nodeDragGlobalPosition =
+                                                    null,
+                                              );
+                                              _finishMove(node);
+                                            },
+                                            onPanCancel: () {
+                                              setState(
+                                                () => _nodeDragGlobalPosition =
+                                                    null,
+                                              );
+                                              _resetNodeGuideState();
+                                            },
 
                                             onConnectionStart:
                                                 (globalPosition) =>
@@ -8697,6 +8781,36 @@ class MindmapCanvasState extends State<MindmapCanvas>
       );
     }
 
+    final isCompactScreen = MediaQuery.sizeOf(context).width < 600;
+    if (isCompactScreen) {
+      return Material(
+        color: Colors.transparent,
+        child: _OverlayPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Zoom Out',
+                icon: const Icon(Icons.zoom_out, size: 18),
+                onPressed: _zoomOut,
+              ),
+              _ToolbarPill(
+                label: '${(currentScale * 100).round()}%',
+                tooltip: 'Reset zoom',
+                onTap: _zoomReset,
+              ),
+              IconButton(
+                tooltip: 'Zoom In',
+                icon: const Icon(Icons.zoom_in, size: 18),
+                onPressed: _zoomIn,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Material(
       color: Colors.transparent,
       child: _OverlayPanel(
@@ -9690,7 +9804,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
       _canvasObjectSnapReleasedY = false;
     }
     final movingNodes = _movingSelectionFor(node);
-    final movingObjects = _selectedNodeIds.contains(node.id) &&
+    final movingObjects =
+        _selectedNodeIds.contains(node.id) &&
             _selectedCanvasObjectIds.isNotEmpty
         ? _selectedCanvasObjects()
         : const <CanvasObject>[];
@@ -9904,7 +10019,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
         }
       });
     }
-    final movingObjects = _selectedNodeIds.contains(node.id) &&
+    final movingObjects =
+        _selectedNodeIds.contains(node.id) &&
             _selectedCanvasObjectIds.isNotEmpty
         ? _selectedCanvasObjects()
         : const <CanvasObject>[];
@@ -9919,12 +10035,11 @@ class MindmapCanvasState extends State<MindmapCanvas>
                 updatedAt: DateTime.now(),
               ),
       ];
-      if (objectUpdates.isNotEmpty &&
-          widget.onCanvasObjectsUpdated != null) {
+      if (objectUpdates.isNotEmpty && widget.onCanvasObjectsUpdated != null) {
         _canvasObjectRawDragGeometries.clear();
-        unawaited(Future.sync(
-          () => widget.onCanvasObjectsUpdated!(objectUpdates),
-        ));
+        unawaited(
+          Future.sync(() => widget.onCanvasObjectsUpdated!(objectUpdates)),
+        );
       }
     }
     _resetNodeGuideState();

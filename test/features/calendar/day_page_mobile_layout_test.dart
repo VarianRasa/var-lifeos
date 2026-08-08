@@ -35,4 +35,32 @@ void main() {
 
     expect(find.byKey(const Key('mobile-compact-header')), findsOneWidget);
   });
+
+  testWidgets('opens mobile tools sheet when tapping Tools button', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    final repository = InMemoryMindmapRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: MaterialApp(
+          home: DayPage(date: DateTime(2026, 8, 8)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final toolsButton = find.byKey(const Key('mobile-tools-button'));
+    await tester.tap(toolsButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Day Tools & Status'), findsOneWidget);
+  });
 }
+
