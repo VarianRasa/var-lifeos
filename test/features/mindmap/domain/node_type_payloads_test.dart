@@ -510,6 +510,52 @@ void main() {
     );
   });
 
+  test('fitness exercise sets round trip and validate', () {
+    final base = node(NodeType.fit, const <String, Object?>{});
+    const payload = FitPayload(
+      exercises: <FitnessExercise>[
+        FitnessExercise(
+          id: 'squat',
+          name: 'Squat',
+          sets: <FitnessWorkoutSet>[
+            FitnessWorkoutSet(
+              id: 'set-1',
+              reps: 8,
+              weight: 60,
+              completed: true,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final decoded = FitPayload.fromNode(
+      base.copyWith(data: payload.toData(base.data)),
+    );
+
+    expect(decoded.exercises.single.name, 'Squat');
+    expect(decoded.exercises.single.sets.single.reps, 8);
+    expect(decoded.exercises.single.sets.single.weight, 60);
+    expect(decoded.exercises.single.sets.single.completed, isTrue);
+    expect(decoded.validate(title: 'Workout'), isEmpty);
+    expect(
+      payload
+          .copyWith(
+            exercises: const <FitnessExercise>[
+              FitnessExercise(
+                id: 'bad',
+                name: '',
+                sets: <FitnessWorkoutSet>[
+                  FitnessWorkoutSet(id: 'set', reps: 0),
+                ],
+              ),
+            ],
+          )
+          .validate(title: 'Workout'),
+      isNotEmpty,
+    );
+  });
+
   test(
     'ExpensePayload round-trips amount category payment and receipt assets',
     () {
@@ -878,6 +924,7 @@ void main() {
       activeTool: 'pen',
       penColor: 'blue',
       penWidth: 4,
+      elementGroups: <String, String>{'stroke': 'Sketches'},
       elements: <CanvasElement>[
         CanvasStroke(
           id: 'stroke',
@@ -929,6 +976,7 @@ void main() {
     expect(decoded.background, 'grid');
     expect(decoded.activeTool, 'pen');
     expect(decoded.elements, hasLength(6));
+    expect(decoded.elementGroups['stroke'], 'Sketches');
     expect(decoded.elements[0], isA<CanvasStroke>());
     expect(decoded.elements[1], isA<CanvasTextElement>());
     expect(decoded.elements[2], isA<CanvasStickyElement>());
@@ -941,6 +989,46 @@ void main() {
     expect((data['canvas'] as Map)['nestedForeign'], 'kept');
     expect(data['strokes'], isNotEmpty);
     expect(decoded.validate(title: 'Sketch'), isEmpty);
+  });
+
+  test('canvas element removal prunes groups and clears legacy strokes', () {
+    const payload = CanvasPayload(
+      strokes: <String>['0.1,0.1;0.2,0.2'],
+      elementGroups: <String, String>{
+        'keep': ' Notes ',
+        'remove': 'Sketches',
+        'missing': 'Invalid',
+      },
+      elements: <CanvasElement>[
+        CanvasTextElement(
+          id: 'keep',
+          color: 'neutral',
+          position: CanvasPoint(0.2, 0.3),
+          text: 'Keep',
+        ),
+        CanvasTextElement(
+          id: 'remove',
+          color: 'neutral',
+          position: CanvasPoint(0.4, 0.3),
+          text: 'Remove',
+        ),
+      ],
+    );
+
+    final reduced = payload.copyWith(
+      elements: <CanvasElement>[payload.elements.first],
+    );
+    final cleared = reduced.copyWith(elements: const <CanvasElement>[]);
+
+    expect(reduced.elementGroups, const <String, String>{'keep': 'Notes'});
+    expect(cleared.elementGroups, isEmpty);
+    expect(cleared.strokes, isEmpty);
+    expect(
+      CanvasPayload.fromNode(
+        node(NodeType.canvas, cleared.toData(const <String, Object?>{})),
+      ).elements,
+      isEmpty,
+    );
   });
 
   test('canvas block document round trips and preserves unknown blocks', () {
@@ -1262,6 +1350,14 @@ void main() {
           title: 'Option B',
           cons: <String>['Lower reach'],
           risks: <String>['Migration'],
+          riskAssessments: <DecisionRisk>[
+            DecisionRisk(
+              id: 'migration',
+              title: 'Migration delay',
+              probability: 3,
+              impact: 4,
+            ),
+          ],
           scores: <String, int>{'impact': 7, 'effort': 9},
         ),
       ],
@@ -1270,6 +1366,14 @@ void main() {
       assumptions: 'Team capacity remains stable.',
       expectedOutcome: 'Faster activation.',
       reviewNotes: 'Review after one month.',
+      reviewEntries: <DecisionReviewEntry>[
+        DecisionReviewEntry(
+          id: 'review-1',
+          date: '2026-08-20',
+          notes: 'Outcome met expectations.',
+          rating: 4,
+        ),
+      ],
     );
 
     final data = payload.toData(const <String, Object?>{
@@ -1282,6 +1386,8 @@ void main() {
     expect(decoded.question, payload.question);
     expect(decoded.criteria, hasLength(2));
     expect(decoded.options, hasLength(2));
+    expect(decoded.options.last.riskExposure, 12);
+    expect(decoded.reviewEntries.single.rating, 4);
     expect(decoded.selectedOption?.title, 'Option A');
     expect(decoded.weightedScores['a'], closeTo(8, 0.001));
     expect(decoded.weightedScores['b'], closeTo(7.666, 0.001));

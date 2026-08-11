@@ -71,6 +71,21 @@ final class SembastMindmapNodeDatabase implements MindmapNodeDatabase {
   }
 
   @override
+  Future<void> deleteRevisions(String nodeId) async {
+    final db = await _db;
+    await db.transaction((transaction) async {
+      final keys = await _revisionStore.findKeys(
+        transaction,
+        finder: Finder(filter: Filter.equals('nodeId', nodeId)),
+      );
+      for (final key in keys) {
+        await _revisionStore.record(key).delete(transaction);
+      }
+      await _revisionHeadStore.record(nodeId).delete(transaction);
+    });
+  }
+
+  @override
   Future<MindmapNode?> getNode(String id) async {
     final value = await _nodeStore.record(id).get(await _db);
     return value == null ? null : _nodeFromRecordValue(value);

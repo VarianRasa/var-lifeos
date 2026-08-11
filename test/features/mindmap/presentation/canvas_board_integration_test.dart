@@ -1537,9 +1537,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(board.objectById(shape.id)!.payload['shape'], 'rectangle');
 
-    await tester.tap(
+    await tester.tap(shapeFinder);
+    await tester.pump();
+    final currentState = tester.state<MindmapCanvasState>(
+      find.byType(MindmapCanvas),
+    );
+    expect(currentState.selectedCanvasObjectIds, contains(shape.id));
+    await tester.pump();
+    final properties = tester.widget<IconButton>(
       find.byKey(const ValueKey('mindmap-canvas-object-properties')),
     );
+    expect(properties.onPressed, isNotNull);
+    properties.onPressed!();
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('canvas-property-fill-color')),

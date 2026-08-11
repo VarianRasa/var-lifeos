@@ -78,48 +78,44 @@ class _HabitMatrixHeatmapState extends State<HabitMatrixHeatmap> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Top Control Bar: Title, Strength Badge & 16/52-week ChoiceChips
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 8,
-                        children: [
-                          Text(
-                            'Matriks Kebiasaan ($_weeks Minggu)',
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: strengthColor.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: strengthColor.withValues(alpha: 0.5),
-                              ),
-                            ),
-                            child: Text(
-                              'Score ${avgStrengthScore.toStringAsFixed(1)} • $strengthLabel',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: strengthColor,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final title = Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Text(
+                      'Matriks Kebiasaan ($_weeks Minggu)',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                    ],
-                  ),
-                ),
-                SegmentedButton<int>(
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: strengthColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(
+                          tokens.radiusElement,
+                        ),
+                        border: Border.all(
+                          color: strengthColor.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: Text(
+                        'Score ${avgStrengthScore.toStringAsFixed(1)} • $strengthLabel',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: strengthColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                final range = SegmentedButton<int>(
                   segments: const [
                     ButtonSegment<int>(
                       value: 16,
@@ -132,16 +128,26 @@ class _HabitMatrixHeatmapState extends State<HabitMatrixHeatmap> {
                   ],
                   selected: {_weeks},
                   onSelectionChanged: (newSelection) {
-                    setState(() {
-                      _weeks = newSelection.first;
-                    });
+                    setState(() => _weeks = newSelection.first);
                   },
                   showSelectedIcon: false,
                   style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
                   ),
-                ),
-              ],
+                );
+                if (constraints.maxWidth < 360) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [title, const SizedBox(height: 8), range],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: title),
+                    range,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
 
@@ -174,70 +180,76 @@ class _HabitMatrixHeatmapState extends State<HabitMatrixHeatmap> {
             ),
             const SizedBox(height: 12),
 
-            // Heatmap Matrix Grid Scrollable
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Weekday Header Column
-                  const Padding(
-                    padding: EdgeInsets.only(right: 6, top: 2),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _WeekdayLabel('S'),
-                        _WeekdayLabel('S'),
-                        _WeekdayLabel('R'),
-                        _WeekdayLabel('K'),
-                        _WeekdayLabel('J'),
-                        _WeekdayLabel('S'),
-                        _WeekdayLabel('M'),
-                      ],
-                    ),
-                  ),
+            Semantics(
+              container: true,
+              image: true,
+              label: 'Habit matrix heatmap',
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 280),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Weekday Header Column
+                      const Padding(
+                        padding: EdgeInsets.only(right: 6, top: 2),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _WeekdayLabel('S'),
+                            _WeekdayLabel('S'),
+                            _WeekdayLabel('R'),
+                            _WeekdayLabel('K'),
+                            _WeekdayLabel('J'),
+                            _WeekdayLabel('S'),
+                            _WeekdayLabel('M'),
+                          ],
+                        ),
+                      ),
 
-                  // Grid Cells
-                  Row(
-                    children: List.generate(_weeks, (weekIdx) {
-                      return Column(
-                        children: List.generate(7, (dayIdx) {
-                          final dayOffset = (weekIdx * 7) + dayIdx;
-                          final date = startDay.addDays(dayOffset);
-                          final key = dayKey(date);
-                          final count = completionMap[key] ?? 0;
+                      // Grid Cells
+                      Row(
+                        children: List.generate(_weeks, (weekIdx) {
+                          return Column(
+                            children: List.generate(7, (dayIdx) {
+                              final dayOffset = (weekIdx * 7) + dayIdx;
+                              final date = startDay.addDays(dayOffset);
+                              final key = dayKey(date);
+                              final count = completionMap[key] ?? 0;
 
-                          Color cellColor =
-                              theme.colorScheme.surfaceContainerHighest;
-                          if (count == 1) {
-                            cellColor = theme.colorScheme.primary.withValues(
-                              alpha: 0.3,
-                            );
-                          } else if (count == 2) {
-                            cellColor = theme.colorScheme.primary.withValues(
-                              alpha: 0.6,
-                            );
-                          } else if (count >= 3) {
-                            cellColor = theme.colorScheme.primary;
-                          }
+                              Color cellColor =
+                                  theme.colorScheme.surfaceContainerHighest;
+                              if (count == 1) {
+                                cellColor = theme.colorScheme.primary
+                                    .withValues(alpha: 0.3);
+                              } else if (count == 2) {
+                                cellColor = theme.colorScheme.primary
+                                    .withValues(alpha: 0.6);
+                              } else if (count >= 3) {
+                                cellColor = theme.colorScheme.primary;
+                              }
 
-                          return Tooltip(
-                            message: '${dayKey(date)}: $count habit selesai',
-                            child: Container(
-                              width: 12,
-                              height: 12,
-                              margin: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: cellColor,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
+                              return Tooltip(
+                                message:
+                                    '${dayKey(date)}: $count habit selesai',
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  margin: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: cellColor,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              );
+                            }),
                           );
                         }),
-                      );
-                    }),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ],

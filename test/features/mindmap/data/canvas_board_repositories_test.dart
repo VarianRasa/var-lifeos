@@ -254,4 +254,30 @@ void main() {
     expect(await repository.getBoard(recent.id), isNull);
     await database.close();
   });
+
+  test(
+    'saveObjects auto-creates missing daily board for Sembast and in-memory',
+    () async {
+      final memoryRepo = InMemoryCanvasBoardRepository();
+      final object = CanvasObject(
+        id: 'test-obj',
+        type: CanvasObjectType.stickyNote,
+        geometry: const CanvasGeometry(x: 10, y: 10, width: 100, height: 100),
+        createdAt: now,
+        updatedAt: now,
+      );
+      await memoryRepo.saveObjects('daily:2026-08-08', [object]);
+      final memoryBoard = await memoryRepo.getBoard('daily:2026-08-08');
+      expect(memoryBoard, isNotNull);
+      expect(memoryBoard!.objects.map((o) => o.id), contains('test-obj'));
+
+      final database = await databaseFactoryMemory.openDatabase('test.db');
+      final sembastRepo = SembastCanvasBoardRepository(database: database);
+      await sembastRepo.saveObjects('daily:2026-08-08', [object]);
+      final sembastBoard = await sembastRepo.getBoard('daily:2026-08-08');
+      expect(sembastBoard, isNotNull);
+      expect(sembastBoard!.objects.map((o) => o.id), contains('test-obj'));
+      await database.close();
+    },
+  );
 }

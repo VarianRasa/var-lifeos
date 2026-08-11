@@ -16,6 +16,27 @@ void main() {
       expect(repository.importCount, 0);
     });
 
+    test('imports generic attachment with safe fallback MIME', () async {
+      final repository = _RecordingAttachmentRepository();
+      final service = MediaFileImportService(
+        repository: repository,
+        picker: const _FakePicker(
+          PickedMediaFile(
+            fileName: 'receipt.pdf',
+            byteLength: 4,
+            bytes: [0x25, 0x50, 0x44, 0x46],
+          ),
+        ),
+      );
+
+      final attachment = await service.pickAttachment();
+
+      expect(attachment, isNotNull);
+      expect(attachment!.fileName, 'receipt.pdf');
+      expect(attachment.mimeType, 'application/pdf');
+      expect(repository.lastBytes, [0x25, 0x50, 0x44, 0x46]);
+    });
+
     test(
       'imports image bytes and preserves existing presentation fields',
       () async {

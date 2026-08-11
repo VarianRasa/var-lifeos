@@ -490,12 +490,8 @@ void main() {
     WidgetTester tester,
   ) async {
     final harness = _Harness(
-      nodes: [
-        _node('node-a', const CanvasPosition(100, 100)),
-      ],
-      objects: [
-        _shape('obj-a', x: 300, y: 100, width: 100, height: 50),
-      ],
+      nodes: [_node('node-a', const CanvasPosition(100, 100))],
+      objects: [_shape('obj-a', x: 300, y: 100, width: 100, height: 50)],
     );
     await tester.pumpWidget(harness.build());
     await tester.pumpAndSettle();

@@ -732,6 +732,83 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('decision review timeline edits date notes rating and deletion', (
+    tester,
+  ) async {
+    final node = _node(NodeType.decision);
+    Object draft = const DecisionPayload(
+      reviewEntries: <DecisionReviewEntry>[
+        DecisionReviewEntry(
+          id: 'review-1',
+          date: '2026-08-11',
+          notes: 'Initial review',
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => buildKnowledgeNodeInlineEditor(
+              NodeEditContext(
+                node: node,
+                typedDraft: draft,
+                effectivePreset: NodeSizePreset.standard,
+                validationErrors: const <String>[],
+                onTitleChanged: (_) {},
+                onBodyChanged: (_) {},
+                onDraftChanged: (value) {
+                  draft = value;
+                  setState(() {});
+                },
+                onNodeDraftChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final notes = find.byKey(
+      const ValueKey<String>('knowledge-decision-review-notes-review-1'),
+    );
+    await tester.ensureVisible(notes);
+    await tester.enterText(notes, 'Validated after launch');
+    await tester.pump();
+    expect(
+      (draft as DecisionPayload).reviewEntries.single.notes,
+      'Validated after launch',
+    );
+
+    final rating = find.byKey(
+      const ValueKey<String>('knowledge-decision-review-rating-review-1-4'),
+    );
+    await tester.ensureVisible(rating);
+    await tester.tap(rating);
+    await tester.pump();
+    expect((draft as DecisionPayload).reviewEntries.single.rating, 4);
+
+    final date = find.byKey(
+      const ValueKey<String>('knowledge-decision-review-date-review-1'),
+    );
+    await tester.ensureVisible(date);
+    await tester.tap(date);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('15'));
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect((draft as DecisionPayload).reviewEntries.single.date, '2026-08-15');
+
+    final delete = find.byKey(
+      const ValueKey<String>('knowledge-decision-review-entry-delete-review-1'),
+    );
+    await tester.ensureVisible(delete);
+    await tester.tap(delete);
+    await tester.pump();
+    expect((draft as DecisionPayload).reviewEntries, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('decision multiline fields survive local draft echo', (
     tester,
   ) async {

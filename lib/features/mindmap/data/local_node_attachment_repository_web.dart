@@ -103,9 +103,14 @@ final class MemoryNodeAttachmentRepository
     final mime = mimeType.trim().toLowerCase();
     final name = _normalizeWebFileName(fileName);
     if (!supportedNodeAttachmentMimeTypes.contains(mime) ||
-        !_webExtensionsForMime(
-          mime,
-        ).contains(p.extension(name).toLowerCase())) {
+        (mime == 'application/octet-stream' &&
+            _unsafeWebGenericExtensions.contains(
+              p.extension(name).toLowerCase(),
+            )) ||
+        (mime != 'application/octet-stream' &&
+            !_webExtensionsForMime(
+              mime,
+            ).contains(p.extension(name).toLowerCase()))) {
       throw const FormatException('Invalid attachment metadata.');
     }
     final id = const Uuid().v4();
@@ -146,9 +151,14 @@ final class MemoryNodeAttachmentRepository
     final name = _normalizeWebFileName(attachment.fileName);
     final mime = attachment.mimeType.trim().toLowerCase();
     if (!supportedNodeAttachmentMimeTypes.contains(mime) ||
-        !_webExtensionsForMime(
-          mime,
-        ).contains(p.extension(name).toLowerCase())) {
+        (mime == 'application/octet-stream' &&
+            _unsafeWebGenericExtensions.contains(
+              p.extension(name).toLowerCase(),
+            )) ||
+        (mime != 'application/octet-stream' &&
+            !_webExtensionsForMime(
+              mime,
+            ).contains(p.extension(name).toLowerCase()))) {
       throw const FormatException('Invalid attachment metadata.');
     }
     final hash = await Sha256().hash(bytes);
@@ -265,6 +275,7 @@ const Set<String> _unsafeWebGenericExtensions = {
 };
 
 Set<String> _webExtensionsForMime(String mime) => switch (mime) {
+  'application/pdf' => {'.pdf'},
   'image/gif' => {'.gif'},
   'image/jpeg' => {'.jpg', '.jpeg'},
   'image/png' => {'.png'},

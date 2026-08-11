@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/date_utils.dart';
 import '../application/collaboration_session.dart';
 import '../domain/collaboration_node_sync.dart';
@@ -7,6 +8,7 @@ import '../domain/collaboration_room.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/mindmap_node_revision_repository.dart';
 import '../domain/mindmap_repository.dart';
+import '../domain/node_type_payloads.dart';
 import 'sembast_collaboration_sync_store.dart';
 
 final class CollaborationMindmapRepository implements MindmapRepository {
@@ -110,6 +112,7 @@ final class CollaborationMindmapRepository implements MindmapRepository {
     MindmapNode node,
     ActiveCollaborationSession session, {
     String? remoteNodeId,
+    bool persistLocally = true,
   }) async {
     _validateWrite(session, dayKey(node.day));
     final sessionDayKey = session.dayKey;
@@ -130,9 +133,9 @@ final class CollaborationMindmapRepository implements MindmapRepository {
           revision: 0,
         );
     await _store.bind(binding);
-    final saved = await _base.saveNode(node);
-    await _enqueueUpsert(saved, binding, session);
-    return saved;
+    final published = persistLocally ? await _base.saveNode(node) : node;
+    await _enqueueUpsert(published, binding, session);
+    return published;
   }
 
   Future<void> unbindNode(
@@ -167,6 +170,13 @@ final class CollaborationMindmapRepository implements MindmapRepository {
     CollaborationNodeBinding binding,
     ActiveCollaborationSession session,
   ) async {
+    final shared = node.type == NodeType.expense
+        ? node.copyWith(
+            data: ExpensePayload.fromNode(
+              node,
+            ).copyWith(receipts: const []).toData(node.data),
+          )
+        : node;
     await _store.enqueue(
       CollaborationPendingMutation(
         mutationId: const Uuid().v4(),
@@ -176,7 +186,7 @@ final class CollaborationMindmapRepository implements MindmapRepository {
         dayKey: binding.dayKey,
         baseRevision: binding.revision,
         kind: CollaborationMutationKind.upsert,
-        payload: node.toJson(),
+        payload: shared.toJson(),
         updatedByUid: session.uid,
         attemptCount: 0,
         createdAt: DateTime.now().toUtc(),

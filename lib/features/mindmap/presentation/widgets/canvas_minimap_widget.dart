@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_design_tokens.dart';
+
 class MinimapNodeDot {
   final double x;
   final double y;
@@ -27,24 +29,31 @@ class CanvasMinimapWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
 
-    return Container(
-      width: 140,
-      height: 100,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: theme.colorScheme.outline.withValues(alpha: 0.3),
+    return Semantics(
+      button: onTapMinimap != null,
+      label: onTapMinimap == null
+          ? '${nodeDots.length} canvas objects'
+          : '${nodeDots.length} canvas objects. Tap to move viewport',
+      child: Container(
+        width: 140,
+        height: 100,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(tokens.radiusElement),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
-      ),
-      child: GestureDetector(
-        onTapDown: (details) => onTapMinimap?.call(details.localPosition),
-        child: CustomPaint(
-          painter: _MinimapPainter(
-            dots: nodeDots,
-            viewport: viewportRect,
-            accentColor: theme.colorScheme.primary,
+        child: GestureDetector(
+          onTapDown: onTapMinimap == null
+              ? null
+              : (details) => onTapMinimap!(details.localPosition),
+          child: CustomPaint(
+            painter: _MinimapPainter(
+              dots: nodeDots,
+              viewport: viewportRect,
+              accentColor: theme.colorScheme.primary,
+            ),
           ),
         ),
       ),

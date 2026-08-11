@@ -2,10 +2,7 @@ class SnapGuideline {
   final double position;
   final bool isVertical;
 
-  const SnapGuideline({
-    required this.position,
-    required this.isVertical,
-  });
+  const SnapGuideline({required this.position, required this.isVertical});
 }
 
 class SnapResult {

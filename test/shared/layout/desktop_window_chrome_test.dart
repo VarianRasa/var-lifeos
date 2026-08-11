@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/theme/app_colors.dart';
@@ -42,6 +43,12 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('windows-title-bar')), findsOneWidget);
+    for (final label in <String>['file', 'navigate', 'view', 'tools', 'help']) {
+      final trigger = find.byKey(ValueKey('windows-menu-$label'));
+      final size = tester.getSize(trigger);
+      expect(size.width, greaterThanOrEqualTo(44));
+      expect(size.height, greaterThanOrEqualTo(44));
+    }
     await tester.tap(find.byKey(const ValueKey('windows-menu-file')));
     await tester.pumpAndSettle();
     expect(
@@ -117,6 +124,40 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('Navigate menu exposes accessible themed 44 px Search action', (
+    tester,
+  ) async {
+    final controller = _FakeWindowController();
+    final semantics = tester.ensureSemantics();
+    DesktopMenuAction? action;
+    void listener() => action = desktopMenuController.action;
+    desktopMenuController.addListener(listener);
+    addTearDown(() => desktopMenuController.removeListener(listener));
+
+    await tester.pumpWidget(app(controller));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('windows-menu-navigate')));
+    await tester.pumpAndSettle();
+
+    final search = find.byKey(const ValueKey('windows-menu-search'));
+    expect(search, findsOneWidget);
+    expect(tester.getSize(search).height, greaterThanOrEqualTo(44));
+    expect(tester.getSemantics(search).label, contains('Search'));
+    final context = tester.element(search);
+    final submenu = tester.widget<SubmenuButton>(
+      find.byKey(const ValueKey('windows-menu-navigate')),
+    );
+    expect(
+      submenu.menuStyle?.backgroundColor?.resolve(<WidgetState>{}),
+      AppSemanticColors.of(context).surfaceRaised,
+    );
+
+    await tester.tap(search);
+    await tester.pumpAndSettle();
+    expect(action, DesktopMenuAction.search);
+    semantics.dispose();
+  });
+
   testWidgets('window buttons call minimize maximize restore and close', (
     tester,
   ) async {
@@ -141,6 +182,30 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('windows-close')));
     await tester.pump();
     expect(controller.closeCalls, 1);
+  });
+
+  testWidgets('titlebar gestures call native window callbacks', (tester) async {
+    final controller = _FakeWindowController();
+    await tester.pumpWidget(app(controller));
+    await tester.pump();
+    final dragRegion = find.byKey(const ValueKey('windows-drag-region'));
+
+    await tester.tap(dragRegion, buttons: kSecondaryButton);
+    await tester.pump();
+    expect(controller.popUpWindowMenuCalls, 1);
+
+    await tester.tap(dragRegion);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(dragRegion);
+    await tester.pump();
+    expect(controller.maximizeCalls, 1);
+
+    await tester.tap(dragRegion);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(dragRegion);
+    await tester.pump();
+    expect(controller.unmaximizeCalls, 1);
+    await tester.pump(const Duration(milliseconds: 50));
   });
 
   testWidgets('drag region moves window and tracks native maximize events', (

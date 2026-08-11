@@ -5,11 +5,7 @@ class CanvasPinMarkerWidget extends StatelessWidget {
   final CanvasPinComment pin;
   final VoidCallback? onTap;
 
-  const CanvasPinMarkerWidget({
-    super.key,
-    required this.pin,
-    this.onTap,
-  });
+  const CanvasPinMarkerWidget({super.key, required this.pin, this.onTap});
 
   @override
   Widget build(BuildContext context) {

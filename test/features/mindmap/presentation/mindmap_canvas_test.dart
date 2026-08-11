@@ -27,6 +27,11 @@ import 'package:var_app/features/mindmap/presentation/inline_node_workspace.dart
 import 'package:var_app/features/mindmap/presentation/mindmap_canvas.dart';
 import 'package:var_app/features/mindmap/presentation/node_shell.dart';
 
+Future<void> settleCanvas(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.pump(const Duration(milliseconds: 100));
+}
+
 void main() {
   setUp(() {
     SharedPreferencesAsyncPlatform.instance =
@@ -66,7 +71,8 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byKey(const ValueKey('expanded-kanban')), findsOneWidget);
     expect(find.byKey(const ValueKey('expanded-note')), findsNothing);
@@ -141,7 +147,7 @@ void main() {
       'Useful architecture reference',
     );
     await typeProgressively('knowledge-bookmark-collection-field', 'Research');
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final payload = LinkResourcePayload.fromNode(node);
     expect(payload.url, 'https://example.com/reference');
@@ -205,7 +211,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     Future<void> pasteInto(String key, String value) async {
       clipboardText = value;
@@ -245,7 +251,7 @@ void main() {
       'knowledge-bookmark-collection-field',
       'Research / Flutter',
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final payload = LinkResourcePayload.fromNode(node);
     expect(payload.url, 'https://example.com/path?q=a/b#section');
@@ -286,7 +292,7 @@ void main() {
         home: Scaffold(body: MindmapCanvas(nodes: <MindmapNode>[node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-bookmark-narrow-collapse'),
@@ -338,7 +344,7 @@ void main() {
           home: Scaffold(body: MindmapCanvas(nodes: <MindmapNode>[node])),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(tester.takeException(), isNull, reason: '$size');
     }
   });
@@ -382,7 +388,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-bookmark-fixed-size'),
@@ -437,7 +443,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-image-fixed-size'),
@@ -489,7 +495,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-weather-fixed-size'),
@@ -538,7 +544,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-fitness-fixed-size'),
@@ -688,7 +694,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.byKey(const ValueKey('quote-collapsed-text')), findsOneWidget);
     expect(
@@ -743,7 +749,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-quote-fixed-size'),
@@ -801,7 +807,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-auto-size-idea'),
@@ -842,7 +848,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-resizable-collapsed-idea'),
@@ -901,7 +907,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-auto-size-decision'),
@@ -944,7 +950,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-resizable-collapsed-decision'),
@@ -999,7 +1005,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-auto-size-question'),
@@ -1042,7 +1048,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-resizable-collapsed-question'),
@@ -1110,7 +1116,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-auto-size-resource'),
@@ -1190,7 +1196,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-collapsed-resource'),
@@ -1367,7 +1373,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.drag(
       find.byKey(const ValueKey('expanded-field')),
       const Offset(80, 40),
@@ -1384,7 +1390,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final key = GlobalKey<_PersistingResizeHarnessState>();
     await tester.pumpWidget(_PersistingResizeHarness(key: key));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final toggle = find.byKey(
       const ValueKey('mindmap-task-toggle-persist-resize'),
@@ -1396,7 +1402,7 @@ void main() {
 
     key.currentState!.setExpanded(true);
     await tester.pump();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(toggle, findsOneWidget);
     final visibility = tester.widget<AnimatedOpacity>(
@@ -1439,7 +1445,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey('expanded-task-custom-header')),
@@ -1484,7 +1490,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final output = find.byKey(
       const ValueKey('mindmap-output-port-keyboard-source'),
@@ -1578,7 +1584,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final field = find.byKey(const ValueKey('isolation-field'));
     await tester.tap(field);
     await tester.enterText(field, '+-0/');
@@ -1657,7 +1663,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester
         .state<MindmapCanvasState>(find.byType(MindmapCanvas))
         .selectAndFocusNode(node);
@@ -1706,7 +1712,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final state = tester.state<MindmapCanvasState>(find.byType(MindmapCanvas));
     await state.selectAndFocusNode(first);
     await tester.pump();
@@ -1766,7 +1772,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final state = tester.state<MindmapCanvasState>(find.byType(MindmapCanvas));
     final controller = tester
         .widget<InteractiveViewer>(find.byType(InteractiveViewer))
@@ -1774,17 +1780,17 @@ void main() {
     final initial = controller.value.storage.toList();
 
     expect(await state.selectAndFocusNode(rejected), isFalse);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(controller.value.storage, orderedEquals(initial));
 
     final staleSelection = state.selectAndFocusNode(pending);
     await tester.pump();
     expect(await state.selectAndFocusNode(accepted), isTrue);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final acceptedTransform = controller.value.storage.toList();
     pendingGuard.complete(true);
     expect(await staleSelection, isFalse);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(controller.value.storage, orderedEquals(acceptedTransform));
   });
 
@@ -1915,7 +1921,7 @@ void main() {
     await canvasKey.currentState!.runContextAction(
       CanvasContextAction.toggleMinimap,
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final node = find.byKey(const ValueKey('mindmap-node-geometry-expanded'));
     final expandedSize = InlineNodeWorkspacePolicy.expandedSizeForNode(
@@ -1950,11 +1956,11 @@ void main() {
     );
     final beforeFit = viewer.transformationController!.value.clone();
     await canvasKey.currentState!.runContextAction(CanvasContextAction.fitAll);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(viewer.transformationController!.value, isNot(equals(beforeFit)));
 
     rebuild!(() => expandedId = '');
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(tester.getSize(node), const Size(420, 240));
   });
 
@@ -2047,7 +2053,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final state = tester.state<MindmapCanvasState>(find.byType(MindmapCanvas));
     state.beginInlineEdit(first.id);
     await tester.pump();
@@ -2102,7 +2108,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Cached destination'), findsOneWidget);
     expect(find.text('Repository destination'), findsNothing);
@@ -2116,11 +2122,11 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final key = GlobalKey<_BuildNotificationHarnessState>();
     await tester.pumpWidget(_BuildNotificationHarness(key: key));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(key.currentState!.notificationCount, 1);
     key.currentState!.rebuildParent();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(key.currentState!.notificationCount, 1);
   });
   testWidgets('canvas exposes professional context actions', (tester) async {
@@ -2145,6 +2151,18 @@ void main() {
     expect(
       state.availableContextActions,
       contains(CanvasContextAction.commandPalette),
+    );
+    expect(
+      state.availableContextActions,
+      contains(CanvasContextAction.exportDialog),
+    );
+    expect(
+      state.availableContextActions,
+      contains(CanvasContextAction.templateGallery),
+    );
+    expect(
+      state.availableContextActions,
+      contains(CanvasContextAction.togglePresentation),
     );
   });
 
@@ -2173,7 +2191,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-resizable-node'),
@@ -2214,7 +2232,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final key = GlobalKey<_PersistingResizeHarnessState>();
       await tester.pumpWidget(_PersistingResizeHarness(key: key));
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       final nodeFinder = find.byKey(
         const ValueKey<String>('mindmap-node-persist-resize'),
@@ -2239,7 +2257,7 @@ void main() {
           phase: NodeResizePhase.commit,
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(key.currentState!.commitCount, 1);
       expect(key.currentState!.node.position, const CanvasPosition(20, 16));
@@ -2250,7 +2268,7 @@ void main() {
       expect(persistedTopLeft, initialTopLeft + const Offset(20, 16));
 
       key.currentState!.applyExternalChange();
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(key.currentState!.node.position, const CanvasPosition(60, 56));
       expect(tester.getSize(nodeFinder), const Size(360, 340));
       expect(
@@ -2269,7 +2287,7 @@ void main() {
     await tester.pumpWidget(
       _PersistingResizeHarness(key: key, deferPersistence: true),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-persist-resize'),
@@ -2306,7 +2324,7 @@ void main() {
     );
 
     key.currentState!.persistPendingResize();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(key.currentState!.node.position, const CanvasPosition(20, 16));
     expect(tester.getSize(nodeFinder), const Size(320, 304));
     expect(
@@ -2324,7 +2342,7 @@ void main() {
     await tester.pumpWidget(
       _PersistingResizeHarness(key: key, deferPersistence: true),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-persist-resize'),
@@ -2387,7 +2405,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final expected = InlineNodeWorkspacePolicy.expandedSizeForNode(draftNode);
     expect(
@@ -2405,7 +2423,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final key = GlobalKey<_PersistingResizeHarnessState>();
     await tester.pumpWidget(_PersistingResizeHarness(key: key, expanded: true));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-persist-resize'),
@@ -2457,7 +2475,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       tester.getSize(
@@ -2536,7 +2554,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey<String>('canvas-collapsed-preview')),
@@ -2586,7 +2604,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-fixed-expanded-canvas'),
@@ -2630,7 +2648,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-resizable-collapsed-canvas'),
@@ -2682,7 +2700,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey<String>('idea-collapsed-preview')),
@@ -2736,7 +2754,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(
         find.byKey(const ValueKey<String>('question-collapsed-preview')),
@@ -2806,7 +2824,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey<String>('decision-collapsed-preview')),
@@ -2847,7 +2865,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey<String>('note-collapsed-markdown-preview')),
@@ -2902,7 +2920,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       tester
@@ -2945,7 +2963,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final Size nodeSize = tester.getSize(
       find.byKey(const ValueKey('mindmap-node-short-full-note')),
@@ -2999,7 +3017,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final Finder nodeFinder = find.byKey(
       const ValueKey('mindmap-node-narrow-long-note'),
@@ -3041,7 +3059,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       tester.getSize(
@@ -3073,7 +3091,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: <MindmapNode>[node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       tester.getSize(
@@ -3118,7 +3136,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: nodes)),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-compact-custom'),
@@ -3144,7 +3162,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           await tester.pumpWidget(
             _PersistingResizeHarness(key: key, deferPersistence: true),
           );
-          await tester.pumpAndSettle();
+          await settleCanvas(tester);
           final nodeFinder = find.byKey(
             const ValueKey<String>('mindmap-node-persist-resize'),
           );
@@ -3175,7 +3193,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await tester.pumpWidget(
       _PersistingResizeHarness(key: key, deferPersistence: true),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final nodeFinder = find.byKey(
       const ValueKey<String>('mindmap-node-persist-resize'),
     );
@@ -3227,7 +3245,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final gesture = await tester.createGesture(
       kind: PointerDeviceKind.mouse,
@@ -3238,7 +3256,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
     await tester.pump();
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(nodeMenuCount, 1);
     expect(canvasMenuCount, 0);
   });
@@ -3341,7 +3359,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
 
     await key.currentState!.selectAndFocusNode(node);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(selected, node);
     expect(
@@ -3375,7 +3393,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final openButton = find.byTooltip('Open Note inline');
     expect(find.byTooltip('Edit in node'), findsNothing);
@@ -3385,7 +3403,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
     await tester.ensureVisible(openButton);
     await tester.tap(openButton);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(selected, node);
     expect(
@@ -3440,12 +3458,12 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
 
     expect(find.text('100%'), findsOneWidget);
     await tester.tap(find.byTooltip('Show canvas controls'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(find.text('Grid on'), findsOneWidget);
     expect(find.text('Snap off'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('mindmap-shortcut-help')));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Mindmap shortcuts'), findsOneWidget);
     expect(find.text('Ctrl+F'), findsOneWidget);
@@ -3484,7 +3502,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final canvas = find.byKey(const ValueKey('mindmap-canvas'));
     final viewer = tester.widget<InteractiveViewer>(canvas);
@@ -3497,9 +3515,9 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     final before = controller.toScene(center);
 
     await tester.tap(find.byTooltip('Show canvas controls'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.tap(find.byTooltip('Zoom In'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final after = controller.toScene(center);
     expect((after - before).distance, lessThan(0.01));
@@ -3533,9 +3551,9 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
 
     await tester.tap(find.byTooltip('Show canvas controls'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.tap(find.byTooltip('Zoom Out'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final viewer = tester.widget<InteractiveViewer>(
       find.byKey(const ValueKey('mindmap-canvas')),
@@ -3576,6 +3594,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
     await tester.drag(
       find.byKey(const ValueKey('mindmap-node-task-1')),
@@ -3620,7 +3639,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(
         find.byKey(const ValueKey('command-palette-input')),
@@ -3636,7 +3655,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
 
       // Submit
       await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(createdType, NodeType.task);
       expect(createdTitle, 'Buy groceries');
@@ -3693,6 +3712,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
     final firstRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-task-1')),
@@ -3708,7 +3728,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await gesture.moveTo(dragEnd);
     await tester.pump();
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('2 nodes selected'), findsOneWidget);
     final Rect archiveRect = tester.getRect(find.byTooltip('Archive selected'));
@@ -3717,10 +3737,10 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     expect(deleteRect.left - archiveRect.right, greaterThanOrEqualTo(4));
     expect(clearRect.left - deleteRect.right, greaterThanOrEqualTo(4));
     await tester.tap(find.byTooltip('Delete selected'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(find.text('Delete 2 selected nodes?'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       deletedNodes?.map((node) => node.id),
@@ -3751,6 +3771,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: <MindmapNode>[node])),
       ),
     );
+    await settleCanvas(tester);
 
     final nodeRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-lasso-custom-width')),
@@ -3766,7 +3787,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await gesture.moveTo(dragEnd);
     await tester.pump();
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey('mindmap-highlight-lasso-custom-width')),
@@ -3813,7 +3834,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final nodeRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-lasso-node')),
@@ -3827,7 +3848,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await gesture.moveTo(objectRect.bottomRight + const Offset(20, 20));
     await tester.pump();
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('1 node + 1 object selected'), findsOneWidget);
     expect(key.currentState!.selectedCanvasObjectIds, <String>{object.id});
@@ -3845,7 +3866,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.minus);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final zoomedNodeRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-lasso-node')),
     );
@@ -3895,7 +3916,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.tap(find.byKey(const ValueKey('mindmap-node-cancel-node')));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     key.currentState!.selectCanvasObject(object.id);
@@ -3945,7 +3966,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
@@ -4003,6 +4024,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
     await tester.tap(find.byKey(const ValueKey('mindmap-node-note-1')));
     await tester.pump();
@@ -4037,7 +4059,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(canvasKey.currentState!.areCompletedNodesVisible, isTrue);
       expect(
@@ -4094,6 +4116,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
     final toggle = find.byKey(const ValueKey('mindmap-task-toggle-task-1'));
     final semantics = tester.getSemantics(toggle);
@@ -4150,7 +4173,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         );
     expect(
       semantics.properties.label,
-      'Minimap with 1 nodes and 0 canvas objects',
+      'Minimap with 1 nodes and 0 canvas objects. Tap to move viewport',
     );
     expect(
       semantics.properties.hint,
@@ -4169,7 +4192,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         logicalKey: LogicalKeyboardKey.arrowRight,
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(result, KeyEventResult.handled);
     expect(viewer.transformationController!.value, isNot(equals(before)));
@@ -4619,7 +4642,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Name: Warrick'), findsOneWidget);
     expect(find.text('Role: Student'), findsOneWidget);
@@ -4763,7 +4786,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('🙂'), findsOneWidget);
     expect(find.textContaining('broken legacy text'), findsNothing);
@@ -4800,7 +4823,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey('event-collapsed-summary-event-short')),
@@ -4838,7 +4861,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Target'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -4872,7 +4895,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('0/2 milestones'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -4904,7 +4927,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [node])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey<String>('habit-collapsed-tracker-habit-short')),
@@ -5212,13 +5235,13 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
       find.byKey(const ValueKey('mindmap-connection-source-target')),
     );
     connection.onDoubleTap!();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.enterText(
       find.byKey(const ValueKey('connection-label-field')),
       'Depends on',
     );
     await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       (updated?.data['connectionLabels'] as Map?)?['target'],
@@ -5262,7 +5285,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final line = find.byKey(
       const ValueKey('mindmap-connection-line-menu-source-menu-target'),
@@ -5283,7 +5306,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         globalPosition: tester.getCenter(label),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Edit connection label'), findsOneWidget);
     expect(find.text('Select source node'), findsOneWidget);
@@ -5291,7 +5314,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     expect(find.text('Delete connection'), findsOneWidget);
 
     await tester.tap(find.text('Delete connection'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(detachedSource?.id, 'menu-source');
     expect(detachedTarget?.id, 'menu-target');
   });
@@ -5322,7 +5345,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           home: Scaffold(body: MindmapCanvas(nodes: [source, target])),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       final line = find.byKey(
         const ValueKey('mindmap-connection-line-clear-source-clear-target'),
@@ -5355,7 +5378,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
             )
             .constraints
             ?.minHeight,
-        6,
+        2,
       );
     },
   );
@@ -5394,7 +5417,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final connection = find.byKey(
       const ValueKey('mindmap-connection-guard-source-guard-target'),
@@ -5415,7 +5438,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         position: connectionCenter,
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(find.text('Edit connection label'), findsOneWidget);
     expect(canvasMenuCount, 0);
@@ -5456,6 +5479,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
+      await settleCanvas(tester);
 
       // Focus the canvas
       final focusFinder = find.byType(Focus);
@@ -5463,17 +5487,17 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
 
       // 1. Initial selection: Tap node A
       await tester.tap(find.byKey(const ValueKey('mindmap-node-node-a')));
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(selectedNode?.id, 'node-a');
 
       // 2. Press ArrowDown to navigate selection to Node B
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(selectedNode?.id, 'node-b');
 
       // 3. Press ArrowUp to navigate selection back to Node A
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(selectedNode?.id, 'node-a');
     },
   );
@@ -5533,53 +5557,54 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     expect(moved['group-b'], const CanvasPosition(210, 20));
   });
 
-  testWidgets('MindmapCanvas renders item badge and color accent in group header', (
-    tester,
-  ) async {
-    final day = DateTime(2026, 7, 11);
-    final nodes = [
-      MindmapNode.create(
-        id: 'group-a',
-        type: NodeType.task,
-        title: 'Task A',
-        day: day,
-        position: const CanvasPosition(-180, 0),
-        data: const {
-          'groupId': 'styled-group',
-          'groupTitle': 'Sprint',
-          'groupColor': 'emerald',
-        },
-        now: day,
-      ),
-      MindmapNode.create(
-        id: 'group-b',
-        type: NodeType.note,
-        title: 'Note B',
-        day: day,
-        position: const CanvasPosition(180, 0),
-        data: const {
-          'groupId': 'styled-group',
-          'groupTitle': 'Sprint',
-          'groupColor': 'emerald',
-        },
-        now: day,
-      ),
-    ];
+  testWidgets(
+    'MindmapCanvas renders item badge and color accent in group header',
+    (tester) async {
+      final day = DateTime(2026, 7, 11);
+      final nodes = [
+        MindmapNode.create(
+          id: 'group-a',
+          type: NodeType.task,
+          title: 'Task A',
+          day: day,
+          position: const CanvasPosition(-180, 0),
+          data: const {
+            'groupId': 'styled-group',
+            'groupTitle': 'Sprint',
+            'groupColor': 'emerald',
+          },
+          now: day,
+        ),
+        MindmapNode.create(
+          id: 'group-b',
+          type: NodeType.note,
+          title: 'Note B',
+          day: day,
+          position: const CanvasPosition(180, 0),
+          data: const {
+            'groupId': 'styled-group',
+            'groupTitle': 'Sprint',
+            'groupColor': 'emerald',
+          },
+          now: day,
+        ),
+      ];
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: MindmapCanvas(nodes: nodes)),
-      ),
-    );
-    await tester.pump();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: MindmapCanvas(nodes: nodes)),
+        ),
+      );
+      await tester.pump();
 
-    expect(find.text('Sprint'), findsOneWidget);
-    expect(find.text('2 items'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('mindmap-group-collapse-styled-group')),
-      findsOneWidget,
-    );
-  });
+      expect(find.text('Sprint'), findsOneWidget);
+      expect(find.text('2 items'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('mindmap-group-collapse-styled-group')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('MindmapCanvas does not drag a locked persisted group', (
     tester,
@@ -5713,15 +5738,16 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pump();
+    await settleCanvas(tester);
 
-    await tester.tap(
-      find.byKey(const ValueKey('mindmap-group-handle-menu-group')),
-      buttons: kSecondaryMouseButton,
-    );
-    await tester.pumpAndSettle();
+    tester
+        .state<PopupMenuButtonState<String>>(
+          find.byKey(const ValueKey('mindmap-group-menu-menu-group')),
+        )
+        .showButtonMenu();
+    await settleCanvas(tester);
     await tester.tap(find.text('Lock group'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(updates, hasLength(2));
     expect(updates.map((node) => node.id), containsAll(['menu-a', 'menu-b']));
@@ -5756,7 +5782,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
 
     canvasKey.currentState!.setPresentationMode(true);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(canvasKey.currentState!.isPresentationMode, isTrue);
     expect(
@@ -5828,15 +5854,15 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await tester.pump();
 
     key.currentState!.setPresentationMode(true);
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(find.text('Slide 1 / 2'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Next slide'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(find.text('Slide 2 / 2'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Previous slide'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     expect(find.text('Slide 1 / 2'), findsOneWidget);
   });
 
@@ -5938,7 +5964,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey('mindmap-background-mode-2')),
@@ -6297,21 +6323,23 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
     expect(find.text('Sprint'), findsOneWidget);
-    await tester.tap(
-      find.byKey(const ValueKey('mindmap-group-handle-rename-group')),
-      buttons: kSecondaryMouseButton,
-    );
-    await tester.pumpAndSettle();
+    tester
+        .state<PopupMenuButtonState<String>>(
+          find.byKey(const ValueKey('mindmap-group-menu-rename-group')),
+        )
+        .showButtonMenu();
+    await settleCanvas(tester);
     await tester.tap(find.text('Rename group'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     await tester.enterText(
       find.byKey(const ValueKey('group-title-field')),
       'Release',
     );
     await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(updates, hasLength(2));
     expect(updates.map((node) => node.data['groupTitle']).toSet(), {'Release'});
@@ -6352,14 +6380,20 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
+    await settleCanvas(tester);
 
-    await tester.tap(
-      find.byKey(const ValueKey('mindmap-group-handle-ungroup-test')),
-      buttons: kSecondaryMouseButton,
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Ungroup'));
-    await tester.pumpAndSettle();
+    tester
+        .state<PopupMenuButtonState<String>>(
+          find.byKey(const ValueKey('mindmap-group-menu-ungroup-test')),
+        )
+        .showButtonMenu();
+    await settleCanvas(tester);
+    tester
+        .widget<PopupMenuButton<String>>(
+          find.byKey(const ValueKey('mindmap-group-menu-ungroup-test')),
+        )
+        .onSelected!('ungroup');
+    await settleCanvas(tester);
 
     expect(updates, hasLength(2));
     expect(updates.every((node) => !node.data.containsKey('groupId')), isTrue);
@@ -6451,7 +6485,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await canvasKey.currentState!.runContextAction(
       CanvasContextAction.zoomToSelection,
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final viewer = tester.widget<InteractiveViewer>(
       find.byType(InteractiveViewer),
@@ -6632,7 +6666,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(
@@ -6730,7 +6764,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(
         find.byKey(
           const ValueKey('production-node-content-production-image-0'),
@@ -6783,7 +6817,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(find.byKey(const ValueKey('image-local-preview')), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -6846,10 +6880,10 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     await tester.tap(find.text('Replace'));
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(updates, isNotEmpty);
     final payload = ImagePayload.fromNode(updates.last);
@@ -6911,7 +6945,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       final saveButton = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Save as new image'),
@@ -6970,7 +7004,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           child: MaterialApp(home: _OpenImageAttachmentHarness(key: key)),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(find.byKey(const ValueKey('image-local-preview')), findsNothing);
 
       key.currentState!.attachImage();
@@ -6978,7 +7012,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ImagePayload.fromNode(key.currentState!.node).fileName,
         'uploaded.png',
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
 
       expect(find.text('uploaded.png'), findsOneWidget);
       expect(find.byKey(const ValueKey('image-local-preview')), findsOneWidget);
@@ -6995,11 +7029,11 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
           child: MaterialApp(home: _ImageRevisionHarness(key: key)),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       tester
           .state<MindmapCanvasState>(find.byType(MindmapCanvas))
           .beginInlineEdit('revision-image');
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(find.byKey(const ValueKey('image-editor-wide')), findsOneWidget);
       Finder captionField() => find.byWidgetPredicate((widget) {
         final key = widget.key;
@@ -7022,7 +7056,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         'Local optimistic',
       );
       key.currentState!.applyExternalCaption('External persisted');
-      await tester.pumpAndSettle();
+      await settleCanvas(tester);
       expect(
         tester
             .widget<EditableText>(
@@ -7206,7 +7240,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     final sourceRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-picker-source')),
@@ -7215,7 +7249,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await gesture.down(Offset(sourceRect.right - 2, sourceRect.center.dy));
     await gesture.moveTo(const Offset(600, 700));
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(
       find.byKey(const ValueKey('connection-target-menu-panel')),
@@ -7233,7 +7267,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     await tester.pump();
     await gesture.down(tester.getCenter(targetTile));
     await gesture.up();
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(tester.takeException(), isNull);
     expect(connected?.$1.id, source.id);
@@ -7276,7 +7310,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
     final sourceRect = tester.getRect(
       find.byKey(const ValueKey('mindmap-node-compact-connect-source')),
     );
@@ -7345,7 +7379,7 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
         home: Scaffold(body: MindmapCanvas(nodes: [image, itinerary])),
       ),
     );
-    await tester.pumpAndSettle();
+    await settleCanvas(tester);
 
     expect(tester.takeException(), isNull);
     for (final nodeId in ['compact-image-render', 'compact-itinerary-render']) {

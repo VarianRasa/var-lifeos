@@ -1,8 +1,8 @@
 /// App shell with adaptive Astryx navigation.
 ///
-/// Mobile (<=768px) uses a drawer, medium widths use a compact rail, and
-/// desktop (>1024px) uses an extended rail. Feature pages keep their own
-/// content scaffolds while this shell manages navigation and global shortcuts.
+/// Mobile (<=768px) uses a drawer. Larger non-Windows layouts use TopNav;
+/// Windows uses native-style title menus. Feature pages keep their own content
+/// scaffolds while this shell manages navigation and global shortcuts.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,10 +12,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
 import '../../core/utils/date_utils.dart';
 import '../../features/command/global_command_palette.dart';
 import '../../features/command/presentation/quick_capture_dock.dart';
 import '../../features/focus/widgets/top_bar_focus_timer_pill.dart';
+import '../widgets/astryx_kbd.dart';
 import 'desktop_window_chrome.dart';
 
 final navigationSidebarCollapsedProvider = StateProvider<bool>((ref) => false);
@@ -45,7 +48,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
   }
 
   void _handleDesktopMenu() {
-    final action = desktopMenuController.action;
+    final action = desktopMenuController.takeAction();
     if (action == null || !mounted) return;
     switch (action) {
       case DesktopMenuAction.quickCapture:
@@ -74,6 +77,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
           applicationVersion: '1.0.1',
         );
       case DesktopMenuAction.calendar:
+      case DesktopMenuAction.search:
       case DesktopMenuAction.focus:
       case DesktopMenuAction.goalsHabits:
       case DesktopMenuAction.notesJournal:
@@ -96,9 +100,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         _routeFromLocation(uri.path);
     final size = MediaQuery.sizeOf(context);
     final isMobile = size.width <= LayoutConstants.mobileBreakpoint;
-    final canExtend = size.width > LayoutConstants.mediumBreakpoint;
     final isSidebarCollapsed = ref.watch(navigationSidebarCollapsedProvider);
-    final isExtended = canExtend && !isSidebarCollapsed;
     final theme = Theme.of(context);
     final pageTheme = theme.copyWith(
       scaffoldBackgroundColor: Colors.transparent,
@@ -128,12 +130,18 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
             context.go('/calendar/${dayKey(DateTime.now())}'),
         const SingleActivator(LogicalKeyboardKey.keyT, meta: true): () =>
             context.go('/calendar/${dayKey(DateTime.now())}'),
-        const SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
+        const SingleActivator(LogicalKeyboardKey.keyB, control: true): () {
+          if (windowsDesktop) {
+            desktopMenuController.openNavigateMenu();
+          } else {
             ref.read(navigationSidebarCollapsedProvider.notifier).state =
-                !isSidebarCollapsed,
-        const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
-            ref.read(navigationSidebarCollapsedProvider.notifier).state =
-                !isSidebarCollapsed,
+                !isSidebarCollapsed;
+          }
+        },
+        if (!windowsDesktop)
+          const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
+              ref.read(navigationSidebarCollapsedProvider.notifier).state =
+                  !isSidebarCollapsed,
       },
       child: Focus(
         autofocus: true,
@@ -156,15 +164,11 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
                           ),
                         ],
                       )
-                    : Row(
+                    : Column(
                         children: [
-                          _AstryxNavigationRail(
+                          AstryxTopNav(
                             route: route,
-                            extended: isExtended,
-                          ),
-                          VerticalDivider(
-                            width: 1,
-                            color: theme.colorScheme.outlineVariant,
+                            navigationCollapsed: isSidebarCollapsed,
                           ),
                           Expanded(
                             child: Theme(data: pageTheme, child: widget.body),
@@ -195,108 +199,11 @@ const _analysisRoutes = <AppRoute>[AppRoute.insights, AppRoute.graph];
 
 const _systemRoutes = <AppRoute>[AppRoute.collab, AppRoute.settings];
 
-class _AstryxNavigationRail extends ConsumerWidget {
-  const _AstryxNavigationRail({required this.route, required this.extended});
-
-  final AppRoute route;
-  final bool extended;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    const destinations = AppRoute.values;
-    final selectedIndex = destinations.indexOf(route);
-    return SizedBox(
-      key: ValueKey(extended ? 'astryx-extended-rail' : 'astryx-compact-rail'),
-      width: extended
-          ? LayoutConstants.extendedNavigationWidth
-          : LayoutConstants.compactNavigationWidth,
-      child: NavigationRail(
-        extended: extended,
-        minWidth: LayoutConstants.compactNavigationWidth,
-        minExtendedWidth: LayoutConstants.extendedNavigationWidth,
-        selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
-        onDestinationSelected: (index) =>
-            context.go(appRouteLocation(context, destinations[index])),
-        leading: Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _BrandMark(),
-              const SizedBox(height: 8),
-              IconButton(
-                key: const ValueKey('astryx-rail-collapse'),
-                tooltip: extended ? 'Collapse navigation' : 'Expand navigation',
-                onPressed: () {
-                  final collapsed = ref.read(
-                    navigationSidebarCollapsedProvider,
-                  );
-                  ref.read(navigationSidebarCollapsedProvider.notifier).state =
-                      !collapsed;
-                },
-                icon: Icon(
-                  extended
-                      ? Icons.keyboard_double_arrow_left
-                      : Icons.keyboard_double_arrow_right,
-                ),
-              ),
-            ],
-          ),
-        ),
-        scrollable: true,
-        trailing: Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TopBarFocusTimerPill(
-                compact: !extended,
-                onTap: () =>
-                    context.go(appRouteLocation(context, AppRoute.focus)),
-              ),
-              const SizedBox(height: 4),
-              IconButton(
-                key: const ValueKey('astryx-command-button'),
-                tooltip: 'Command palette (Ctrl/⌘+K)',
-                onPressed: () => showGlobalCommandPalette(context),
-                icon: const Icon(Icons.manage_search_outlined),
-              ),
-              IconButton(
-                key: const ValueKey('astryx-quick-capture-button'),
-                tooltip: 'Quick capture (Ctrl/⌘+Q)',
-                onPressed: () {
-                  final visible = ref.read(quickCaptureVisibleProvider);
-                  ref.read(quickCaptureVisibleProvider.notifier).state =
-                      !visible;
-                },
-                icon: const Icon(Icons.bolt_outlined),
-              ),
-              if (extended)
-                Text(
-                  'Var LifeOS',
-                  style: theme.textTheme.labelMedium,
-                  textAlign: TextAlign.center,
-                ),
-            ],
-          ),
-        ),
-        destinations: [
-          for (final destination in destinations)
-            NavigationRailDestination(
-              icon: Tooltip(
-                key: ValueKey('astryx-rail-${destination.name}'),
-                message: destination.label,
-                child: Icon(destination.icon),
-              ),
-              selectedIcon: Icon(destination.selectedIcon),
-              label: Text(destination.label),
-            ),
-        ],
-      ),
-    );
-  }
-}
+const _navigationRoutes = <AppRoute>[
+  ..._primaryRoutes,
+  ..._analysisRoutes,
+  ..._systemRoutes,
+];
 
 class _MobileShellHeader extends ConsumerWidget {
   const _MobileShellHeader({required this.route});
@@ -324,15 +231,17 @@ class _MobileShellHeader extends ConsumerWidget {
               Expanded(
                 child: Text(
                   route.label,
-                  style: Theme.of(context).textTheme.headlineMedium,
+                  style: Theme.of(context).textTheme.titleLarge,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              TopBarFocusTimerPill(
-                compact: true,
-                onTap: () =>
-                    context.go(appRouteLocation(context, AppRoute.focus)),
+              Flexible(
+                child: TopBarFocusTimerPill(
+                  compact: true,
+                  onTap: () =>
+                      context.go(appRouteLocation(context, AppRoute.focus)),
+                ),
               ),
               IconButton(
                 key: const ValueKey('astryx-mobile-quick-capture'),
@@ -366,10 +275,10 @@ class _AstryxNavigationDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     return NavigationDrawer(
       key: const ValueKey('astryx-mobile-drawer'),
-      selectedIndex: AppRoute.values.indexOf(route),
+      selectedIndex: _navigationRoutes.indexOf(route),
       onDestinationSelected: (index) {
         Navigator.of(context).pop();
-        context.go(appRouteLocation(context, AppRoute.values[index]));
+        context.go(appRouteLocation(context, _navigationRoutes[index]));
       },
       children: [
         const SafeArea(
@@ -435,4 +344,284 @@ AppRoute _routeFromLocation(String location) {
     return AppRoute.settings;
   }
   return AppRoute.calendar;
+}
+
+/// Astryx TopNav navigation header component for Web & Desktop shell.
+class AstryxTopNav extends ConsumerWidget {
+  const AstryxTopNav({
+    required this.route,
+    this.navigationCollapsed = false,
+    super.key,
+  });
+
+  final AppRoute route;
+  final bool navigationCollapsed;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
+    final tokens = AppDesignTokens.of(context);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final showMenu =
+            width >= 900 &&
+            !navigationCollapsed &&
+            (textScale < 2 || width >= 1440);
+        final showSearchText = width >= 720 && textScale < 2;
+        return Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: semantic.surface,
+            border: Border(bottom: BorderSide(color: semantic.border)),
+          ),
+          child: Row(
+            children: [
+              // Brand
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(tokens.radiusInner),
+                    child: Image.asset(
+                      'assets/branding/app_icon.png',
+                      width: 22,
+                      height: 22,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  if (showSearchText) ...[
+                    const SizedBox(width: 10),
+                    Text('Var LifeOS', style: theme.textTheme.labelLarge),
+                  ],
+                ],
+              ),
+              const SizedBox(width: 20),
+
+              // Menu Dropdowns (File, Navigate, Tools)
+              if (showMenu) ...[
+                const _TopNavMenuBar(),
+                const SizedBox(width: 20),
+              ],
+
+              // Search / Command Trigger Bar
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    child: InkWell(
+                      key: const ValueKey('astryx-topnav-search'),
+                      onTap: () => showGlobalCommandPalette(context),
+                      borderRadius: BorderRadius.circular(tokens.radiusElement),
+                      child: Container(
+                        constraints: BoxConstraints(
+                          minHeight: tokens.minimumTarget,
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: semantic.surfaceRaised,
+                          borderRadius: BorderRadius.circular(
+                            tokens.radiusElement,
+                          ),
+                          border: Border.all(color: semantic.border),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.search,
+                              size: 16,
+                              color: semantic.textSecondary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Search nodes...',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: semantic.textSecondary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const AstryxKbd(label: 'Ctrl K'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 16),
+
+              // Right Controls (Timer, Capture, Settings)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TopBarFocusTimerPill(
+                    compact: !showSearchText,
+                    onTap: () =>
+                        context.go(appRouteLocation(context, AppRoute.focus)),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    key: const ValueKey('astryx-topnav-quick-capture'),
+                    tooltip: 'Quick capture (Ctrl+Q)',
+                    onPressed: () {
+                      final visible = ref.read(quickCaptureVisibleProvider);
+                      ref.read(quickCaptureVisibleProvider.notifier).state =
+                          !visible;
+                    },
+                    icon: const Icon(Icons.bolt_outlined, size: 20),
+                  ),
+                  IconButton(
+                    key: const ValueKey('astryx-topnav-settings'),
+                    tooltip: 'Settings',
+                    onPressed: () => context.go(
+                      appRouteLocation(context, AppRoute.settings),
+                    ),
+                    icon: const Icon(Icons.settings_outlined, size: 20),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TopNavMenuBar extends StatelessWidget {
+  const _TopNavMenuBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = AppSemanticColors.of(context);
+    final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
+
+    final menuButtonStyle = ButtonStyle(
+      minimumSize: WidgetStatePropertyAll(
+        Size(tokens.minimumTarget, tokens.minimumTarget),
+      ),
+      visualDensity: VisualDensity.standard,
+      padding: const WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 10),
+      ),
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.hovered)
+            ? semantic.textPrimary
+            : semantic.textSecondary,
+      ),
+      backgroundColor: WidgetStateProperty.resolveWith(
+        (states) =>
+            states.contains(WidgetState.hovered) ||
+                states.contains(WidgetState.focused)
+            ? semantic.surfaceRaised
+            : Colors.transparent,
+      ),
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radiusInner),
+        ),
+      ),
+      textStyle: WidgetStatePropertyAll(theme.textTheme.labelMedium),
+    );
+
+    final popupStyle = MenuStyle(
+      backgroundColor: WidgetStatePropertyAll(semantic.surfaceRaised),
+      surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+      elevation: const WidgetStatePropertyAll(8),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 4)),
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radiusElement),
+          side: BorderSide(color: semantic.border),
+        ),
+      ),
+    );
+
+    return MenuBar(
+      style: const MenuStyle(
+        padding: WidgetStatePropertyAll(EdgeInsets.zero),
+        elevation: WidgetStatePropertyAll(0),
+        backgroundColor: WidgetStatePropertyAll(Colors.transparent),
+        surfaceTintColor: WidgetStatePropertyAll(Colors.transparent),
+      ),
+      children: [
+        _menu(
+          context,
+          'File',
+          {'Quick Capture': DesktopMenuAction.quickCapture},
+          menuButtonStyle,
+          popupStyle,
+        ),
+        _menu(
+          context,
+          'Navigate',
+          {
+            'Calendar': DesktopMenuAction.calendar,
+            'Focus': DesktopMenuAction.focus,
+            'Goals & Habits': DesktopMenuAction.goalsHabits,
+            'Notes & Journal': DesktopMenuAction.notesJournal,
+            'Workspaces': DesktopMenuAction.workspaces,
+            'Insights': DesktopMenuAction.insights,
+            'Graph': DesktopMenuAction.graph,
+            'Collab': DesktopMenuAction.collab,
+            'Settings': DesktopMenuAction.settings,
+          },
+          menuButtonStyle,
+          popupStyle,
+          includeSearch: true,
+        ),
+        _menu(
+          context,
+          'Tools',
+          {
+            'Command Palette': DesktopMenuAction.commandPalette,
+            'Recovery Center': DesktopMenuAction.recoveryCenter,
+          },
+          menuButtonStyle,
+          popupStyle,
+        ),
+      ],
+    );
+  }
+
+  Widget _menu(
+    BuildContext context,
+    String label,
+    Map<String, DesktopMenuAction> items,
+    ButtonStyle style,
+    MenuStyle popupStyle, {
+    bool includeSearch = false,
+  }) {
+    return SubmenuButton(
+      key: ValueKey('astryx-topnav-menu-${label.toLowerCase()}'),
+      style: style,
+      menuStyle: popupStyle,
+      menuChildren: [
+        if (includeSearch)
+          MenuItemButton(
+            onPressed: () => context.go('/search'),
+            child: const Text('Search'),
+          ),
+        for (final entry in items.entries)
+          MenuItemButton(
+            onPressed: () => desktopMenuController.invoke(entry.value),
+            child: Text(entry.key),
+          ),
+      ],
+      child: Text(label),
+    );
+  }
 }

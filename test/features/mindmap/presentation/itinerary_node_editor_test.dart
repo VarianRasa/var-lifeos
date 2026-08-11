@@ -635,7 +635,7 @@ void main() {
     final policyHeight = InlineNodeWorkspacePolicy.expandedSizeForNode(
       node,
     ).height;
-    expect(policyHeight - editorHeight, inInclusiveRange(115, 145));
+    expect(policyHeight - editorHeight, inInclusiveRange(95, 115));
     expect(tester.takeException(), isNull);
   });
 

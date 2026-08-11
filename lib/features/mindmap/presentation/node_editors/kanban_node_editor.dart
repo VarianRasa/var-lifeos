@@ -100,6 +100,43 @@ final class _KanbanNodeEditorState extends State<KanbanNodeEditor> {
     );
   }
 
+  Future<void> _setColumnWipLimit(KanbanColumnDefinition column) async {
+    final value = await _textDialog(
+      'Set WIP limit',
+      column.wipLimit?.toString() ?? '',
+    );
+    if (value == null) return;
+    final limit = int.tryParse(value);
+    if (value.isNotEmpty && (limit == null || limit <= 0)) {
+      _showWipMessage('WIP limit must be a positive number.');
+      return;
+    }
+    _emit(
+      board.copyWith(
+        columns: [
+          for (final item in board.columns)
+            item.id == column.id
+                ? item.copyWith(wipLimit: limit, clearWipLimit: value.isEmpty)
+                : item,
+        ],
+      ),
+    );
+  }
+
+  void _showWipMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _moveCard(String cardId, KanbanColumnDefinition column, int order) {
+    if (!board.canAddCardTo(column.id, movingCardId: cardId)) {
+      _showWipMessage('${column.title} reached WIP limit ${column.wipLimit}.');
+      return;
+    }
+    _emit(board.moveCard(cardId, column.id, order));
+  }
+
   void _moveColumn(String columnId, int targetIndex) {
     final columns = [...board.columns]
       ..sort((a, b) => a.order.compareTo(b.order));
@@ -172,6 +209,10 @@ final class _KanbanNodeEditorState extends State<KanbanNodeEditor> {
   }
 
   Future<void> _addCard(KanbanColumnDefinition column) async {
+    if (!board.canAddCardTo(column.id)) {
+      _showWipMessage('${column.title} reached WIP limit ${column.wipLimit}.');
+      return;
+    }
     final source = KanbanCard(
       id: const Uuid().v4(),
       title: '',
@@ -628,6 +669,8 @@ final class _KanbanNodeEditorState extends State<KanbanNodeEditor> {
                                       onAdd: () => _addCard(columns[index]),
                                       onRename: () =>
                                           _renameColumn(columns[index]),
+                                      onSetWipLimit: () =>
+                                          _setColumnWipLimit(columns[index]),
                                       onDelete: () =>
                                           _deleteColumn(columns[index]),
                                       onEdit: _editCard,
@@ -641,13 +684,8 @@ final class _KanbanNodeEditorState extends State<KanbanNodeEditor> {
                                                 widget.onAttachmentOpen!(
                                                   attachment,
                                                 ),
-                                      onDrop: (id, order) => _emit(
-                                        board.moveCard(
-                                          id,
-                                          columns[index].id,
-                                          order,
-                                        ),
-                                      ),
+                                      onDrop: (id, order) =>
+                                          _moveCard(id, columns[index], order),
                                     ),
                                   ),
                             ),
@@ -699,6 +737,7 @@ final class _Column extends StatelessWidget {
     required this.cards,
     required this.onAdd,
     required this.onRename,
+    required this.onSetWipLimit,
     required this.onDelete,
     required this.onEdit,
     required this.onDuplicate,
@@ -711,6 +750,7 @@ final class _Column extends StatelessWidget {
   final List<KanbanCard> cards;
   final VoidCallback onAdd;
   final VoidCallback onRename;
+  final VoidCallback onSetWipLimit;
   final VoidCallback onDelete;
   final ValueChanged<KanbanCard> onEdit;
   final ValueChanged<KanbanCard> onDuplicate;
@@ -764,15 +804,27 @@ final class _Column extends StatelessWidget {
                     child: _ColumnDragHandle(title: column.title),
                   ),
                 ),
-                Text('${cards.length}'),
+                Text(
+                  column.wipLimit == null
+                      ? '${cards.length}'
+                      : '${cards.length}/${column.wipLimit}',
+                ),
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'rename') onRename();
+                    if (value == 'wip') onSetWipLimit();
                     if (value == 'delete') onDelete();
                   },
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'rename', child: Text('Rename')),
-
+                    PopupMenuItem(
+                      value: 'wip',
+                      child: Text(
+                        column.wipLimit == null
+                            ? 'Set WIP limit'
+                            : 'Change WIP limit',
+                      ),
+                    ),
                     const PopupMenuDivider(),
                     const PopupMenuItem(value: 'delete', child: Text('Delete')),
                   ],

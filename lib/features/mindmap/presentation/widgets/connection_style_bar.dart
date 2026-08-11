@@ -24,11 +24,7 @@ class ConnectionStyleBar extends StatelessWidget {
         color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2)),
         ],
         border: Border.all(color: colorScheme.outlineVariant),
       ),
@@ -37,16 +33,14 @@ class ConnectionStyleBar extends StatelessWidget {
         children: [
           // Line type menu
           PopupMenuButton<ConnectionLineType>(
-            icon: Icon(
-              switch (style.lineType) {
-                ConnectionLineType.bezier => Icons.gesture,
-                ConnectionLineType.straight => Icons.show_chart,
-                ConnectionLineType.orthogonal => Icons.alt_route,
-              },
-              size: 18,
-            ),
+            icon: Icon(switch (style.lineType) {
+              ConnectionLineType.bezier => Icons.gesture,
+              ConnectionLineType.straight => Icons.show_chart,
+              ConnectionLineType.orthogonal => Icons.alt_route,
+            }, size: 18),
             tooltip: 'Line Style',
-            onSelected: (type) => onStyleChanged(style.copyWith(lineType: type)),
+            onSelected: (type) =>
+                onStyleChanged(style.copyWith(lineType: type)),
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: ConnectionLineType.bezier,
@@ -73,7 +67,8 @@ class ConnectionStyleBar extends StatelessWidget {
               size: 18,
             ),
             tooltip: 'Stroke Pattern',
-            onSelected: (pattern) => onStyleChanged(style.copyWith(linePattern: pattern)),
+            onSelected: (pattern) =>
+                onStyleChanged(style.copyWith(linePattern: pattern)),
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: ConnectionLinePattern.solid,
@@ -93,14 +88,11 @@ class ConnectionStyleBar extends StatelessWidget {
 
           // Arrowhead toggle
           IconButton(
-            icon: Icon(
-              switch (style.arrowhead) {
-                ConnectionArrowhead.target => Icons.east,
-                ConnectionArrowhead.both => Icons.sync_alt,
-                ConnectionArrowhead.none => Icons.horizontal_rule,
-              },
-              size: 18,
-            ),
+            icon: Icon(switch (style.arrowhead) {
+              ConnectionArrowhead.target => Icons.east,
+              ConnectionArrowhead.both => Icons.sync_alt,
+              ConnectionArrowhead.none => Icons.horizontal_rule,
+            }, size: 18),
             tooltip: 'Arrowhead',
             onPressed: () {
               final next = switch (style.arrowhead) {

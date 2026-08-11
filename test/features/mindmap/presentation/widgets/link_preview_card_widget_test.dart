@@ -17,9 +17,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: LinkPreviewCardWidget(metadata: metadata),
-        ),
+        home: Scaffold(body: LinkPreviewCardWidget(metadata: metadata)),
       ),
     );
 

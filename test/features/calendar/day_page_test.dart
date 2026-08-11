@@ -60,13 +60,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final canvas = find.byKey(const ValueKey('mindmap-canvas'));
-    final gesture = await tester.startGesture(
-      tester.getTopRight(canvas) - const Offset(40, -40),
-      kind: PointerDeviceKind.mouse,
-      buttons: kSecondaryMouseButton,
-    );
-    await gesture.up();
+    await _openCanvasContextMenu(tester);
     await tester.pumpAndSettle();
 
     expect(find.text('Create'), findsOneWidget);
@@ -1474,23 +1468,24 @@ void main() {
       'Edited selected task',
     );
 
-    expect(find.byKey(const ValueKey('ribbon-tab-node')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('ribbon-node-actions')));
+    await tester.tap(
+      find.byKey(const ValueKey('mindmap-node-task')),
+      buttons: kSecondaryMouseButton,
+    );
     await tester.pumpAndSettle();
-
-    expect(find.text('Node tools'), findsOneWidget);
-    final markDoneAction = find.widgetWithText(ActionChip, 'Mark done');
-    expect(markDoneAction, findsOneWidget);
-    tester.widget<ActionChip>(markDoneAction).onPressed!();
+    await tester.tap(find.text('Mark done'));
     await tester.pumpAndSettle();
 
     final task = (await repository.listNodes(day: day)).single;
     expect(task.isDone, isTrue);
     expect(task.title, 'Edited selected task');
 
-    final followUpAction = find.widgetWithText(ActionChip, 'Follow-up');
-    expect(followUpAction, findsOneWidget);
-    tester.widget<ActionChip>(followUpAction).onPressed!();
+    await tester.tap(
+      find.byKey(const ValueKey('mindmap-node-task')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Follow-up'));
     await tester.pumpAndSettle();
 
     final nodes = await repository.listNodes(day: day);
@@ -1644,11 +1639,12 @@ void main() {
       find.byKey(const ValueKey('productivity-move-now-title-field')),
       'Edited before move',
     );
-    await tester.tap(find.byKey(const ValueKey('ribbon-node-actions')));
+    await tester.tap(
+      find.byKey(const ValueKey('mindmap-node-move-now')),
+      buttons: kSecondaryMouseButton,
+    );
     await tester.pumpAndSettle();
-    tester
-        .widget<ActionChip>(find.widgetWithText(ActionChip, 'Tomorrow'))
-        .onPressed!();
+    await tester.tap(find.text('Tomorrow'));
     await tester.pumpAndSettle();
 
     final moved = (await repository.listNodes(
@@ -1679,6 +1675,7 @@ void main() {
       find.byKey(const ValueKey('productivity-json-latest-title-field')),
       'Latest JSON title',
     );
+    await tester.pump();
     String? exportedJson;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -1693,11 +1690,7 @@ void main() {
           .setMockMethodCallHandler(SystemChannels.platform, null);
     });
 
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-canvas')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('More canvas tools'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Copy canvas JSON'));
+    await tester.tap(find.byKey(const ValueKey('day-copy-canvas-json')));
     await tester.pumpAndSettle();
 
     expect(exportedJson, contains('Latest JSON title'));
@@ -1775,7 +1768,7 @@ void main() {
       find.byKey(const ValueKey('productivity-context-latest-title-field')),
       'Edited before context action',
     );
-    await tester.tap(find.byKey(const ValueKey('ribbon-clear-node-selection')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('mindmap-node-context-latest')),
@@ -1976,7 +1969,7 @@ void main() {
         .runContextAction(CanvasContextAction.selectAll);
     await tester.pumpAndSettle();
 
-    expect(find.text('2 selected'), findsOneWidget);
+    expect(find.text('2 nodes selected'), findsOneWidget);
     await tester.tap(find.byTooltip('Delete selected'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
@@ -2065,25 +2058,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('2026-06-18').last);
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Hide day tabs'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-
-    await tester.tap(find.byTooltip('Next day'));
-    await tester.pumpAndSettle();
-
+    expect(find.byKey(const Key('mobile-compact-header')), findsOneWidget);
+    expect(find.byKey(const ValueKey('day-mobile-view-menu')), findsOneWidget);
     expect(
       router.routeInformationProvider.value.uri.path,
-      '/calendar/2026-06-19',
+      '/calendar/2026-06-18',
     );
-    expect(find.byTooltip('Hide day tabs'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
     'DayPage day tabs collapse and selection rail state preservation',
     (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final day = DateTime(2026, 6, 18);
       final repository = InMemoryMindmapRepository(
         seedNodes: [
@@ -2110,46 +2100,26 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 1. Day tabs start collapsed (showing dayKey title)
-      const formattedDayStr = '2026-06-18';
-      expect(find.text(formattedDayStr), findsNWidgets(2));
-      expect(find.byIcon(Icons.calendar_view_week_rounded), findsOneWidget);
-
-      // Tap to expand day tabs
-      await tester.tap(find.text(formattedDayStr).last);
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Hide day tabs'), findsOneWidget);
-
-      // 2. Select node A -> shows compact mobile toolbar.
+      // Select node A in current floating canvas workspace.
       await tester
           .state<MindmapCanvasState>(find.byType(MindmapCanvas))
           .selectAndFocusNode((await repository.getNode('node-a'))!);
       await tester.pumpAndSettle();
-      expect(find.text('Tools'), findsOneWidget);
-
       expect(
         find.byKey(const ValueKey('inline-workspace-node-a')),
         findsOneWidget,
       );
-      // Open Node tab, then collapse expanded canvas workspace.
-      await tester.tap(find.text('Tools'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(Tab, 'Node'));
-      await tester.pumpAndSettle();
       tester
           .widget<IconButton>(
             find.byKey(const ValueKey('inline-workspace-collapse-node-a')),
           )
           .onPressed!();
       await tester.pumpAndSettle();
-      expect(find.text('Tools'), findsOneWidget);
-
-      // 3. Select node B -> only B expands.
+      // Select node B -> only B expands.
       await tester
           .state<MindmapCanvasState>(find.byType(MindmapCanvas))
           .selectAndFocusNode((await repository.getNode('node-b'))!);
       await tester.pumpAndSettle();
-      expect(find.text('Tools'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('inline-workspace-node-a')),
         findsNothing,
@@ -2189,82 +2159,65 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Board'), findsWidgets);
-    expect(find.textContaining('Pulse'), findsWidgets);
-    expect(find.text('Plan'), findsOneWidget);
-    expect(find.text('Capture'), findsOneWidget);
-    expect(find.byKey(const ValueKey('ribbon-active-tools')), findsOneWidget);
-    final homeToolsHeight = tester
-        .getSize(find.byKey(const ValueKey('ribbon-active-tools')))
-        .height;
-
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-insert')));
-    await tester.pumpAndSettle();
+    expect(find.byTooltip('Activity log'), findsOneWidget);
     expect(
-      tester.getSize(find.byKey(const ValueKey('ribbon-active-tools'))).height,
-      homeToolsHeight,
+      tester.getSize(find.byTooltip('Activity log')).height,
+      greaterThanOrEqualTo(44),
     );
-    expect(find.text('All types'), findsOneWidget);
-    expect(find.text('Task'), findsWidgets);
-    expect(find.text('Note'), findsOneWidget);
-    final allTypesRect = tester.getRect(
-      find.byKey(const ValueKey('ribbon-all-types')),
+    await _openCanvasContextMenu(tester);
+    expect(
+      find.byKey(const ValueKey('canvas-context-folder-create')),
+      findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('ribbon-all-types')));
-    await tester.pumpAndSettle();
-    final ribbonPanelRect = tester.getRect(
-      find.byKey(const ValueKey('canvas-add-node-context-panel')),
-    );
-    expect(ribbonPanelRect.top, greaterThanOrEqualTo(allTypesRect.bottom));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester
+        .state<MindmapCanvasState>(find.byType(MindmapCanvas))
+        .selectAndFocusNode((await repository.getNode('ribbon-node'))!);
     await tester.pumpAndSettle();
+    expect(find.byType(InlineNodeWorkspace), findsOneWidget);
+    expect(_inlineSaveStatus(), findsOneWidget);
+  });
 
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-canvas')));
-    await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const ValueKey('ribbon-active-tools'))).height,
-      homeToolsHeight,
+  testWidgets('DayPage node menu applies wide preset without losing fields', (
+    tester,
+  ) async {
+    final day = DateTime(2026, 7, 13);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'preset-task',
+          type: NodeType.task,
+          title: 'Preset task',
+          body: 'Keep body',
+          day: day,
+        ),
+      ],
     );
-    expect(find.text('Grid'), findsOneWidget);
-    expect(find.text('Snap'), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-view')));
-    await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const ValueKey('ribbon-active-tools'))).height,
-      homeToolsHeight,
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(home: DayPage(date: day)),
+      ),
     );
-    expect(find.text('Explorer'), findsOneWidget);
-    expect(find.text('Minimap'), findsOneWidget);
+    await tester.pumpAndSettle();
 
     await tester.tap(
-      find.byKey(const ValueKey('mindmap-node-ribbon-node')),
-      warnIfMissed: false,
+      find.byKey(const ValueKey('mindmap-node-preset-task')),
+      buttons: kSecondaryMouseButton,
     );
     await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const ValueKey('ribbon-active-tools'))).height,
-      homeToolsHeight,
-    );
-    expect(
-      find.byKey(const ValueKey('ribbon-node-size-presets')),
-      findsOneWidget,
-    );
-    expect(find.text('Edit'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('ribbon-node-save-status')),
-      findsOneWidget,
-    );
+    await tester.tap(find.text('Size: Wide'));
+    await tester.idle();
 
-    await tester.tap(find.byKey(const ValueKey('ribbon-clear-node-selection')));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Board'), findsWidgets);
+    final saved = await repository.getNode('preset-task');
+    expect(NodeUiStateCodec.read(saved!).sizePreset, NodeSizePreset.wide);
+    expect(saved.body, 'Keep body');
   });
 
   testWidgets(
     'Task15 contextual Node ribbon persists presets and gates media actions',
     (tester) async {
-      tester.view.physicalSize = const Size(1800, 1000);
+      tester.view.physicalSize = const Size(2400, 1600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -2303,8 +2256,25 @@ void main() {
         warnIfMissed: false,
       );
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('ribbon-tab-node')), findsOneWidget);
-      expect(find.byKey(const ValueKey('ribbon-media-replace')), findsNothing);
+      expect(find.byType(InlineNodeWorkspace), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('mindmap-node-task15-task')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('canvas-node-menu-media-replace')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('canvas-node-menu-media-export')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('canvas-node-menu-media-open')),
+        findsNothing,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       expect(
         find.byKey(const ValueKey('productivity-task15-task-title-field')),
         findsOneWidget,
@@ -2319,26 +2289,19 @@ void main() {
           'task15-task',
         ))!.copyWith(body: 'Concurrent body update'),
       );
-      await tester.tap(find.text('Wide'));
-      await tester.pumpAndSettle();
       final savedTask = await repository.getNode('task15-task');
-      expect(NodeUiStateCodec.read(savedTask!).sizePreset.name, 'wide');
-      expect(savedTask.body, 'Concurrent body update');
+      expect(savedTask!.body, 'Concurrent body update');
 
-      var semantics = tester.getSemantics(
-        find.byKey(const ValueKey('ribbon-node-save-status')),
-      );
-      expect(semantics.value, 'saved');
+      var semantics = tester.getSemantics(_inlineSaveStatus());
+      expect(semantics.label, contains('idle'));
       await tester.enterText(
         find.byKey(const ValueKey('productivity-task15-task-title-field')),
         'Task ribbon edited',
       );
       await tester.pump(const Duration(milliseconds: 450));
       await tester.pumpAndSettle();
-      semantics = tester.getSemantics(
-        find.byKey(const ValueKey('ribbon-node-save-status')),
-      );
-      expect(semantics.value, 'saved');
+      semantics = tester.getSemantics(_inlineSaveStatus());
+      expect(semantics.label, 'saved');
       expect(
         (await repository.getNode('task15-task'))!.title,
         'Task ribbon edited',
@@ -2349,29 +2312,29 @@ void main() {
         '   ',
       );
       await tester.pumpAndSettle();
-      semantics = tester.getSemantics(
-        find.byKey(const ValueKey('ribbon-node-save-status')),
-      );
-      expect(semantics.value, 'error');
+      semantics = tester.getSemantics(_inlineSaveStatus());
+      expect(semantics.label, 'save failed');
       await tester.enterText(
         find.byKey(const ValueKey('productivity-task15-task-title-field')),
         'Task ribbon corrected',
       );
       await tester.pump(const Duration(milliseconds: 450));
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-            .value,
-        'saved',
-      );
+      expect(tester.getSemantics(_inlineSaveStatus()).label, 'saved');
 
       await tester.enterText(
         find.byKey(const ValueKey('productivity-task15-task-body-field')),
         'Saved while deselecting',
       );
-      await tester.tap(
-        find.byKey(const ValueKey('ribbon-clear-node-selection')),
+      await tester.pump();
+      final taskContainer = ProviderScope.containerOf(
+        tester.element(find.byType(DayPage)),
+      );
+      expect(
+        await taskContainer
+            .read(inlineNodeWorkspaceControllerProvider.notifier)
+            .flush('task15-task'),
+        isTrue,
       );
       await tester.pumpAndSettle();
       expect(find.textContaining('Board'), findsWidgets);
@@ -2405,31 +2368,37 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-      await tester.pumpAndSettle();
+      final remoteImageEditor = find.byType(InlineNodeWorkspace);
+      final remoteImageReplace = find.descendant(
+        of: remoteImageEditor,
+        matching: find.widgetWithText(OutlinedButton, 'Replace'),
+      );
+      expect(remoteImageReplace, findsOneWidget);
       expect(
-        find.byKey(const ValueKey('ribbon-media-replace')),
+        find.descendant(
+          of: remoteImageEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Open externally'),
+        ),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('ribbon-media-export')), findsOneWidget);
-      expect(find.byKey(const ValueKey('ribbon-media-open')), findsOneWidget);
       expect(
-        tester
-            .widget<OutlinedButton>(
-              find.byKey(const ValueKey('ribbon-media-export')),
-            )
-            .onPressed,
-        isNull,
+        find.descendant(
+          of: remoteImageEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Export'),
+        ),
+        findsNothing,
       );
-      expect(
-        tester
-            .widget<OutlinedButton>(
-              find.byKey(const ValueKey('ribbon-media-open')),
+      await tester.dragUntilVisible(
+        remoteImageReplace,
+        find
+            .descendant(
+              of: remoteImageEditor,
+              matching: find.byType(Scrollable),
             )
-            .onPressed,
-        isNotNull,
+            .last,
+        const Offset(0, -300),
       );
-      await tester.tap(find.byKey(const ValueKey('ribbon-media-replace')));
+      await tester.tap(remoteImageReplace);
       await tester.pumpAndSettle();
       expect(find.text('Add image'), findsWidgets);
       await imageRepository.saveNode(
@@ -2459,9 +2428,6 @@ void main() {
         ImagePayload.fromNode(replacedImage).caption,
         'Concurrent caption',
       );
-      await tester.tap(find.byKey(const ValueKey('ribbon-media-open')));
-      await tester.pump();
-
       final attachmentRepository = _RecordingAttachmentRepository();
       var fileExportCalls = 0;
       Future<String> recordExport(Uint8List bytes, String fileName) async {
@@ -2503,22 +2469,38 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('ribbon-media-export')));
+      final localImageEditor = find.byType(InlineNodeWorkspace);
+      expect(
+        find.descendant(
+          of: localImageEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Replace'),
+        ),
+        findsOneWidget,
+      );
+      final localImageExport = find.descendant(
+        of: localImageEditor,
+        matching: find.widgetWithText(OutlinedButton, 'Export'),
+      );
+      expect(localImageExport, findsOneWidget);
+      expect(
+        find.descendant(
+          of: localImageEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Open externally'),
+        ),
+        findsNothing,
+      );
+      await tester.dragUntilVisible(
+        localImageExport,
+        find
+            .descendant(of: localImageEditor, matching: find.byType(Scrollable))
+            .last,
+        const Offset(0, -300),
+      );
+      await tester.tap(localImageExport);
       await tester.pumpAndSettle();
       expect(attachmentRepository.exportCalls, 1);
       expect(fileExportCalls, 1);
       expect(find.textContaining('Exported to'), findsOneWidget);
-      expect(
-        tester
-            .widget<OutlinedButton>(
-              find.byKey(const ValueKey('ribbon-media-open')),
-            )
-            .onPressed,
-        isNull,
-      );
-
       final localVideoRepository = InMemoryMindmapRepository(
         seedNodes: [
           MindmapNode.create(
@@ -2554,10 +2536,34 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.byKey(const ValueKey('ribbon-media-export')));
+      final localVideoEditor = find.byType(InlineNodeWorkspace);
+      expect(
+        find.descendant(
+          of: localVideoEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Replace'),
+        ),
+        findsOneWidget,
+      );
+      final localVideoExport = find.descendant(
+        of: localVideoEditor,
+        matching: find.widgetWithText(OutlinedButton, 'Export'),
+      );
+      expect(localVideoExport, findsOneWidget);
+      expect(
+        find.descendant(
+          of: localVideoEditor,
+          matching: find.widgetWithText(OutlinedButton, 'Open externally'),
+        ),
+        findsNothing,
+      );
+      await tester.dragUntilVisible(
+        localVideoExport,
+        find
+            .descendant(of: localVideoEditor, matching: find.byType(Scrollable))
+            .last,
+        const Offset(0, -300),
+      );
+      await tester.tap(localVideoExport);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(attachmentRepository.exportCalls, 2);
@@ -2602,12 +2608,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 450));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-          .value,
-      'error',
-    );
+    expect(tester.getSemantics(_inlineSaveStatus()).label, 'save failed');
 
     await tester.tap(
       find.byKey(const ValueKey('inline-workspace-retry-task15-fail')),
@@ -2652,27 +2653,12 @@ void main() {
       'Saving state edited',
     );
     await tester.pump();
-    expect(
-      tester
-          .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-          .value,
-      'dirty',
-    );
+    expect(tester.getSemantics(_inlineSaveStatus()).label, 'unsaved');
     await tester.pump(const Duration(milliseconds: 450));
-    expect(
-      tester
-          .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-          .value,
-      'saving',
-    );
+    expect(tester.getSemantics(_inlineSaveStatus()).label, 'saving');
     repository.completeSave();
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-          .value,
-      'saved',
-    );
+    expect(tester.getSemantics(_inlineSaveStatus()).label, 'saved');
   });
 
   testWidgets('Task15 applies only latest async selection transition', (
@@ -2747,10 +2733,7 @@ void main() {
     repository.completeSave();
     await tester.pumpAndSettle();
     expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('ribbon-active-tools')),
-        matching: find.text('Goal'),
-      ),
+      find.byKey(const ValueKey('inline-workspace-race-c')),
       findsOneWidget,
     );
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -2774,7 +2757,7 @@ void main() {
       find.byKey(const ValueKey('productivity-race-a-body-field')),
       'Clear race draft',
     );
-    await tester.tap(find.byKey(const ValueKey('ribbon-clear-node-selection')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     unawaited(
       canvasState.selectAndFocusNode(
         (await repository.listNodes(
@@ -2786,18 +2769,10 @@ void main() {
     repository.completeSave();
     await tester.pumpAndSettle();
     expect(
-      find.descendant(
-        of: find.byKey(const ValueKey('ribbon-active-tools')),
-        matching: find.text('Note'),
-      ),
+      find.byKey(const ValueKey('inline-workspace-race-b')),
       findsOneWidget,
     );
-    expect(
-      tester
-          .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-          .value,
-      'idle',
-    );
+    expect(tester.getSemantics(_inlineSaveStatus()).label, 'idle');
     repository.holdNextSave();
     await tester.enterText(
       find.byKey(const ValueKey('note-markdown-editor')),
@@ -2881,12 +2856,7 @@ void main() {
             .selected,
         isTrue,
       );
-      expect(
-        tester
-            .getSemantics(find.byKey(const ValueKey('ribbon-node-save-status')))
-            .value,
-        'idle',
-      );
+      expect(tester.getSemantics(_inlineSaveStatus()).label, 'idle');
     },
   );
 
@@ -2906,9 +2876,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-insert')));
+    await _openCanvasContextMenu(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('canvas-context-folder-create')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-all-types')));
+    await tester.tap(
+      find.byKey(const ValueKey('canvas-context-action-createNode')),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byWidgetPredicate(
@@ -2919,12 +2894,11 @@ void main() {
       'Image',
     );
     await tester.pumpAndSettle();
-    final imageTile = find.ancestor(
-      of: find.text('Image'),
-      matching: find.byType(InkWell),
+    await tester.tap(
+      find.byWidgetPredicate(
+        (widget) => widget is Text && widget.data == 'Image',
+      ),
     );
-    expect(imageTile, findsOneWidget);
-    await tester.tap(imageTile);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('image-import-url')), findsOneWidget);
     expect(find.text('Import local image'), findsOneWidget);
@@ -2963,9 +2937,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-insert')));
+    await _openCanvasContextMenu(tester);
+    await tester.tap(
+      find.byKey(const ValueKey('canvas-context-folder-create')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-all-types')));
+    await tester.tap(
+      find.byKey(const ValueKey('canvas-context-action-createNode')),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byWidgetPredicate(
@@ -2977,7 +2956,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(
-      find.ancestor(of: find.text('Video'), matching: find.byType(InkWell)),
+      find.byWidgetPredicate(
+        (widget) => widget is Text && widget.data == 'Video',
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('video-import-url')), findsOneWidget);
@@ -3009,7 +2990,7 @@ void main() {
   testWidgets(
     'DayPage replaces image and refreshes expanded editor immediately',
     (tester) async {
-      tester.view.physicalSize = const Size(1800, 1000);
+      tester.view.physicalSize = const Size(1800, 1600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -3077,9 +3058,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('ribbon-media-replace')));
+      final replaceImage = find.descendant(
+        of: find.byType(InlineNodeWorkspace),
+        matching: find.widgetWithText(OutlinedButton, 'Replace'),
+      );
+      expect(replaceImage, findsOneWidget);
+      await tester.tap(replaceImage);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('image-import-local')), findsOneWidget);
 
@@ -3088,6 +3072,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       await tester.pump(const Duration(milliseconds: 500));
 
+      await tester.pump();
       final container = ProviderScope.containerOf(
         tester.element(find.byType(DayPage)),
       );
@@ -3287,13 +3272,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('ribbon-clear-node-selection')));
-    await tester.pumpAndSettle();
-    final shell = tester.widget<NodeShell>(find.byType(NodeShell));
-
-    shell.onResizeChanged!(
+    tester.widget<MindmapCanvas>(find.byType(MindmapCanvas)).onNodeResize!(
+      (await repository.getNode('direct-shell-resize'))!,
       const NodeResizeChange(
         size: Size(132, 96),
         positionDelta: Offset(12, -8),
@@ -3312,6 +3292,25 @@ void main() {
     expect(uiState.editorVersion, 4);
   });
 }
+
+Future<void> _openCanvasContextMenu(WidgetTester tester) async {
+  final canvas = find.byKey(const ValueKey('mindmap-canvas'));
+  final gesture = await tester.startGesture(
+    tester.getBottomLeft(canvas) + const Offset(40, -40),
+    kind: PointerDeviceKind.mouse,
+    buttons: kSecondaryMouseButton,
+  );
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+Finder _inlineSaveStatus() => find.byWidgetPredicate(
+  (widget) =>
+      widget.key is ValueKey<String> &&
+      (widget.key! as ValueKey<String>).value.startsWith(
+        'inline-workspace-save-status-',
+      ),
+);
 
 const _oldAttachmentId = '223e4567-e89b-12d3-a456-426614174000';
 const _validPickedPng = PickedMediaFile(
@@ -3343,7 +3342,7 @@ Future<void> _pumpMediaReplacePage(
   required _RecordingAttachmentRepository attachments,
   required MediaFilePicker picker,
 }) async {
-  tester.view.physicalSize = const Size(1800, 1000);
+  tester.view.physicalSize = const Size(1800, 1600);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -3368,16 +3367,17 @@ Future<void> _pumpMediaReplacePage(
     ),
   );
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('ribbon-tab-node')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('ribbon-media-replace')));
+  final replaceImage = find.descendant(
+    of: find.byType(InlineNodeWorkspace),
+    matching: find.widgetWithText(OutlinedButton, 'Replace'),
+  );
+  expect(replaceImage, findsOneWidget);
+  await tester.tap(replaceImage);
   await tester.pumpAndSettle();
 }
 
 Future<void> _pumpAsyncReplace(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 200));
-  await tester.pump(const Duration(milliseconds: 500));
+  await tester.idle();
 }
 
 final class _DayPageMediaPicker implements MediaFilePicker {

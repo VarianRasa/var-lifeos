@@ -41,18 +41,13 @@ class AppDesignTokens extends ThemeExtension<AppDesignTokens> {
     48,
   ];
 
-  static const _shadowsLow = <BoxShadow>[
-    BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 1),
+  static const _shadowsLow = <BoxShadow>[];
+
+  static const _shadowsMedium = <BoxShadow>[
     BoxShadow(color: Color(0x1A000000), offset: Offset(0, 2), blurRadius: 8),
   ];
 
-  static const _shadowsMedium = <BoxShadow>[
-    BoxShadow(color: Color(0x1A000000), offset: Offset(0, 1), blurRadius: 2),
-    BoxShadow(color: Color(0x1A000000), offset: Offset(0, 2), blurRadius: 12),
-  ];
-
   static const _shadowsHigh = <BoxShadow>[
-    BoxShadow(color: Color(0x1A000000), offset: Offset(0, 2), blurRadius: 2),
     BoxShadow(color: Color(0x26000000), offset: Offset(0, 8), blurRadius: 24),
   ];
 

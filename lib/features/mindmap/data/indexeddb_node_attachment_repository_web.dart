@@ -583,6 +583,7 @@ const Set<String> _unsafeGenericExtensions = {
 };
 
 Set<String> _extensionsForMime(String mime) => switch (mime) {
+  'application/pdf' => {'.pdf'},
   'image/gif' => {'.gif'},
   'image/jpeg' => {'.jpg', '.jpeg'},
   'image/png' => {'.png'},

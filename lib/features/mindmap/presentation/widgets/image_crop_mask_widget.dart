@@ -30,10 +30,7 @@ class ImageCropMaskWidget extends StatelessWidget {
     return Container(
       width: width,
       height: height,
-      decoration: BoxDecoration(
-        shape: boxShape,
-        borderRadius: borderRadius,
-      ),
+      decoration: BoxDecoration(shape: boxShape, borderRadius: borderRadius),
       clipBehavior: Clip.antiAlias,
       child: Image.network(
         imageUrl,

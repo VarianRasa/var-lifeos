@@ -60,6 +60,42 @@ void main() {
     },
   );
 
+  test('tree helpers preserve descendants and reject parent cycles', () {
+    const items = <TaskChecklistItem>[
+      TaskChecklistItem(id: 'a', title: 'Parent'),
+      TaskChecklistItem(id: 'b', title: 'Child', parentId: 'a'),
+      TaskChecklistItem(id: 'c', title: 'Sibling'),
+    ];
+
+    final moved = moveTaskChecklistItem(items, 0, 3);
+    expect(moved.map((item) => item.id), <String>['c', 'a', 'b']);
+    expect(setTaskChecklistParent(items, 'a', 'b')?.parentId, isNull);
+    expect(setTaskChecklistParent(items, 'c', 'a')?.parentId, 'a');
+  });
+
+  test('tree normalization clears orphan and cyclic parents', () {
+    const items = <TaskChecklistItem>[
+      TaskChecklistItem(id: 'a', title: 'A', parentId: 'b'),
+      TaskChecklistItem(id: 'b', title: 'B', parentId: 'a'),
+      TaskChecklistItem(id: 'c', title: 'C', parentId: 'missing'),
+    ];
+
+    final normalized = normalizeTaskChecklistTree(items);
+    expect(normalized.every((item) => item.parentId == null), isTrue);
+  });
+
+  test('task node load boundary clears malformed checklist parents', () {
+    final node = _taskNode(
+      checklist: const <TaskChecklistItem>[
+        TaskChecklistItem(id: 'a', title: 'A', parentId: 'b'),
+        TaskChecklistItem(id: 'b', title: 'B', parentId: 'a'),
+        TaskChecklistItem(id: 'c', title: 'C', parentId: 'missing'),
+      ],
+    );
+
+    expect(node.checklist.every((item) => item.parentId == null), isTrue);
+  });
+
   test(
     'completeNextChecklistItem leaves non-task or completed nodes unchanged',
     () {

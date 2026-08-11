@@ -63,15 +63,18 @@ void main() {
       tester.widget<FilledButton>(find.byType(FilledButton).last).onPressed!();
       await tester.pumpAndSettle();
     }
+    tester.widget<FilledButton>(find.byType(FilledButton).last).onPressed!();
+    await tester.pumpAndSettle();
 
     final review = (await repository.listNodes()).single;
     expect(review.id, 'weekly-review_2026-07-20_2026-07-22');
     expect(review.type, NodeType.journal);
     expect(review.title, 'Weekly Review — 2026-07-20 to 2026-07-22');
-    expect(review.body, contains('### Wins'));
-    expect(review.body, contains('### Lessons'));
-    expect(review.body, contains('### Next focus'));
-    expect(review.body, contains('### Mood'));
+    expect(review.body, contains('## 🏆 Wins & Accomplishments'));
+    expect(review.body, contains('Shipped weekly review'));
+    expect(review.body, contains('## 💡 Key Lessons & Reflection'));
+    expect(review.body, contains('## 🎯 Next Week Core Focus'));
+    expect(review.body, contains('**Weekly Mood Score:** 4.0 / 5.0'));
     expect(
       review.data['journal'],
       containsPair('periodKey', '2026-07-20_2026-07-22'),

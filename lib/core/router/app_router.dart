@@ -17,6 +17,7 @@ import '../../features/insights/insights_page.dart';
 import '../../features/life_os/goals_habits_page.dart';
 import '../../features/life_os/notes_journal_page.dart';
 import '../../features/mindmap/presentation/collab_page.dart';
+import '../../features/mindmap/presentation/node_detail_page.dart';
 import '../../features/search/presentation/search_page.dart';
 import '../../features/settings/settings_page.dart';
 import '../../features/sync/presentation/recovery_center.dart';
@@ -31,6 +32,7 @@ final appRouterProvider = Provider<GoRouter>((ref) => createAppRouter());
 
 GoRouter createAppRouter({String? initialLocation}) {
   final todayStr = dayKey(DateTime.now());
+  final nodeDetailExitController = NodeDetailExitController();
   return GoRouter(
     initialLocation: initialLocation ?? '/calendar/$todayStr',
     debugLogDiagnostics: false,
@@ -81,10 +83,19 @@ GoRouter createAppRouter({String? initialLocation}) {
           GoRoute(
             path: '/calendar/:date/node/:nodeId',
             name: 'node_detail',
-            redirect: (context, state) => legacyNodeRouteLocation(
-              date: state.pathParameters['date']!,
-              nodeId: state.pathParameters['nodeId']!,
-            ),
+            onExit: (context, state) => nodeDetailExitController.prepareExit(),
+            pageBuilder: (context, state) {
+              final date = _parseDateParam(state.pathParameters['date']);
+              final nodeId = state.pathParameters['nodeId']!;
+              return NoTransitionPage<void>(
+                key: state.pageKey,
+                child: NodeDetailPage(
+                  date: date,
+                  nodeId: nodeId,
+                  exitController: nodeDetailExitController,
+                ),
+              );
+            },
           ),
           GoRoute(
             path: '/focus',

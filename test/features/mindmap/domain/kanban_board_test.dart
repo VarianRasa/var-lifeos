@@ -51,6 +51,31 @@ void main() {
     expect(board.cardById('legacy')?.columnId, kanbanInProgressColumnId);
   });
 
+  test('per-column WIP limit blocks cross-column moves', () {
+    const board = KanbanBoard(
+      columns: [
+        KanbanColumnDefinition(id: 'backlog', title: 'Backlog', order: 0),
+        KanbanColumnDefinition(
+          id: 'doing',
+          title: 'Doing',
+          order: 1,
+          wipLimit: 1,
+        ),
+      ],
+      cards: [
+        KanbanCard(id: 'a', title: 'A', customColumnId: 'backlog'),
+        KanbanCard(id: 'b', title: 'B', customColumnId: 'doing'),
+      ],
+    );
+
+    final blocked = board.moveCard('a', 'doing', 1);
+
+    expect(blocked, board);
+    expect(blocked.canAddCardTo('doing'), isFalse);
+    expect(blocked.moveCard('b', 'doing', 0).cardById('b')?.columnId, 'doing');
+    expect(KanbanBoard.fromJson(board.toJson()).columns[1].wipLimit, 1);
+  });
+
   test('round trips rich cards and reorders across custom columns', () {
     final dueDate = DateTime(2026, 7, 20);
     final board = KanbanBoard(

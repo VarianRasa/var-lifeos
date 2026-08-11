@@ -34,6 +34,7 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
 import '../mindmap/presentation/workspace_rhythm_tracker.dart';
 import 'application/context_health.dart' as health;
 import 'application/focus_insights.dart' as focus;
@@ -52,8 +53,12 @@ import 'domain/insights_summary.dart';
 import 'insights_export_stub.dart'
     if (dart.library.io) 'insights_export_io.dart'
     if (dart.library.js_interop) 'insights_export_web.dart';
+import 'presentation/deep_work_focus_card.dart';
+import 'presentation/eisenhower_matrix_card.dart';
 import 'presentation/executive_dashboard_panel.dart';
+import 'presentation/expense_budget_card.dart';
 import 'presentation/habit_matrix_heatmap.dart';
+import 'presentation/para_okr_rollup_card.dart';
 import 'presentation/smart_goal_milestone_tracker.dart';
 
 class _SetInsightRangeIntent extends Intent {
@@ -147,6 +152,8 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
     final smartViews = ref.watch(smartNodeViewsProvider);
     final automationSuggestions = ref.watch(automationSuggestionsProvider);
     final today = ref.watch(currentDateProvider);
+    final showInlineSearch =
+        MediaQuery.sizeOf(context).width >= LayoutConstants.mobileBreakpoint;
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -210,6 +217,12 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
               title: const Text('Insights'),
               actions: [
                 IconButton(
+                  tooltip: 'Automation & Smart Rules',
+                  icon: const Icon(Icons.auto_fix_high_outlined),
+                  onPressed: () => showAutomationRuleEditorDialog(context),
+                ),
+                IconButton(
+                  key: const ValueKey('insights-dashboard-toggle'),
                   tooltip: _showDashboardPanels
                       ? 'Hide dashboard panels'
                       : 'Show dashboard panels',
@@ -222,16 +235,38 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
                     _showDashboardPanels = !_showDashboardPanels;
                   }),
                 ),
-                SearchField(
-                  key: const ValueKey('insights-search-field'),
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  hintText: 'Search nodes...',
-                  onChanged: (value) {
-                    setState(() => _query = value.trim().toLowerCase());
-                  },
-                ),
-                const SizedBox(width: 16),
+                if (showInlineSearch)
+                  SearchField(
+                    key: const ValueKey('insights-search-field'),
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    hintText: 'Search nodes...',
+                    onChanged: (value) {
+                      setState(() => _query = value.trim().toLowerCase());
+                    },
+                  )
+                else
+                  IconButton(
+                    key: const ValueKey('insights-mobile-search'),
+                    tooltip: 'Search insights',
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Search insights'),
+                        content: SearchField(
+                          key: const ValueKey('insights-search-field'),
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          hintText: 'Search nodes...',
+                          onChanged: (value) {
+                            setState(() => _query = value.trim().toLowerCase());
+                          },
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.search),
+                  ),
+                if (showInlineSearch) const SizedBox(width: 16),
               ],
             ),
             body: smartViews.when(
@@ -842,317 +877,438 @@ class _InsightsBody extends StatelessWidget {
         workspaceContexts.isNotEmpty && showOverviewPanels;
     final isEmptyWorkspace = nodes.isEmpty && hasCleanDashboardScope;
 
-    return Padding(
-      padding: EdgeInsets.all(spacing),
-      child: ListView(
-        children: [
-          PeriodicReviewTriggerBanner(today: today, nodes: nodes),
-          WorkspaceRhythmTracker(
-            workspaceContexts: workspaceContexts,
-            nodes: nodes,
-          ),
-          const SizedBox(height: 16),
-          SmartGoalMilestoneTracker(nodes: nodes, today: today),
-          const SizedBox(height: 16),
-          if (showOverviewPanels) ...[
-            _buildWeeklyDigest(context),
-            SizedBox(height: spacing),
-          ],
-          _InsightRangeFilterBar(
-            rangePreset: rangePreset,
-            typeFilter: typeFilter,
-            tagFilter: tagFilter,
-            nodes: nodes,
-            onRangePresetChanged: onRangePresetChanged,
-            onTypeChanged: onTypeChanged,
-            onTagChanged: onTagChanged,
-            onClear: onClearInsightFilters,
-          ),
-          const SizedBox(height: 6),
-          _RangeDateLabel(preset: rangePreset, today: today),
-          if (_hasActiveFilters(
-            smartView: smartViewFilter,
-            project: projectFilter,
-            area: areaFilter,
-            status: statusFilter,
-            priority: priorityFilter,
-            type: typeFilter,
-            tag: tagFilter,
-          )) ...[
-            const SizedBox(height: 8),
-            _ActiveFilterRail(
-              smartView: smartViewFilter,
-              project: projectFilter,
-              area: areaFilter,
-              status: statusFilter,
-              priority: priorityFilter,
-              type: typeFilter,
-              tag: tagFilter,
-              onSmartViewChanged: onSmartViewChanged,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-              onStatusChanged: onStatusChanged,
-              onPriorityChanged: onPriorityChanged,
-              onTypeChanged: onTypeChanged,
-              onTagChanged: onTagChanged,
-              onClearAll: onClearInsightFilters,
-            ),
-          ],
-          const SizedBox(height: 8),
-          const _InsightShortcutHintBar(),
-          SizedBox(height: spacing),
-          if (isEmptyWorkspace) ...[
-            const _NewUserEmptyState(),
-            SizedBox(height: spacing),
-          ],
-          _MetricRail(
-            children: [
-              _MetricPill(
-                icon: Icons.hub_outlined,
-                label: '${nodes.length} nodes',
-              ),
-              _MetricPill(
-                icon: Icons.check_circle_outline,
-                label: '${nodeIndex.completedCount} done',
-              ),
-              _MetricPill(
-                icon: Icons.flag_outlined,
-                label: '${nodeIndex.highPriorityOpenTaskCount} high priority',
-              ),
-              if (insightsSummary.taskCount > 0)
-                _MetricPill(
-                  icon: Icons.task_alt_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.taskCompletionRate)} task completion',
+    Widget adaptiveLegacyPanel(Widget child, {double minWidth = 680}) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= minWidth) return child;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(width: minWidth, child: child),
+          );
+        },
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth =
+            constraints.maxWidth >= LayoutConstants.desktopBreakpoint
+            ? 1280.0
+            : double.infinity;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: ListView(
+              padding: EdgeInsets.all(spacing),
+              children: [
+                if (showOverviewPanels) ...[
+                  adaptiveLegacyPanel(_buildWeeklyDigest(context)),
+                  SizedBox(height: spacing),
+                ],
+                Semantics(
+                  key: const ValueKey('insights-filter-region'),
+                  container: true,
+                  header: true,
+                  explicitChildNodes: true,
+                  label: 'Insight filters',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      adaptiveLegacyPanel(
+                        _InsightRangeFilterBar(
+                          rangePreset: rangePreset,
+                          typeFilter: typeFilter,
+                          tagFilter: tagFilter,
+                          nodes: nodes,
+                          onRangePresetChanged: onRangePresetChanged,
+                          onTypeChanged: onTypeChanged,
+                          onTagChanged: onTagChanged,
+                          onClear: onClearInsightFilters,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _RangeDateLabel(preset: rangePreset, today: today),
+                      if (_hasActiveFilters(
+                        smartView: smartViewFilter,
+                        project: projectFilter,
+                        area: areaFilter,
+                        status: statusFilter,
+                        priority: priorityFilter,
+                        type: typeFilter,
+                        tag: tagFilter,
+                      )) ...[
+                        const SizedBox(height: 8),
+                        _ActiveFilterRail(
+                          smartView: smartViewFilter,
+                          project: projectFilter,
+                          area: areaFilter,
+                          status: statusFilter,
+                          priority: priorityFilter,
+                          type: typeFilter,
+                          tag: tagFilter,
+                          onSmartViewChanged: onSmartViewChanged,
+                          onProjectChanged: onProjectChanged,
+                          onAreaChanged: onAreaChanged,
+                          onStatusChanged: onStatusChanged,
+                          onPriorityChanged: onPriorityChanged,
+                          onTypeChanged: onTypeChanged,
+                          onTagChanged: onTagChanged,
+                          onClearAll: onClearInsightFilters,
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      const _InsightShortcutHintBar(),
+                    ],
+                  ),
                 ),
-              if (insightsSummary.overdueCount > 0)
-                _MetricPill(
-                  icon: Icons.warning_amber_outlined,
-                  label: '${insightsSummary.overdueCount} overdue',
+                SizedBox(height: spacing),
+                if (isEmptyWorkspace) ...[
+                  const _NewUserEmptyState(),
+                  SizedBox(height: spacing),
+                ],
+                _MetricRail(
+                  children: [
+                    _MetricPill(
+                      icon: Icons.hub_outlined,
+                      label: '${nodes.length} nodes',
+                    ),
+                    _MetricPill(
+                      icon: Icons.check_circle_outline,
+                      label: '${nodeIndex.completedCount} done',
+                    ),
+                    _MetricPill(
+                      icon: Icons.flag_outlined,
+                      label:
+                          '${nodeIndex.highPriorityOpenTaskCount} high priority',
+                    ),
+                    if (insightsSummary.taskCount > 0)
+                      _MetricPill(
+                        icon: Icons.task_alt_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.taskCompletionRate)} task completion',
+                      ),
+                    if (insightsSummary.overdueCount > 0)
+                      _MetricPill(
+                        icon: Icons.warning_amber_outlined,
+                        label: '${insightsSummary.overdueCount} overdue',
+                      ),
+                    if (insightsSummary.productiveDayCount > 0)
+                      _MetricPill(
+                        icon: Icons.calendar_view_week_outlined,
+                        label:
+                            '${insightsSummary.productiveDayCount} productive days',
+                      ),
+                    if (insightsSummary.habitConsistency > 0)
+                      _MetricPill(
+                        icon: Icons.repeat_on_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.habitConsistency)} habit consistency',
+                      ),
+                    if (insightsSummary.activeDayCount > 0)
+                      _MetricPill(
+                        icon: Icons.calendar_today_outlined,
+                        label: '${insightsSummary.activeDayCount} active days',
+                      ),
+                    if (insightsSummary.averageNodesPerActiveDay > 0)
+                      _MetricPill(
+                        icon: Icons.query_stats_outlined,
+                        label:
+                            '${insightsSummary.averageNodesPerActiveDay.toStringAsFixed(1)} nodes/day',
+                      ),
+                    if (insightsSummary.averageGoalProgress > 0)
+                      _MetricPill(
+                        icon: Icons.stacked_line_chart_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.averageGoalProgress)} goal progress',
+                      ),
+                    if (insightsSummary.monthlyReviewCount > 0)
+                      _MetricPill(
+                        icon: Icons.event_note_outlined,
+                        label:
+                            '${insightsSummary.monthlyReviewCount} monthly review',
+                      ),
+                    if (lifeSummary.bestHabitStreak > 0)
+                      _MetricPill(
+                        icon: Icons.local_fire_department_outlined,
+                        label: '${lifeSummary.bestHabitStreak} habit streak',
+                      ),
+                    if (lifeSummary.averageMood > 0)
+                      _MetricPill(
+                        icon: Icons.mood_outlined,
+                        label:
+                            '${lifeSummary.averageMood.toStringAsFixed(1)} mood',
+                      ),
+                    if (lifeSummary.averageGoalProgress > 0)
+                      _MetricPill(
+                        icon: Icons.track_changes_outlined,
+                        label:
+                            '${(lifeSummary.averageGoalProgress * 100).round()}% goals',
+                      ),
+                    if (lifeSummary.weeklyReviewCount > 0)
+                      _MetricPill(
+                        icon: Icons.rate_review_outlined,
+                        label: '${lifeSummary.weeklyReviewCount} weekly review',
+                      ),
+                    if (insightsSummary.totalFocusMinutesToday > 0)
+                      _MetricPill(
+                        icon: Icons.hourglass_empty,
+                        label:
+                            '${insightsSummary.totalFocusMinutesToday} mins focused today',
+                      ),
+                  ],
                 ),
-              if (insightsSummary.productiveDayCount > 0)
-                _MetricPill(
-                  icon: Icons.calendar_view_week_outlined,
-                  label:
-                      '${insightsSummary.productiveDayCount} productive days',
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _InsightActionStrip(
+                      overdueCount: nodeIndex.overdueTaskCount,
+                      highPriorityCount: nodeIndex.highPriorityOpenTaskCount,
+                      automationCount: automationSuggestions?.readyCount ?? 0,
+                      onOverdue: () =>
+                          onSmartViewChanged(SmartNodeViewType.overdue),
+                      onHighPriority: () =>
+                          onPriorityChanged(NodePriority.high),
+                      onAutomations: automationSuggestions == null
+                          ? null
+                          : () => onReviewAutomations(automationSuggestions!),
+                    ),
+                  ),
+                ],
+                if (showAttentionPanel) ...[
+                  SizedBox(height: spacing),
+                  _AttentionPanel(attention: attention),
+                ],
+                SizedBox(height: spacing),
+                _SmartViewsBand(
+                  views: smartViews,
+                  selectedView: smartViewFilter,
+                  onChanged: onSmartViewChanged,
                 ),
-              if (insightsSummary.habitConsistency > 0)
-                _MetricPill(
-                  icon: Icons.repeat_on_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.habitConsistency)} habit consistency',
+                SizedBox(height: spacing),
+                _WorkspaceContextsBand(
+                  contexts: workspaceContexts,
+                  selectedProject: projectFilter,
+                  selectedArea: areaFilter,
+                  onProjectChanged: onProjectChanged,
+                  onAreaChanged: onAreaChanged,
                 ),
-              if (insightsSummary.activeDayCount > 0)
-                _MetricPill(
-                  icon: Icons.calendar_today_outlined,
-                  label: '${insightsSummary.activeDayCount} active days',
+                if (showAutomationPanel) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _AutomationPanel(
+                      suggestions: automationSuggestions!,
+                      onReview: () =>
+                          onReviewAutomations(automationSuggestions!),
+                    ),
+                  ),
+                ],
+                if (showAutomationForecast) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _AutomationForecastPanel(forecast: automationForecast),
+                  ),
+                ],
+                if (showAutomationHealth) ...[
+                  SizedBox(height: spacing),
+                  _AutomationHealthPanel(
+                    health: automationHealth,
+                    onPauseIssue: onPauseAutomationIssue,
+                  ),
+                ],
+                if (showAutomationHistory) ...[
+                  SizedBox(height: spacing),
+                  _AutomationHistoryPanel(events: automationEvents),
+                ],
+                if (showWorkspaceFocus) ...[
+                  SizedBox(height: spacing),
+                  _WorkspaceFocusPanel(
+                    contexts: workspaceContexts,
+                    today: today,
+                    onProjectChanged: onProjectChanged,
+                    onAreaChanged: onAreaChanged,
+                  ),
+                ],
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  _LifeRhythmPanel(rhythm: lifeRhythm),
+                  SizedBox(height: spacing),
+                  _WeeklyPulsePanel(pulse: weeklyPulse),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _WeeklyReviewPanel(
+                      review: weeklyReview,
+                      onCreateWeeklyReview: onCreateWeeklyReview,
+                      onRescheduleNode: onRescheduleNode,
+                      onCompleteNode: onCompleteNode,
+                      onPinGoal: onPinGoal,
+                      onCreateGoalNextAction: onCreateGoalNextAction,
+                    ),
+                  ),
+                  SizedBox(height: spacing),
+                  _FocusTimerAnalyticsPanel(
+                    summary: insightsSummary,
+                    focusSummary: focusInsights,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                  _KnowledgeGraphPanel(graph: nodeGraph),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _MissionDashboardPanel(summaries: missionSummaries),
+                    minWidth: 900,
+                  ),
+                  SizedBox(height: spacing),
+                  _WorkloadTrendPanel(series: completionTrend),
+                  SizedBox(height: spacing),
+                  ExecutiveDashboardPanel(
+                    summary: ExecutiveDashboardSummary.fromNodes(nodes),
+                    onAreaTap: (area) => onAreaChanged(area.name),
+                    onStartWeeklyReview: onCreateWeeklyReview,
+                  ),
+                  SizedBox(height: spacing),
+                  HabitMatrixHeatmap(
+                    habitNodes: [
+                      for (final node in nodes)
+                        if (!node.isArchived && node.type == NodeType.habit)
+                          node,
+                    ],
+                  ),
+                  SizedBox(height: spacing),
+                  _HabitRoutineInsightPanel(summary: habitRoutineInsights),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _ReviewInsightPanel(summary: reviewInsights),
+                  ),
+                  SizedBox(height: spacing),
+                  _ContextHealthPanel(summary: contextHealth),
+                  SizedBox(height: spacing),
+                  _GoalInsightPanel(summary: goalInsights),
+                  SizedBox(height: spacing),
+                  _InsightRiskPanel(riskItems: insightRisks),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _RecommendationPanel(
+                      recommendations: recommendations,
+                      onSmartViewChanged: onSmartViewChanged,
+                      onPriorityChanged: onPriorityChanged,
+                      onCreateWeeklyReview: onCreateWeeklyReview,
+                      onProjectChanged: onProjectChanged,
+                      markdownReport: markdownReport,
+                    ),
+                  ),
+                  SizedBox(height: spacing),
+                  _InsightDrillDownPanel(
+                    nodeIndex: nodeIndex,
+                    contextHealth: contextHealth,
+                    habitSummary: habitRoutineInsights.habits,
+                    reviewSummary: reviewInsights,
+                    goalSummary: goalInsights,
+                    onProjectChanged: onProjectChanged,
+                    onAreaChanged: onAreaChanged,
+                  ),
+                  SizedBox(height: spacing),
+                  _buildProductivityDistribution(
+                    context,
+                    effortCounts,
+                    reviewCounts,
+                  ),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _buildOverdueAndWins(context, overdueWork, weeklyWins),
+                  ),
+                ],
+                SizedBox(height: spacing),
+                adaptiveLegacyPanel(
+                  _FilterBand(
+                    statusFilter: statusFilter,
+                    priorityFilter: priorityFilter,
+                    onStatusChanged: onStatusChanged,
+                    onPriorityChanged: onPriorityChanged,
+                  ),
                 ),
-              if (insightsSummary.averageNodesPerActiveDay > 0)
-                _MetricPill(
-                  icon: Icons.query_stats_outlined,
-                  label:
-                      '${insightsSummary.averageNodesPerActiveDay.toStringAsFixed(1)} nodes/day',
+                SizedBox(height: spacing),
+                Semantics(
+                  key: const ValueKey('insights-results-region'),
+                  container: true,
+                  header: true,
+                  explicitChildNodes: true,
+                  label: 'Insight results',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _SectionLabel(
+                        icon: Icons.manage_search_outlined,
+                        title: 'Focus results',
+                        subtitle: filteredNodes.isEmpty
+                            ? 'No nodes match the active filters'
+                            : '${filteredNodes.length} sorted nodes ready to inspect',
+                      ),
+                      SizedBox(height: spacing * 0.75),
+                      if (filteredNodes.isEmpty)
+                        const SizedBox(height: 260, child: _EmptyResults())
+                      else
+                        for (
+                          var index = 0;
+                          index < filteredNodes.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(height: 10),
+                          _InsightNodeTile(node: filteredNodes[index]),
+                        ],
+                    ],
+                  ),
                 ),
-              if (insightsSummary.averageGoalProgress > 0)
-                _MetricPill(
-                  icon: Icons.stacked_line_chart_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.averageGoalProgress)} goal progress',
-                ),
-              if (insightsSummary.monthlyReviewCount > 0)
-                _MetricPill(
-                  icon: Icons.event_note_outlined,
-                  label: '${insightsSummary.monthlyReviewCount} monthly review',
-                ),
-              if (lifeSummary.bestHabitStreak > 0)
-                _MetricPill(
-                  icon: Icons.local_fire_department_outlined,
-                  label: '${lifeSummary.bestHabitStreak} habit streak',
-                ),
-              if (lifeSummary.averageMood > 0)
-                _MetricPill(
-                  icon: Icons.mood_outlined,
-                  label: '${lifeSummary.averageMood.toStringAsFixed(1)} mood',
-                ),
-              if (lifeSummary.averageGoalProgress > 0)
-                _MetricPill(
-                  icon: Icons.track_changes_outlined,
-                  label:
-                      '${(lifeSummary.averageGoalProgress * 100).round()}% goals',
-                ),
-              if (lifeSummary.weeklyReviewCount > 0)
-                _MetricPill(
-                  icon: Icons.rate_review_outlined,
-                  label: '${lifeSummary.weeklyReviewCount} weekly review',
-                ),
-              if (insightsSummary.totalFocusMinutesToday > 0)
-                _MetricPill(
-                  icon: Icons.hourglass_empty,
-                  label:
-                      '${insightsSummary.totalFocusMinutesToday} mins focused today',
-                ),
-            ],
-          ),
-          if (showOverviewPanels) ...[
-            SizedBox(height: spacing),
-            _InsightActionStrip(
-              overdueCount: nodeIndex.overdueTaskCount,
-              highPriorityCount: nodeIndex.highPriorityOpenTaskCount,
-              automationCount: automationSuggestions?.readyCount ?? 0,
-              onOverdue: () => onSmartViewChanged(SmartNodeViewType.overdue),
-              onHighPriority: () => onPriorityChanged(NodePriority.high),
-              onAutomations: automationSuggestions == null
-                  ? null
-                  : () => onReviewAutomations(automationSuggestions!),
-            ),
-          ],
-          if (showAttentionPanel) ...[
-            SizedBox(height: spacing),
-            _AttentionPanel(attention: attention),
-          ],
-          SizedBox(height: spacing),
-          _SmartViewsBand(
-            views: smartViews,
-            selectedView: smartViewFilter,
-            onChanged: onSmartViewChanged,
-          ),
-          SizedBox(height: spacing),
-          _WorkspaceContextsBand(
-            contexts: workspaceContexts,
-            selectedProject: projectFilter,
-            selectedArea: areaFilter,
-            onProjectChanged: onProjectChanged,
-            onAreaChanged: onAreaChanged,
-          ),
-          if (showAutomationPanel) ...[
-            SizedBox(height: spacing),
-            _AutomationPanel(
-              suggestions: automationSuggestions!,
-              onReview: () => onReviewAutomations(automationSuggestions!),
-            ),
-          ],
-          if (showAutomationForecast) ...[
-            SizedBox(height: spacing),
-            _AutomationForecastPanel(forecast: automationForecast),
-          ],
-          if (showAutomationHealth) ...[
-            SizedBox(height: spacing),
-            _AutomationHealthPanel(
-              health: automationHealth,
-              onPauseIssue: onPauseAutomationIssue,
-            ),
-          ],
-          if (showAutomationHistory) ...[
-            SizedBox(height: spacing),
-            _AutomationHistoryPanel(events: automationEvents),
-          ],
-          if (showWorkspaceFocus) ...[
-            SizedBox(height: spacing),
-            _WorkspaceFocusPanel(
-              contexts: workspaceContexts,
-              today: today,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-            ),
-          ],
-          if (showOverviewPanels) ...[
-            SizedBox(height: spacing),
-            _LifeRhythmPanel(rhythm: lifeRhythm),
-            SizedBox(height: spacing),
-            _WeeklyPulsePanel(pulse: weeklyPulse),
-            SizedBox(height: spacing),
-            _WeeklyReviewPanel(
-              review: weeklyReview,
-              onCreateWeeklyReview: onCreateWeeklyReview,
-              onRescheduleNode: onRescheduleNode,
-              onCompleteNode: onCompleteNode,
-              onPinGoal: onPinGoal,
-              onCreateGoalNextAction: onCreateGoalNextAction,
-            ),
-            SizedBox(height: spacing),
-            _FocusTimerAnalyticsPanel(
-              summary: insightsSummary,
-              focusSummary: focusInsights,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-            _KnowledgeGraphPanel(graph: nodeGraph),
-            SizedBox(height: spacing),
-            _MissionDashboardPanel(summaries: missionSummaries),
-            SizedBox(height: spacing),
-            _WorkloadTrendPanel(series: completionTrend),
-            SizedBox(height: spacing),
-            ExecutiveDashboardPanel(
-              summary: ExecutiveDashboardSummary.fromNodes(nodes),
-              onAreaTap: (area) => onAreaChanged(area.name),
-              onStartWeeklyReview: onCreateWeeklyReview,
-            ),
-            SizedBox(height: spacing),
-            HabitMatrixHeatmap(
-              habitNodes: [
-                for (final node in nodes)
-                  if (!node.isArchived && node.type == NodeType.habit) node,
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  Column(
+                    key: const ValueKey('insights-supplemental-region'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      adaptiveLegacyPanel(
+                        PeriodicReviewTriggerBanner(today: today, nodes: nodes),
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        WorkspaceRhythmTracker(
+                          workspaceContexts: workspaceContexts,
+                          nodes: nodes,
+                        ),
+                        minWidth: 760,
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        SmartGoalMilestoneTracker(nodes: nodes, today: today),
+                        minWidth: 800,
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        EisenhowerMatrixCard(
+                          nodes: nodes,
+                          today: today,
+                          onNodeSelected: (node) => goToDay(
+                            context,
+                            node.day,
+                            highlightNodeId: node.id,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        DeepWorkFocusCard(nodes: nodes, today: today),
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(ExpenseBudgetCard(nodes: nodes)),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(const ParaOkrRollupCard()),
+                    ],
+                  ),
+                ],
               ],
             ),
-            SizedBox(height: spacing),
-            _HabitRoutineInsightPanel(summary: habitRoutineInsights),
-            SizedBox(height: spacing),
-            _ReviewInsightPanel(summary: reviewInsights),
-            SizedBox(height: spacing),
-            _ContextHealthPanel(summary: contextHealth),
-            SizedBox(height: spacing),
-            _GoalInsightPanel(summary: goalInsights),
-            SizedBox(height: spacing),
-            _InsightRiskPanel(riskItems: insightRisks),
-            SizedBox(height: spacing),
-            _RecommendationPanel(
-              recommendations: recommendations,
-              onSmartViewChanged: onSmartViewChanged,
-              onPriorityChanged: onPriorityChanged,
-              onCreateWeeklyReview: onCreateWeeklyReview,
-              onProjectChanged: onProjectChanged,
-              markdownReport: markdownReport,
-            ),
-            SizedBox(height: spacing),
-            _InsightDrillDownPanel(
-              nodeIndex: nodeIndex,
-              contextHealth: contextHealth,
-              habitSummary: habitRoutineInsights.habits,
-              reviewSummary: reviewInsights,
-              goalSummary: goalInsights,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-            ),
-            SizedBox(height: spacing),
-            _buildProductivityDistribution(context, effortCounts, reviewCounts),
-            SizedBox(height: spacing),
-            _buildOverdueAndWins(context, overdueWork, weeklyWins),
-          ],
-          SizedBox(height: spacing),
-          _FilterBand(
-            statusFilter: statusFilter,
-            priorityFilter: priorityFilter,
-            onStatusChanged: onStatusChanged,
-            onPriorityChanged: onPriorityChanged,
           ),
-          SizedBox(height: spacing),
-          _SectionLabel(
-            icon: Icons.manage_search_outlined,
-            title: 'Focus results',
-            subtitle: filteredNodes.isEmpty
-                ? 'No nodes match the active filters'
-                : '${filteredNodes.length} sorted nodes ready to inspect',
-          ),
-          SizedBox(height: spacing * 0.75),
-          if (filteredNodes.isEmpty)
-            const SizedBox(height: 260, child: _EmptyResults())
-          else
-            for (var index = 0; index < filteredNodes.length; index++) ...[
-              if (index > 0) const SizedBox(height: 10),
-              _InsightNodeTile(node: filteredNodes[index]),
-            ],
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1220,28 +1376,26 @@ class _InsightsBody extends StatelessWidget {
     }
 
     Widget buildColumn(String title, Iterable<Widget> rows, Color color) {
-      return Expanded(
-        child: DecoratedBox(
-          decoration: ShapeDecoration(
-            color: panelSurface,
-            shape: _astryxBorder(context, color: color.withValues(alpha: 0.26)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: textTheme.labelLarge?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w900,
-                  ),
+      return DecoratedBox(
+        decoration: ShapeDecoration(
+          color: panelSurface,
+          shape: _astryxBorder(context, color: color.withValues(alpha: 0.26)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: textTheme.labelLarge?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
                 ),
-                const SizedBox(height: 8),
-                for (final row in rows) ...[row, const SizedBox(height: 6)],
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+              for (final row in rows) ...[row, const SizedBox(height: 6)],
+            ],
           ),
         ),
       );
@@ -1269,45 +1423,64 @@ class _InsightsBody extends StatelessWidget {
               children: [
                 Icon(Icons.query_stats_rounded, size: 17, color: primary),
                 const SizedBox(width: 8),
-                Text(
-                  'Productivity Distribution',
-                  style: textTheme.titleSmall?.copyWith(
-                    color: textColor,
-                    fontWeight: FontWeight.w900,
+                Expanded(
+                  child: Text(
+                    'Productivity Distribution',
+                    style: textTheme.titleSmall?.copyWith(
+                      color: textColor,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                buildColumn(
-                  'Effort',
-                  NodeEffort.values.map(
-                    (e) => buildMiniBar(
-                      e.label,
-                      efforts[e] ?? 0,
-                      totalEfforts,
-                      primary,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = <Widget>[
+                  buildColumn(
+                    'Effort',
+                    NodeEffort.values.map(
+                      (e) => buildMiniBar(
+                        e.label,
+                        efforts[e] ?? 0,
+                        totalEfforts,
+                        primary,
+                      ),
                     ),
+                    primary,
                   ),
-                  primary,
-                ),
-                const SizedBox(width: 10),
-                buildColumn(
-                  'Review State',
-                  NodeReviewState.values.map(
-                    (r) => buildMiniBar(
-                      r.label,
-                      reviews[r] ?? 0,
-                      totalReviews,
-                      secondary,
+                  buildColumn(
+                    'Review State',
+                    NodeReviewState.values.map(
+                      (r) => buildMiniBar(
+                        r.label,
+                        reviews[r] ?? 0,
+                        totalReviews,
+                        secondary,
+                      ),
                     ),
+                    secondary,
                   ),
-                  secondary,
-                ),
-              ],
+                ];
+                if (constraints.maxWidth < 680) {
+                  return Column(
+                    children: [
+                      columns.first,
+                      const SizedBox(height: 10),
+                      columns.last,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: columns.first),
+                    const SizedBox(width: 10),
+                    Expanded(child: columns.last),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -6921,12 +7094,10 @@ class _InsightDrillDownPanel extends StatelessWidget {
             .take(8)
             .toList(growable: false);
 
-    return DecoratedBox(
+    return Material(
       key: const ValueKey('insights-drill-down-panel'),
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: _astryxBorder(context, color: theme.dividerColor),
-      ),
+      color: theme.colorScheme.surface,
+      shape: _astryxBorder(context, color: theme.dividerColor),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(

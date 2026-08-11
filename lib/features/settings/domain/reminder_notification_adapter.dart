@@ -148,34 +148,40 @@ List<ScheduledReminderNotification> buildScheduledReminderNotifications(
     for (final item in plan.items)
       ScheduledReminderNotification(
         id: _notificationIdFor(item),
-        title: item.kind == ReminderPlanItemKind.routine
-            ? 'Routine ready'
-            : item.isOverdue
-            ? 'Overdue task'
-            : 'Due reminder',
+        title: switch (item.kind) {
+          ReminderPlanItemKind.routine => 'Routine ready',
+          ReminderPlanItemKind.habit => 'Habit reminder',
+          ReminderPlanItemKind.dueNode =>
+            item.isOverdue ? 'Overdue task' : 'Due reminder',
+        },
         body: item.title,
         day: item.day,
-        scheduledAt: policy.scheduledAt(item.day),
+        scheduledAt: item.scheduledAt ?? policy.scheduledAt(item.day),
         payload: {
           ..._payloadFor(item),
-          'reminderTime': _timeLabel(policy),
+          'reminderTime': item.scheduledAt == null
+              ? _timeLabel(policy)
+              : _dateTimeLabel(item.scheduledAt!),
           'snoozeMinutes': policy.snoozeMinutes,
         },
       ),
   ];
 }
 
-String _timeLabel(ReminderSchedulePolicy policy) {
-  final hour = policy.hour.toString().padLeft(2, '0');
-  final minute = policy.minute.toString().padLeft(2, '0');
-  return '$hour:$minute';
-}
+String _timeLabel(ReminderSchedulePolicy policy) =>
+    _formatTime(policy.hour, policy.minute);
+
+String _dateTimeLabel(DateTime value) => _formatTime(value.hour, value.minute);
+
+String _formatTime(int hour, int minute) =>
+    '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
 
 String _notificationIdFor(ReminderPlanItem item) {
   return switch (item.kind) {
     ReminderPlanItemKind.dueNode => 'due-${item.node!.id}-${dayKey(item.day)}',
     ReminderPlanItemKind.routine =>
       'routine-${item.routine!.id}-${dayKey(item.day)}',
+    ReminderPlanItemKind.habit => 'habit-${item.node!.id}-${dayKey(item.day)}',
   };
 }
 
@@ -218,6 +224,11 @@ Map<String, Object?> _payloadFor(ReminderPlanItem item) {
     ReminderPlanItemKind.routine => {
       'kind': 'routine',
       'routineId': item.routine!.id,
+      'day': dayKey(item.day),
+    },
+    ReminderPlanItemKind.habit => {
+      'kind': 'habit',
+      'nodeId': item.node!.id,
       'day': dayKey(item.day),
     },
   };

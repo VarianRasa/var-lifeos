@@ -175,9 +175,9 @@ void main() {
 
     final pulse = InsightsWeeklyPulse.fromNodes(today: today, nodes: nodes);
 
-    expect(pulse.days, hasLength(4));
-    expect(pulse.activeDayCount, 3);
-    expect(pulse.quietDayCount, 1);
+    expect(pulse.days, hasLength(7));
+    expect(pulse.activeDayCount, 4);
+    expect(pulse.quietDayCount, 3);
     expect(pulse.busiestDay, today);
     expect(pulse.busiestDayNodeCount, 3);
     expect(pulse.taskCount, 3);
@@ -197,6 +197,7 @@ void main() {
         title: 'Finished old task',
         day: DateTime(2026, 7, 1),
         progress: 1,
+        status: NodeStatus.done,
         now: DateTime(2026, 7, 21),
       ),
       MindmapNode.create(
@@ -205,7 +206,7 @@ void main() {
         title: 'Finished before range',
         day: start,
         status: NodeStatus.done,
-        now: DateTime(2026, 7, 19),
+        now: DateTime(2026, 7, 15),
       ),
       MindmapNode.create(
         id: 'late',

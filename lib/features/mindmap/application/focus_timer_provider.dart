@@ -304,24 +304,23 @@ class FocusTimerNotifier extends StateNotifier<FocusTimerState> {
     await repository.saveNode(updatedNode);
 
     if (taskId != null) {
-      final taskNode = dayNodes.firstWhere(
-        (n) => n.id == taskId,
-        orElse: () => journalNode!,
-      );
-      if (taskNode.id == taskId) {
+      final taskNode = await repository.getNode(taskId);
+      if (taskNode != null && taskNode.type == NodeType.task) {
         final taskData = Map<String, Object?>.from(
           taskNode.data['task'] as Map? ?? const {},
         );
-        final prevFocusSeconds = (taskData['actualMinutes'] as num? ?? 0) * 60;
-        final updatedFocusMins = ((prevFocusSeconds + durationMins * 60) / 60)
-            .round();
-        taskData['actualMinutes'] = updatedFocusMins;
+        final previousMinutes =
+            (taskData['actualMinutes'] as num?)?.round() ?? 0;
+        taskData['actualMinutes'] = previousMinutes + durationMins;
 
-        final updatedTaskNode = taskNode.copyWith(
-          data: {...taskNode.data, 'task': taskData},
-          updatedAt: DateTime.now(),
+        await repository.saveNode(
+          taskNode.copyWith(
+            data: {...taskNode.data, 'task': taskData},
+            updatedAt: DateTime.now(),
+          ),
         );
-        await repository.saveNode(updatedTaskNode);
+        invalidateMindmapStateFromRef(_ref, day: taskNode.day, extraDay: today);
+        return;
       }
     }
 

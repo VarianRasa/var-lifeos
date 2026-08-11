@@ -9,7 +9,7 @@ import '../domain/node_attachment.dart';
 import '../domain/node_type_payloads.dart';
 import 'media_file_picker_mode.dart';
 
-enum MediaFileKind { image, video, audio }
+enum MediaFileKind { attachment, image, video, audio }
 
 final class PickedMediaFile {
   const PickedMediaFile({
@@ -37,8 +37,10 @@ final class FilePickerMediaFilePicker implements MediaFilePicker {
   @override
   Future<PickedMediaFile?> pick(MediaFileKind kind) async {
     final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: _extensionsForKind(kind),
+      type: kind == MediaFileKind.attachment ? FileType.any : FileType.custom,
+      allowedExtensions: kind == MediaFileKind.attachment
+          ? null
+          : _extensionsForKind(kind),
       allowMultiple: false,
       withData: mediaFilePickerUsesBytes,
       withReadStream: !mediaFilePickerUsesBytes,
@@ -68,6 +70,9 @@ final class MediaFileImportService {
   final NodeAttachmentRepository _repository;
   final MediaFilePicker _picker;
   final int _maxBytes;
+
+  Future<NodeAttachment?> pickAttachment() =>
+      _pickAndImport(MediaFileKind.attachment);
 
   Future<ImagePayload?> pickImage({
     ImagePayload existing = const ImagePayload(),
@@ -127,19 +132,24 @@ final class MediaFileImportService {
       throw FormatException(_oversizedMessage);
     }
     final extensionMime = _mimeForExtension(p.extension(fileName));
-    if (extensionMime == null || !_mimeMatchesKind(extensionMime, kind)) {
-      throw FormatException('Unsupported ${kind.name} file extension.');
-    }
     final declaredMime = file.mimeType?.trim().toLowerCase();
-    if (declaredMime == null ||
-        !supportedNodeAttachmentMimeTypes.contains(declaredMime) ||
-        !_mimeMatchesKind(declaredMime, kind)) {
-      throw FormatException('Unsupported ${kind.name} MIME type.');
-    }
-    if (declaredMime != extensionMime) {
-      throw const FormatException(
-        'Selected media extension does not match its MIME type.',
-      );
+    final mimeType = kind == MediaFileKind.attachment
+        ? extensionMime ?? 'application/octet-stream'
+        : declaredMime;
+    if (kind != MediaFileKind.attachment) {
+      if (extensionMime == null || !_mimeMatchesKind(extensionMime, kind)) {
+        throw FormatException('Unsupported ${kind.name} file extension.');
+      }
+      if (declaredMime == null ||
+          !supportedNodeAttachmentMimeTypes.contains(declaredMime) ||
+          !_mimeMatchesKind(declaredMime, kind)) {
+        throw FormatException('Unsupported ${kind.name} MIME type.');
+      }
+      if (declaredMime != extensionMime) {
+        throw const FormatException(
+          'Selected media extension does not match its MIME type.',
+        );
+      }
     }
     final bytes = await _readBytes(file);
     if (bytes.isEmpty) {
@@ -148,7 +158,8 @@ final class MediaFileImportService {
     if (bytes.length != file.byteLength) {
       throw const FormatException('Selected media file size is invalid.');
     }
-    if (!_matchesMagicBytes(bytes, declaredMime)) {
+    if (mimeType != 'application/octet-stream' &&
+        !_matchesMagicBytes(bytes, mimeType!)) {
       throw const FormatException(
         'Selected media content does not match its MIME type.',
       );
@@ -156,7 +167,7 @@ final class MediaFileImportService {
     return _repository.importBytes(
       bytes: bytes,
       fileName: fileName,
-      mimeType: declaredMime,
+      mimeType: mimeType!,
     );
   }
 
@@ -186,12 +197,14 @@ final class MediaFileImportService {
 }
 
 List<String> _extensionsForKind(MediaFileKind kind) => switch (kind) {
+  MediaFileKind.attachment => const [],
   MediaFileKind.image => const ['gif', 'jpg', 'jpeg', 'png', 'webp'],
   MediaFileKind.video => const ['mp4', 'mov', 'webm'],
   MediaFileKind.audio => const ['aac', 'm4a', 'mp3', 'ogg', 'wav', 'webm'],
 };
 
 bool _mimeMatchesKind(String mime, MediaFileKind kind) => switch (kind) {
+  MediaFileKind.attachment => true,
   MediaFileKind.image => mime.startsWith('image/'),
   MediaFileKind.video => mime.startsWith('video/'),
   MediaFileKind.audio => mime.startsWith('audio/'),
@@ -203,6 +216,7 @@ String? _mimeForExtension(String extension) =>
       '.jpg' || '.jpeg' => 'image/jpeg',
       '.png' => 'image/png',
       '.webp' => 'image/webp',
+      '.pdf' => 'application/pdf',
       '.mp4' => 'video/mp4',
       '.mov' => 'video/quicktime',
       '.webm' => 'video/webm',
@@ -251,6 +265,7 @@ bool _matchesMagicBytes(List<int> bytes, String mime) => switch (mime) {
         _asciiAt(bytes, 0, 'RIFF') &&
         _asciiAt(bytes, 8, 'WAVE'),
   'audio/webm' => _startsWith(bytes, const [0x1a, 0x45, 0xdf, 0xa3]),
+  'application/pdf' => _startsWithAscii(bytes, '%PDF'),
   _ => false,
 };
 

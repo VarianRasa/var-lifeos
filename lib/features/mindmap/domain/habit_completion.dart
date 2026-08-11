@@ -82,7 +82,9 @@ List<String> habitCompletionKeys(MindmapNode node) {
 
 int calculateCurrentStreak(MindmapNode node) {
   final keys = habitCompletionKeys(node);
-  if (keys.isEmpty) return 0;
+  final freezes = streakFreezeKeys(node);
+  final validKeys = {...keys, ...freezes};
+  if (validKeys.isEmpty) return 0;
 
   final today = DateTime.now().dateOnly;
   final yesterday = today.subtract(const Duration(days: 1));
@@ -90,16 +92,16 @@ int calculateCurrentStreak(MindmapNode node) {
   final todayKey = dayKey(today);
   final yesterdayKey = dayKey(yesterday);
 
-  if (!keys.contains(todayKey) && !keys.contains(yesterdayKey)) {
+  if (!validKeys.contains(todayKey) && !validKeys.contains(yesterdayKey)) {
     return 0;
   }
 
   int streak = 0;
-  DateTime currentDay = keys.contains(todayKey) ? today : yesterday;
+  DateTime currentDay = validKeys.contains(todayKey) ? today : yesterday;
 
   while (true) {
     final currentKey = dayKey(currentDay);
-    if (keys.contains(currentKey)) {
+    if (validKeys.contains(currentKey)) {
       streak++;
       currentDay = currentDay.subtract(const Duration(days: 1));
     } else {
@@ -112,13 +114,15 @@ int calculateCurrentStreak(MindmapNode node) {
 
 int calculateMaxStreak(MindmapNode node) {
   final keys = habitCompletionKeys(node);
-  if (keys.isEmpty) return 0;
+  final freezes = streakFreezeKeys(node);
+  final validKeys = ({...keys, ...freezes}).toList()..sort();
+  if (validKeys.isEmpty) return 0;
 
   int maxStreak = 0;
   int currentStreak = 0;
   DateTime? prevDate;
 
-  for (final key in keys) {
+  for (final key in validKeys) {
     final date = DateTime.tryParse(key)?.dateOnly;
     if (date == null) continue;
 
@@ -149,4 +153,114 @@ Map<String, Object?> _habitData(MindmapNode node) {
   final section = node.data['habit'];
   if (section is Map) return section.cast<String, Object?>();
   return const {};
+}
+
+/// Habit Stacking & Streak Freeze additions.
+
+/// Sets a habit stacking trigger node ID on a habit ("After [triggerId], I will do this habit").
+MindmapNode setHabitStackingTrigger(
+  MindmapNode node,
+  String? triggerHabitId, {
+  DateTime? now,
+}) {
+  if (node.type != NodeType.habit) return node;
+  final habitData = _habitData(node);
+  final updatedData = {...habitData};
+  if (triggerHabitId == null || triggerHabitId.isEmpty) {
+    updatedData.remove('stackedTriggerHabitId');
+  } else {
+    updatedData['stackedTriggerHabitId'] = triggerHabitId;
+  }
+  return node.copyWith(
+    data: {...node.data, 'habit': updatedData},
+    updatedAt: now ?? DateTime.now(),
+  );
+}
+
+/// Reads the stacked trigger habit ID if configured.
+String? getHabitStackingTriggerId(MindmapNode node) {
+  final raw = _habitData(node)['stackedTriggerHabitId'];
+  return raw is String && raw.isNotEmpty ? raw : null;
+}
+
+/// Consumes a streak freeze token on a specific date to protect streak calculation.
+MindmapNode applyStreakFreeze(MindmapNode node, DateTime day, {DateTime? now}) {
+  if (node.type != NodeType.habit) return node;
+  final habitData = _habitData(node);
+  final existingFreezes = streakFreezeKeys(node);
+  final key = dayKey(day.dateOnly);
+  if (existingFreezes.contains(key)) return node;
+
+  final nextFreezes = [...existingFreezes, key]..sort();
+  return node.copyWith(
+    data: {
+      ...node.data,
+      'habit': {...habitData, 'streakFreezes': nextFreezes},
+    },
+    updatedAt: now ?? DateTime.now(),
+  );
+}
+
+/// Reads all streak freeze keys stored on habit.
+List<String> streakFreezeKeys(MindmapNode node) {
+  final raw = _habitData(node)['streakFreezes'];
+  if (raw is List) {
+    return [
+      for (final item in raw)
+        if (item is String && item.isNotEmpty) item,
+    ]..sort();
+  }
+  return const [];
+}
+
+final class HabitStreakStats {
+  const HabitStreakStats({
+    required this.currentStreak,
+    required this.maxStreak,
+    required this.totalCompletions,
+    required this.completionRate30Days,
+  });
+
+  final int currentStreak;
+  final int maxStreak;
+  final int totalCompletions;
+  final double completionRate30Days;
+}
+
+HabitStreakStats calculateHabitStreakStats(MindmapNode node, DateTime today) {
+  final keys = habitCompletionKeys(node);
+  final validKeys = {...keys, ...streakFreezeKeys(node)};
+  final todayNorm = today.dateOnly;
+  final yesterday = todayNorm.subtract(const Duration(days: 1));
+  var currentDay = validKeys.contains(dayKey(todayNorm))
+      ? todayNorm
+      : yesterday;
+  var currentStreak = 0;
+  while (validKeys.contains(dayKey(currentDay))) {
+    currentStreak++;
+    currentDay = currentDay.subtract(const Duration(days: 1));
+  }
+  final maxStreak = calculateMaxStreak(node);
+  final totalCompletions = keys.length;
+
+  final thirtyDaysAgo = todayNorm.subtract(const Duration(days: 29));
+
+  var completionsInLast30 = 0;
+  for (final key in keys) {
+    final date = DateTime.tryParse(key)?.dateOnly;
+    if (date != null &&
+        !date.isBefore(thirtyDaysAgo) &&
+        !date.isAfter(todayNorm)) {
+      completionsInLast30++;
+    }
+  }
+
+  final rate = (completionsInLast30 / 30.0).clamp(0.0, 1.0);
+
+  return HabitStreakStats(
+    currentStreak: currentStreak,
+    maxStreak: maxStreak,
+    totalCompletions: totalCompletions,
+    completionRate30Days: rate,
+  );
 }

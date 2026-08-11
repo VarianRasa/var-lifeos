@@ -18,8 +18,12 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
 import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/widgets/astryx_kbd.dart';
+import '../calendar/presentation/inbox_triage_dialog.dart';
+import '../calendar/presentation/periodic_review_wizard_dialog.dart';
 import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -30,6 +34,7 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
 import '../search/application/search_providers.dart';
 import '../search/domain/search_query.dart';
 import '../search/presentation/search_result_tile.dart';
@@ -689,6 +694,15 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                       onRescheduleOverdue: _rescheduleOverdueTasks,
                       onCreateWeeklyReview: _createWeeklyReview,
                       onApplyRoutines: _applyReadyRoutinesForToday,
+                      onTriageInbox: () => showInboxTriageDialog(context),
+                      onPeriodicReview: () => showPeriodicReviewWizardDialog(
+                        context,
+                        today: today,
+                        start: today.subtract(const Duration(days: 6)),
+                        end: today,
+                      ),
+                      onManageAutomations: () =>
+                          showAutomationRuleEditorDialog(context),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1675,30 +1689,13 @@ class _CommandHintChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(
-          alpha: 0.45,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: RichText(
-          text: TextSpan(
-            style: theme.textTheme.labelSmall,
-            children: [
-              TextSpan(
-                text: label,
-                style: TextStyle(color: theme.colorScheme.primary),
-              ),
-              TextSpan(text: '  $text'),
-            ],
-          ),
-        ),
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AstryxKbd(label: label),
+        const SizedBox(width: 4),
+        Text(text, style: Theme.of(context).textTheme.labelSmall),
+      ],
     );
   }
 }
@@ -1719,10 +1716,11 @@ class _CommandSavedSearchesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(tokens.radiusContainer),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -2608,6 +2606,9 @@ class _CommandPowerActionsPanel extends StatelessWidget {
     required this.onRescheduleOverdue,
     required this.onCreateWeeklyReview,
     required this.onApplyRoutines,
+    required this.onTriageInbox,
+    required this.onPeriodicReview,
+    required this.onManageAutomations,
   });
 
   final List<MindmapNode> nodes;
@@ -2616,6 +2617,9 @@ class _CommandPowerActionsPanel extends StatelessWidget {
   final Future<void> Function(List<MindmapNode> nodes) onRescheduleOverdue;
   final Future<void> Function() onCreateWeeklyReview;
   final Future<void> Function() onApplyRoutines;
+  final Future<void> Function() onTriageInbox;
+  final Future<MindmapNode?> Function() onPeriodicReview;
+  final Future<void> Function() onManageAutomations;
 
   @override
   Widget build(BuildContext context) {
@@ -2664,6 +2668,21 @@ class _CommandPowerActionsPanel extends StatelessWidget {
           avatar: const Icon(Icons.auto_awesome_motion_outlined, size: 16),
           label: const Text('Apply routines'),
           onPressed: onApplyRoutines,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.inbox_outlined, size: 16),
+          label: const Text('Triage inbox'),
+          onPressed: onTriageInbox,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.fact_check_outlined, size: 16),
+          label: const Text('Periodic review'),
+          onPressed: onPeriodicReview,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.auto_fix_high_outlined, size: 16),
+          label: const Text('Manage automations'),
+          onPressed: onManageAutomations,
         ),
       ],
     );

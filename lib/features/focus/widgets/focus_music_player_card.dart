@@ -103,11 +103,23 @@ class FocusMusicPlayerCard extends ConsumerWidget {
             ),
             if (audioState.error != null) ...[
               const SizedBox(height: 8),
-              Text(
-                audioState.error!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      audioState.error!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: audioState.isLoadingStream
+                        ? null
+                        : notifier.play,
+                    child: const Text('Coba lagi'),
+                  ),
+                ],
               ),
             ],
             const SizedBox(height: 12),
@@ -115,7 +127,9 @@ class FocusMusicPlayerCard extends ConsumerWidget {
             Row(
               children: [
                 Text(
-                  _formatDuration(audioState.position),
+                  audioState.duration > Duration.zero
+                      ? _formatDuration(audioState.position)
+                      : '--:--',
                   style: theme.textTheme.bodySmall,
                 ),
                 Expanded(
@@ -136,14 +150,18 @@ class FocusMusicPlayerCard extends ConsumerWidget {
                       max: audioState.duration.inSeconds.toDouble() == 0
                           ? 1.0
                           : audioState.duration.inSeconds.toDouble(),
-                      onChanged: (val) {
-                        notifier.seek(Duration(seconds: val.toInt()));
-                      },
+                      onChanged: audioState.duration > Duration.zero
+                          ? (val) {
+                              notifier.seek(Duration(seconds: val.toInt()));
+                            }
+                          : null,
                     ),
                   ),
                 ),
                 Text(
-                  _formatDuration(audioState.duration),
+                  audioState.duration > Duration.zero
+                      ? _formatDuration(audioState.duration)
+                      : '--:--',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -178,33 +196,60 @@ class FocusMusicPlayerCard extends ConsumerWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.skip_previous),
-                      onPressed: notifier.previousTrack,
+                    Semantics(
+                      key: const ValueKey('focus-music-previous'),
+                      label: 'Previous focus track',
+                      button: true,
+                      excludeSemantics: true,
+                      child: IconButton(
+                        tooltip: 'Previous focus track',
+                        icon: const Icon(Icons.skip_previous),
+                        onPressed: notifier.previousTrack,
+                      ),
                     ),
                     const SizedBox(width: 4),
-                    IconButton.filled(
-                      icon: audioState.isLoadingStream
-                          ? SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: semantic.onAccent,
+                    Semantics(
+                      key: const ValueKey('focus-music-play-pause'),
+                      label: audioState.isPlaying
+                          ? 'Pause focus audio'
+                          : 'Play focus audio',
+                      button: true,
+                      excludeSemantics: true,
+                      child: IconButton.filled(
+                        tooltip: audioState.isPlaying
+                            ? 'Pause focus audio'
+                            : 'Play focus audio',
+                        icon: audioState.isLoadingStream
+                            ? SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: semantic.onAccent,
+                                ),
+                              )
+                            : Icon(
+                                audioState.isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
                               ),
-                            )
-                          : Icon(
-                              audioState.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                            ),
-                      iconSize: 28,
-                      onPressed: notifier.togglePlayPause,
+                        iconSize: 28,
+                        onPressed: audioState.isLoadingStream
+                            ? null
+                            : notifier.togglePlayPause,
+                      ),
                     ),
                     const SizedBox(width: 4),
-                    IconButton(
-                      icon: const Icon(Icons.skip_next),
-                      onPressed: notifier.nextTrack,
+                    Semantics(
+                      key: const ValueKey('focus-music-next'),
+                      label: 'Next focus track',
+                      button: true,
+                      excludeSemantics: true,
+                      child: IconButton(
+                        tooltip: 'Next focus track',
+                        icon: const Icon(Icons.skip_next),
+                        onPressed: notifier.nextTrack,
+                      ),
                     ),
                   ],
                 ),

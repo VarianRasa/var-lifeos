@@ -5,10 +5,7 @@ import 'package:var_app/features/mindmap/domain/canvas_board_template.dart';
 class BoardTemplateGalleryDialog extends StatelessWidget {
   final ValueChanged<CanvasProjectTemplate>? onSelectTemplate;
 
-  const BoardTemplateGalleryDialog({
-    super.key,
-    this.onSelectTemplate,
-  });
+  const BoardTemplateGalleryDialog({super.key, this.onSelectTemplate});
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +50,9 @@ class BoardTemplateGalleryDialog extends StatelessWidget {
                         color: theme.colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: theme.colorScheme.outline.withValues(alpha: 0.3),
+                          color: theme.colorScheme.outline.withValues(
+                            alpha: 0.3,
+                          ),
                         ),
                       ),
                       child: Column(

@@ -16,6 +16,7 @@ enum DesktopMenuAction {
   quickCapture,
   today,
   calendar,
+  search,
   focus,
   goalsHabits,
   notesJournal,
@@ -37,11 +38,24 @@ enum DesktopMenuAction {
 
 class DesktopMenuController extends ChangeNotifier {
   DesktopMenuAction? _action;
+  int _navigateMenuRequests = 0;
 
   DesktopMenuAction? get action => _action;
+  int get navigateMenuRequests => _navigateMenuRequests;
+
+  DesktopMenuAction? takeAction() {
+    final action = _action;
+    _action = null;
+    return action;
+  }
 
   void invoke(DesktopMenuAction action) {
     _action = action;
+    notifyListeners();
+  }
+
+  void openNavigateMenu() {
+    _navigateMenuRequests++;
     notifyListeners();
   }
 }
@@ -248,15 +262,47 @@ class _DesktopWindowChromeState extends State<DesktopWindowChrome>
   }
 }
 
-class _DesktopMenuBar extends StatelessWidget {
+class _DesktopMenuBar extends StatefulWidget {
   const _DesktopMenuBar();
+
+  @override
+  State<_DesktopMenuBar> createState() => _DesktopMenuBarState();
+}
+
+class _DesktopMenuBarState extends State<_DesktopMenuBar> {
+  final _navigateMenuController = MenuController();
+  late int _handledNavigateMenuRequests;
+
+  @override
+  void initState() {
+    super.initState();
+    _handledNavigateMenuRequests = desktopMenuController.navigateMenuRequests;
+    desktopMenuController.addListener(_handleMenuRequest);
+  }
+
+  void _handleMenuRequest() {
+    final requests = desktopMenuController.navigateMenuRequests;
+    if (requests == _handledNavigateMenuRequests) return;
+    _handledNavigateMenuRequests = requests;
+    _navigateMenuController.open();
+  }
+
+  @override
+  void dispose() {
+    desktopMenuController.removeListener(_handleMenuRequest);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final semantic = AppSemanticColors.of(context);
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
     final menuButtonStyle = ButtonStyle(
-      minimumSize: const WidgetStatePropertyAll(Size(0, 30)),
+      minimumSize: WidgetStatePropertyAll(
+        Size(tokens.minimumTarget, tokens.minimumTarget),
+      ),
+      visualDensity: VisualDensity.standard,
       padding: const WidgetStatePropertyAll(
         EdgeInsets.symmetric(horizontal: 11),
       ),
@@ -275,7 +321,9 @@ class _DesktopMenuBar extends StatelessWidget {
       ),
       overlayColor: const WidgetStatePropertyAll(Colors.transparent),
       shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radiusInner),
+        ),
       ),
       textStyle: WidgetStatePropertyAll(
         theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
@@ -284,11 +332,13 @@ class _DesktopMenuBar extends StatelessWidget {
     final popupStyle = MenuStyle(
       backgroundColor: WidgetStatePropertyAll(semantic.surfaceRaised),
       surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-      elevation: const WidgetStatePropertyAll(10),
+      elevation: WidgetStatePropertyAll(
+        theme.menuTheme.style?.elevation?.resolve(<WidgetState>{}),
+      ),
       padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
       shape: WidgetStatePropertyAll(
         RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(tokens.radiusContainer),
           side: BorderSide(color: semantic.border),
         ),
       ),
@@ -308,12 +358,14 @@ class _DesktopMenuBar extends StatelessWidget {
             {'Quick Capture': DesktopMenuAction.quickCapture},
             menuButtonStyle,
             popupStyle,
+            tokens: tokens,
           ),
           _menu(
             'Navigate',
             {
               'Today': DesktopMenuAction.today,
               'Calendar': DesktopMenuAction.calendar,
+              'Search': DesktopMenuAction.search,
               'Focus': DesktopMenuAction.focus,
               'Goals & Habits': DesktopMenuAction.goalsHabits,
               'Notes & Journal': DesktopMenuAction.notesJournal,
@@ -325,6 +377,8 @@ class _DesktopMenuBar extends StatelessWidget {
             },
             menuButtonStyle,
             popupStyle,
+            tokens: tokens,
+            controller: _navigateMenuController,
           ),
           _menu(
             'View',
@@ -338,6 +392,7 @@ class _DesktopMenuBar extends StatelessWidget {
             },
             menuButtonStyle,
             popupStyle,
+            tokens: tokens,
           ),
           _menu(
             'Tools',
@@ -347,12 +402,14 @@ class _DesktopMenuBar extends StatelessWidget {
             },
             menuButtonStyle,
             popupStyle,
+            tokens: tokens,
           ),
           _menu(
             'Help',
             {'About Var': DesktopMenuAction.about},
             menuButtonStyle,
             popupStyle,
+            tokens: tokens,
           ),
         ],
       ),
@@ -363,37 +420,44 @@ class _DesktopMenuBar extends StatelessWidget {
     String label,
     Map<String, DesktopMenuAction> actions,
     ButtonStyle buttonStyle,
-    MenuStyle menuStyle,
-  ) {
+    MenuStyle menuStyle, {
+    required AppDesignTokens tokens,
+    MenuController? controller,
+  }) {
     return SubmenuButton(
+      controller: controller,
       key: ValueKey('windows-menu-${label.toLowerCase()}'),
       style: buttonStyle,
       menuStyle: menuStyle,
       menuChildren: [
         for (final entry in actions.entries)
-          MenuItemButton(
+          Semantics(
             key: ValueKey('windows-menu-${entry.value.name}'),
-            style: ButtonStyle(
-              minimumSize: const WidgetStatePropertyAll(Size(210, 38)),
-              padding: const WidgetStatePropertyAll(
-                EdgeInsets.symmetric(horizontal: 12),
-              ),
-              shape: WidgetStatePropertyAll(
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
-              ),
-            ),
-            leadingIcon: Icon(entry.value.icon, size: 17),
-            trailingIcon: entry.value.shortcut == null
-                ? null
-                : Text(
-                    entry.value.shortcut!,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
+            label: entry.key,
+            button: true,
+            child: MenuItemButton(
+              style: ButtonStyle(
+                minimumSize: const WidgetStatePropertyAll(Size(210, 44)),
+                visualDensity: VisualDensity.standard,
+                padding: const WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 12),
+                ),
+                shape: WidgetStatePropertyAll(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(tokens.radiusElement),
                   ),
-            onPressed: () => desktopMenuController.invoke(entry.value),
-            child: Text(entry.key),
+                ),
+              ),
+              leadingIcon: Icon(entry.value.icon, size: 17),
+              trailingIcon: entry.value.shortcut == null
+                  ? null
+                  : Text(
+                      entry.value.shortcut!,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+              onPressed: () => desktopMenuController.invoke(entry.value),
+              child: Text(entry.key),
+            ),
           ),
       ],
       child: Text(label),
@@ -406,6 +470,7 @@ extension on DesktopMenuAction {
     DesktopMenuAction.quickCapture => Icons.bolt_rounded,
     DesktopMenuAction.today => Icons.today_rounded,
     DesktopMenuAction.calendar => Icons.calendar_month_rounded,
+    DesktopMenuAction.search => Icons.search_rounded,
     DesktopMenuAction.focus => Icons.timer_rounded,
     DesktopMenuAction.goalsHabits => Icons.track_changes_rounded,
     DesktopMenuAction.notesJournal => Icons.auto_stories_rounded,
@@ -455,6 +520,7 @@ class _WindowControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final semantic = AppSemanticColors.of(context);
+    final tokens = AppDesignTokens.of(context);
     return Semantics(
       key: controlKey,
       label: tooltip,
@@ -469,7 +535,9 @@ class _WindowControlButton extends StatelessWidget {
           fixedSize: const WidgetStatePropertyAll(Size(44, 44)),
           padding: const WidgetStatePropertyAll(EdgeInsets.zero),
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(tokens.radiusElement),
+            ),
           ),
           foregroundColor: WidgetStateProperty.resolveWith((states) {
             if (danger &&

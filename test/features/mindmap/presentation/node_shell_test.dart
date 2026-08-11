@@ -164,10 +164,11 @@ void main() {
   testWidgets('preset selection emits one atomic commit', (tester) async {
     final changes = <NodeResizeChange>[];
     await tester.pumpWidget(subject(onResizeChanged: changes.add));
-    await tester.tap(find.byKey(NodeShell.presetButtonKey));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Wide'));
-    await tester.pumpAndSettle();
+    final presetButton = tester.widget<PopupMenuButton<NodeSizePreset>>(
+      find.byKey(NodeShell.presetButtonKey),
+    );
+    presetButton.onSelected!(NodeSizePreset.wide);
+    await tester.pump();
     expect(changes, hasLength(1));
     expect(changes.single.phase, NodeResizePhase.commit);
     expect(changes.single.preset, NodeSizePreset.wide);
@@ -178,17 +179,23 @@ void main() {
   ) async {
     final changes = <NodeResizeChange>[];
     await tester.pumpWidget(subject(onResizeChanged: changes.add));
-    final handle = nodeShellHandleFinder(NodeResizeHandle.topLeft);
-    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.down(tester.getCenter(handle));
-    await gesture.moveBy(const Offset(20, 16));
+    final handle = tester.widget<GestureDetector>(
+      nodeShellHandleFinder(NodeResizeHandle.topLeft),
+    );
+    handle.onPanStart!(DragStartDetails());
+    handle.onPanUpdate!(
+      DragUpdateDetails(
+        globalPosition: Offset.zero,
+        delta: const Offset(20, 16),
+      ),
+    );
     await tester.pump();
     expect(
       tester.getSize(find.byKey(const ValueKey('node-shell-content'))),
       const Size(280, 184),
     );
 
-    await gesture.cancel();
+    handle.onPanCancel!();
     await tester.pump();
     expect(changes.last.phase, NodeResizePhase.cancel);
     expect(

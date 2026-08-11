@@ -52,6 +52,7 @@ void main() {
                 description: 'Publish package',
                 status: ProjectTaskStatus.blocked,
                 priority: ProjectTaskPriority.urgent,
+                startDate: DateTime(2026, 7, 20),
                 deadline: DateTime(2026, 7, 30),
                 labels: const <String>['release'],
                 checklist: const <ProjectTaskChecklistItem>[

@@ -214,7 +214,12 @@ final class InsightsWeeklyReview {
     for (final node in nodes) {
       if (node.isArchived) continue;
       final inWeek = _isInRange(node.day, windowStart, normalizedToday);
-      if (inWeek && node.type == NodeType.task && _isComplete(node)) {
+      final completedInWeek = _isInRange(
+        node.updatedAt,
+        windowStart,
+        normalizedToday,
+      );
+      if (completedInWeek && node.type == NodeType.task && _isComplete(node)) {
         completedTasks.add(node);
       }
       if (node.type == NodeType.task &&

@@ -36,12 +36,20 @@ void main() {
         body: 'See [[Daily Review]]',
         relatedNodeIds: const ['current'],
       );
+      final incomingMention = MindmapNode.create(
+        id: 'incoming-mention',
+        type: NodeType.note,
+        title: 'Review Notes',
+        day: day,
+        body: 'Daily Review needs another pass.',
+      );
 
       final links = NodeKnowledgeIndex([
         current,
         existing,
         mention,
         backlink,
+        incomingMention,
       ]).linksFor('current');
 
       expect(links.outgoingNodes.map((node) => node.id), ['existing']);
@@ -49,6 +57,9 @@ void main() {
       expect(links.backlinks.single.node.id, 'backlink');
       expect(links.backlinks.single.reasonLabel, 'relation + [[link]]');
       expect(links.unlinkedMentions.map((node) => node.id), ['mention']);
+      expect(links.incomingMentions.map((node) => node.id), [
+        'incoming-mention',
+      ]);
     },
   );
 

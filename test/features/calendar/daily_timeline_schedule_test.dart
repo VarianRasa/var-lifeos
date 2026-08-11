@@ -76,7 +76,12 @@ void main() {
       expect(find.text('Scheduled Task 1'), findsOneWidget);
       expect(find.text('09:00 - 10:00 • Task'), findsOneWidget);
       expect(
-        find.bySemanticsLabel('Scheduled Task 1, 09:00 - 10:00, Scheduled'),
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.label ==
+                  'Scheduled Task 1, 09:00 - 10:00, Scheduled',
+        ),
         findsOneWidget,
       );
       expect(

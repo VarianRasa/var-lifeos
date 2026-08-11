@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -772,98 +773,101 @@ final class _KnowledgeEditorState extends State<_KnowledgeEditor> {
   }
 
   @override
-  Widget build(BuildContext buildContext) => Container(
+  Widget build(BuildContext buildContext) => Material(
     color: Theme.of(buildContext).colorScheme.surface,
-    padding: const EdgeInsets.all(12),
-    child: SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            key: ValueKey<String>(
-              'knowledge-${editContext.node.id}-title-field',
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: ValueKey<String>(
+                'knowledge-${editContext.node.id}-title-field',
+              ),
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: 'Title',
+                isDense: true,
+              ),
+              onChanged: editContext.onTitleChanged,
             ),
-            controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Title',
-              isDense: true,
+            const SizedBox(height: 10),
+            TextField(
+              key: ValueKey<String>(
+                'knowledge-${editContext.node.id}-body-field',
+              ),
+              controller: _bodyController,
+              decoration: const InputDecoration(
+                labelText: 'Content',
+                alignLabelWithHint: true,
+                isDense: true,
+              ),
+              minLines: editContext.effectivePreset == NodeSizePreset.compact
+                  ? 1
+                  : 2,
+              maxLines: editContext.effectivePreset == NodeSizePreset.compact
+                  ? 3
+                  : 4,
+              onChanged: editContext.onBodyChanged,
             ),
-            onChanged: editContext.onTitleChanged,
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            key: ValueKey<String>(
-              'knowledge-${editContext.node.id}-body-field',
-            ),
-            controller: _bodyController,
-            decoration: const InputDecoration(
-              labelText: 'Content',
-              alignLabelWithHint: true,
-              isDense: true,
-            ),
-            minLines: editContext.effectivePreset == NodeSizePreset.compact
-                ? 1
-                : 2,
-            maxLines: editContext.effectivePreset == NodeSizePreset.compact
-                ? 3
-                : 4,
-            onChanged: editContext.onBodyChanged,
-          ),
-          const SizedBox(height: 12),
-          _TypeFields(
-            NodeEditContext(
-              node: editContext.node,
-              typedDraft: _latestDraft,
-              cachedPayload: editContext.cachedPayload,
-              effectivePreset: editContext.effectivePreset,
-              validationErrors: editContext.validationErrors,
-              onTitleChanged: editContext.onTitleChanged,
-              onBodyChanged: editContext.onBodyChanged,
-              onDraftChanged: _emitDraft,
-              onNodeDraftChanged: editContext.onNodeDraftChanged,
-              attachmentBytes: editContext.attachmentBytes,
-              attachmentLoading: editContext.attachmentLoading,
-              attachmentError: editContext.attachmentError,
-              onResourceAssetAdd: editContext.onResourceAssetAdd,
-              onResourceAssetOpen: editContext.onResourceAssetOpen,
-              resourceFolderSuggestions: editContext.resourceFolderSuggestions,
-              onKnowledgeAction: editContext.onKnowledgeAction,
-              onActionError: editContext.onActionError,
-            ),
-            onJournalNumericError: _setJournalNumericError,
-            ideaHypothesisController: _ideaHypothesisController,
-            ideaEvidenceController: _ideaEvidenceController,
-            ideaNextActionController: _ideaNextActionController,
-            ideaHypothesisFocusNode: _ideaHypothesisFocusNode,
-            ideaEvidenceFocusNode: _ideaEvidenceFocusNode,
-            ideaNextActionFocusNode: _ideaNextActionFocusNode,
-            questionTextController: _questionTextController,
-            questionContextController: _questionContextController,
-            questionAnswerController: _questionAnswerController,
-            questionEvidenceController: _questionEvidenceController,
-            questionNextActionController: _questionNextActionController,
-            questionTextFocusNode: _questionTextFocusNode,
-            questionContextFocusNode: _questionContextFocusNode,
-            questionAnswerFocusNode: _questionAnswerFocusNode,
-            questionEvidenceFocusNode: _questionEvidenceFocusNode,
-            questionNextActionFocusNode: _questionNextActionFocusNode,
-            key: ValueKey<String>(
-              'knowledge-type-fields-${editContext.node.id}-$_draftRevision',
-            ),
-          ),
-          if (_journalMoodError != null) _LocalError(_journalMoodError!),
-          if (_journalEnergyError != null) _LocalError(_journalEnergyError!),
-          for (final error in editContext.validationErrors)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                error,
-                style: TextStyle(
-                  color: Theme.of(buildContext).colorScheme.error,
-                ),
+            const SizedBox(height: 12),
+            _TypeFields(
+              NodeEditContext(
+                node: editContext.node,
+                typedDraft: _latestDraft,
+                cachedPayload: editContext.cachedPayload,
+                effectivePreset: editContext.effectivePreset,
+                validationErrors: editContext.validationErrors,
+                onTitleChanged: editContext.onTitleChanged,
+                onBodyChanged: editContext.onBodyChanged,
+                onDraftChanged: _emitDraft,
+                onNodeDraftChanged: editContext.onNodeDraftChanged,
+                attachmentBytes: editContext.attachmentBytes,
+                attachmentLoading: editContext.attachmentLoading,
+                attachmentError: editContext.attachmentError,
+                onResourceAssetAdd: editContext.onResourceAssetAdd,
+                onResourceAssetOpen: editContext.onResourceAssetOpen,
+                resourceFolderSuggestions:
+                    editContext.resourceFolderSuggestions,
+                onKnowledgeAction: editContext.onKnowledgeAction,
+                onActionError: editContext.onActionError,
+              ),
+              onJournalNumericError: _setJournalNumericError,
+              ideaHypothesisController: _ideaHypothesisController,
+              ideaEvidenceController: _ideaEvidenceController,
+              ideaNextActionController: _ideaNextActionController,
+              ideaHypothesisFocusNode: _ideaHypothesisFocusNode,
+              ideaEvidenceFocusNode: _ideaEvidenceFocusNode,
+              ideaNextActionFocusNode: _ideaNextActionFocusNode,
+              questionTextController: _questionTextController,
+              questionContextController: _questionContextController,
+              questionAnswerController: _questionAnswerController,
+              questionEvidenceController: _questionEvidenceController,
+              questionNextActionController: _questionNextActionController,
+              questionTextFocusNode: _questionTextFocusNode,
+              questionContextFocusNode: _questionContextFocusNode,
+              questionAnswerFocusNode: _questionAnswerFocusNode,
+              questionEvidenceFocusNode: _questionEvidenceFocusNode,
+              questionNextActionFocusNode: _questionNextActionFocusNode,
+              key: ValueKey<String>(
+                'knowledge-type-fields-${editContext.node.id}-$_draftRevision',
               ),
             ),
-        ],
+            if (_journalMoodError != null) _LocalError(_journalMoodError!),
+            if (_journalEnergyError != null) _LocalError(_journalEnergyError!),
+            for (final error in editContext.validationErrors)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  error,
+                  style: TextStyle(
+                    color: Theme.of(buildContext).colorScheme.error,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     ),
   );
@@ -1590,6 +1594,111 @@ final class _TypeFields extends StatelessWidget {
           onChanged: (value) =>
               context.onDraftChanged(payload.copyWith(reviewNotes: value)),
         ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Expanded(child: Text('Outcome review timeline')),
+            IconButton(
+              key: const ValueKey<String>(
+                'knowledge-decision-review-entry-add',
+              ),
+              tooltip: 'Add outcome review',
+              onPressed: () => context.onDraftChanged(
+                payload.copyWith(
+                  reviewEntries: <DecisionReviewEntry>[
+                    ...payload.reviewEntries,
+                    DecisionReviewEntry(
+                      id: 'review-${const Uuid().v4()}',
+                      date: DateTime.now().toIso8601String().split('T').first,
+                      notes: 'New review',
+                    ),
+                  ],
+                ),
+              ),
+              icon: const Icon(Icons.add_circle_outline_rounded),
+            ),
+          ],
+        ),
+        for (final entry in payload.reviewEntries)
+          Card(
+            key: ValueKey<String>(
+              'knowledge-decision-review-entry-${entry.id}',
+            ),
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: ValueKey<String>(
+                            'knowledge-decision-review-date-${entry.id}',
+                          ),
+                          onPressed: () => _pickDecisionReviewDate(
+                            buildContext,
+                            payload,
+                            entry,
+                          ),
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text(entry.date),
+                        ),
+                      ),
+                      IconButton(
+                        key: ValueKey<String>(
+                          'knowledge-decision-review-entry-delete-${entry.id}',
+                        ),
+                        tooltip: 'Delete review entry',
+                        onPressed: () => context.onDraftChanged(
+                          payload.copyWith(
+                            reviewEntries: payload.reviewEntries
+                                .where((item) => item.id != entry.id)
+                                .toList(),
+                          ),
+                        ),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _field(
+                    key: 'knowledge-decision-review-notes-${entry.id}',
+                    label: 'Review notes',
+                    value: entry.notes,
+                    lines: true,
+                    onChanged: (value) => _updateDecisionReviewEntry(
+                      payload,
+                      entry.copyWith(notes: value),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (var rating = 1; rating <= 5; rating++)
+                        ChoiceChip(
+                          key: ValueKey<String>(
+                            'knowledge-decision-review-rating-${entry.id}-$rating',
+                          ),
+                          label: Text('$rating'),
+                          selected: entry.rating == rating,
+                          onSelected: (selected) => _updateDecisionReviewEntry(
+                            payload,
+                            entry.copyWith(
+                              rating: selected ? rating : null,
+                              clearRating: !selected,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1784,6 +1893,129 @@ final class _TypeFields extends StatelessWidget {
                     option.copyWith(risks: values),
                   ),
                 ),
+                Row(
+                  children: [
+                    const Expanded(child: Text('Quantified risks')),
+                    IconButton(
+                      key: ValueKey<String>(
+                        'knowledge-decision-option-${option.id}-risk-assessment-add',
+                      ),
+                      tooltip: 'Add quantified risk',
+                      onPressed: () => _updateDecisionOption(
+                        payload,
+                        option.copyWith(
+                          riskAssessments: <DecisionRisk>[
+                            ...option.riskAssessments,
+                            DecisionRisk(
+                              id: 'risk-${const Uuid().v4()}',
+                              title: 'New risk',
+                            ),
+                          ],
+                        ),
+                      ),
+                      icon: const Icon(Icons.add_circle_outline_rounded),
+                    ),
+                  ],
+                ),
+                for (final risk in option.riskAssessments)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _field(
+                                key:
+                                    'knowledge-decision-risk-title-${option.id}-${risk.id}',
+                                label: 'Risk',
+                                value: risk.title,
+                                onChanged: (value) => _updateDecisionOption(
+                                  payload,
+                                  option.copyWith(
+                                    riskAssessments: <DecisionRisk>[
+                                      for (final item in option.riskAssessments)
+                                        item.id == risk.id
+                                            ? item.copyWith(title: value)
+                                            : item,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Delete quantified risk',
+                              onPressed: () => _updateDecisionOption(
+                                payload,
+                                option.copyWith(
+                                  riskAssessments: option.riskAssessments
+                                      .where((item) => item.id != risk.id)
+                                      .toList(),
+                                ),
+                              ),
+                              icon: const Icon(Icons.delete_outline_rounded),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          'Probability ${risk.probability}/5 · Impact ${risk.impact}/5 · Exposure ${risk.exposure}/25',
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Slider(
+                                key: ValueKey<String>(
+                                  'knowledge-decision-risk-probability-${option.id}-${risk.id}',
+                                ),
+                                value: risk.probability.toDouble(),
+                                min: 1,
+                                max: 5,
+                                divisions: 4,
+                                onChanged: (value) => _updateDecisionOption(
+                                  payload,
+                                  option.copyWith(
+                                    riskAssessments: <DecisionRisk>[
+                                      for (final item in option.riskAssessments)
+                                        item.id == risk.id
+                                            ? item.copyWith(
+                                                probability: value.round(),
+                                              )
+                                            : item,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Slider(
+                                key: ValueKey<String>(
+                                  'knowledge-decision-risk-impact-${option.id}-${risk.id}',
+                                ),
+                                value: risk.impact.toDouble(),
+                                min: 1,
+                                max: 5,
+                                divisions: 4,
+                                onChanged: (value) => _updateDecisionOption(
+                                  payload,
+                                  option.copyWith(
+                                    riskAssessments: <DecisionRisk>[
+                                      for (final item in option.riskAssessments)
+                                        item.id == risk.id
+                                            ? item.copyWith(
+                                                impact: value.round(),
+                                              )
+                                            : item,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 for (final criterion in payload.criteria) ...[
                   const SizedBox(height: 6),
                   Text(
@@ -1860,6 +2092,40 @@ final class _TypeFields extends StatelessWidget {
           ],
         ),
     ],
+  );
+
+  Future<void> _pickDecisionReviewDate(
+    BuildContext buildContext,
+    DecisionPayload payload,
+    DecisionReviewEntry entry,
+  ) async {
+    final initialDate = DateTime.tryParse(entry.date) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: buildContext,
+      initialDate: initialDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !buildContext.mounted) return;
+    _updateDecisionReviewEntry(
+      payload,
+      entry.copyWith(
+        date:
+            '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}',
+      ),
+    );
+  }
+
+  void _updateDecisionReviewEntry(
+    DecisionPayload payload,
+    DecisionReviewEntry updated,
+  ) => context.onDraftChanged(
+    payload.copyWith(
+      reviewEntries: <DecisionReviewEntry>[
+        for (final entry in payload.reviewEntries)
+          entry.id == updated.id ? updated : entry,
+      ],
+    ),
   );
 
   void _updateDecisionOption(DecisionPayload payload, DecisionOption updated) =>

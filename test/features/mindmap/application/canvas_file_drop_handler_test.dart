@@ -43,15 +43,18 @@ void main() {
     expect(node.type, NodeType.video);
   });
 
-  test('CanvasFileDropHandler classifies unknown extension as link node', () async {
-    final node = await handler.processDroppedFile(
-      fileName: 'document.pdf',
-      bytes: dummyBytes,
-      position: const CanvasPosition(0, 0),
-      dayKey: '2026-08-04',
-    );
+  test(
+    'CanvasFileDropHandler classifies unknown extension as link node',
+    () async {
+      final node = await handler.processDroppedFile(
+        fileName: 'document.pdf',
+        bytes: dummyBytes,
+        position: const CanvasPosition(0, 0),
+        dayKey: '2026-08-04',
+      );
 
-    expect(node.type, NodeType.link);
-    expect(node.data['isLocalFile'], true);
-  });
+      expect(node.type, NodeType.link);
+      expect(node.data['isLocalFile'], true);
+    },
+  );
 }

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
+import 'package:var_app/features/mindmap/domain/node_mini_app_data.dart';
 import 'package:var_app/features/settings/domain/reminder_notification_adapter.dart';
 import 'package:var_app/features/settings/domain/reminder_planner.dart';
 
@@ -40,6 +41,43 @@ void main() {
       expect(notifications.single.payload['nodeId'], 'task-1');
     },
   );
+
+  test('habit notifications use per-node reminder time and payload', () {
+    final now = DateTime(2026, 6, 29, 12);
+    final base = MindmapNode.create(
+      id: 'habit-1',
+      type: NodeType.habit,
+      title: 'Walk',
+      day: now,
+      now: now,
+    );
+    final habit = updateNodeMiniAppSection(base, 'habit', {
+      'reminderEnabled': true,
+      'reminderTime': '18:30',
+    });
+    final plan = buildReminderPlan(
+      nodes: [habit],
+      routines: const [],
+      options: ReminderPlannerOptions(
+        today: now,
+        lookaheadDays: 0,
+        dueRemindersEnabled: false,
+        routineRemindersEnabled: false,
+      ),
+    );
+
+    final notification = buildScheduledReminderNotifications(
+      plan,
+      policy: const ReminderSchedulePolicy(hour: 8, minute: 15),
+    ).single;
+
+    expect(notification.id, 'habit-habit-1-2026-06-29');
+    expect(notification.title, 'Habit reminder');
+    expect(notification.scheduledAt, DateTime(2026, 6, 29, 18, 30));
+    expect(notification.payload['kind'], 'habit');
+    expect(notification.payload['nodeId'], 'habit-1');
+    expect(notification.payload['reminderTime'], '18:30');
+  });
 
   test('scheduledReminderNotificationsFromJson decodes exported payloads', () {
     final decoded = scheduledReminderNotificationsFromJson([

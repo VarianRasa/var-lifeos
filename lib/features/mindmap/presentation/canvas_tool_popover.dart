@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+import '../../../core/theme/app_design_tokens.dart';
 
 class CanvasToolPopover extends StatelessWidget {
   const CanvasToolPopover({
@@ -13,46 +17,64 @@ class CanvasToolPopover extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => Material(
-    key: const ValueKey('canvas-tool-popover'),
-    elevation: 10,
-    color: Theme.of(context).colorScheme.surfaceContainerHigh,
-    borderRadius: BorderRadius.circular(16),
-    child: ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 240, maxWidth: 320),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+  Widget build(BuildContext context) {
+    final tokens = AppDesignTokens.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) => ConstrainedBox(
+        key: const ValueKey('canvas-tool-popover'),
+        constraints: BoxConstraints(
+          minWidth: math.min(240, constraints.maxWidth),
+          maxWidth: math.min(320, constraints.maxWidth),
+        ),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: colorScheme.surfaceContainerHigh,
+            shadows: tokens.shadowMedium,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(tokens.radiusContainer),
+              side: BorderSide(color: colorScheme.outlineVariant),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    Semantics(
+                      label: 'Close tool settings',
+                      button: true,
+                      child: SizedBox.square(
+                        key: const ValueKey('canvas-tool-popover-close'),
+                        dimension: tokens.minimumTarget,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          tooltip: 'Close tool settings',
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                Semantics(
-                  label: 'Close tool settings',
-                  button: true,
-                  child: IconButton(
-                    key: const ValueKey('canvas-tool-popover-close'),
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onClose,
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                  ),
-                ),
+                const SizedBox(height: 8),
+                child,
               ],
             ),
-            const SizedBox(height: 8),
-            child,
-          ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class CanvasColorChoices extends StatelessWidget {
@@ -75,35 +97,46 @@ class CanvasColorChoices extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 8,
-    runSpacing: 8,
-    children: [
-      for (final entry in colors.entries)
-        Semantics(
-          button: true,
-          selected: selected == entry.key,
-          label: 'Color ${entry.key}',
-          child: InkWell(
-            key: ValueKey('canvas-color-${entry.key}'),
-            borderRadius: BorderRadius.circular(999),
-            onTap: () => onSelected(entry.key),
-            child: Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: entry.value,
-                border: Border.all(
-                  color: selected == entry.key
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.outlineVariant,
-                  width: selected == entry.key ? 3 : 1,
+  Widget build(BuildContext context) {
+    final tokens = AppDesignTokens.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final entry in colors.entries)
+          Semantics(
+            button: true,
+            selected: selected == entry.key,
+            label: selected == entry.key
+                ? 'Color ${entry.key}, selected'
+                : 'Color ${entry.key}',
+            child: SizedBox.square(
+              key: ValueKey('canvas-color-${entry.key}'),
+              dimension: tokens.minimumTarget,
+              child: InkResponse(
+                customBorder: const CircleBorder(),
+                onTap: () => onSelected(entry.key),
+                child: Center(
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: entry.value,
+                      border: Border.all(
+                        color: selected == entry.key
+                            ? colorScheme.primary
+                            : colorScheme.outlineVariant,
+                        width: selected == entry.key ? 3 : 1,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-    ],
-  );
+      ],
+    );
+  }
 }

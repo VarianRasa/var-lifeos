@@ -9,6 +9,7 @@ import 'package:var_app/features/mindmap/domain/node_type_payloads.dart';
 import 'package:var_app/features/mindmap/presentation/node_editors/checklist_node_editor.dart';
 import 'package:var_app/features/mindmap/presentation/node_type_content.dart';
 import 'package:var_app/features/mindmap/presentation/node_type_inline_editor.dart';
+import 'package:var_app/features/mindmap/presentation/widgets/sticky_note_card_widget.dart';
 
 void main() {
   const productivityTypes = <NodeType>[
@@ -43,15 +44,19 @@ void main() {
           ),
         );
 
-        expect(
-          find.byKey(
-            ValueKey<String>('productivity-${type.name}-${preset.name}'),
-          ),
-          findsOneWidget,
-        );
+        if (type == NodeType.note) {
+          expect(find.byType(StickyNoteCardWidget), findsOneWidget);
+        } else {
+          expect(
+            find.byKey(
+              ValueKey<String>('productivity-${type.name}-${preset.name}'),
+            ),
+            findsOneWidget,
+          );
+        }
         expect(find.text(node.title), findsOneWidget);
         expect(tester.takeException(), isNull);
-        if (preset == NodeSizePreset.compact) {
+        if (type == NodeType.note || preset == NodeSizePreset.compact) {
           expect(
             find.byKey(ValueKey<String>('productivity-${type.name}-details')),
             findsNothing,
@@ -162,6 +167,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('goal editor supports unbounded full-page layout', (
+    tester,
+  ) async {
+    final node = _node(NodeType.goal);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: buildNodeTypeInlineEditor(
+              NodeEditContext(
+                node: node,
+                typedDraft: GoalPayload.fromNode(node),
+                effectivePreset: NodeSizePreset.standard,
+                validationErrors: const [],
+                onTitleChanged: (_) {},
+                onBodyChanged: (_) {},
+                onDraftChanged: (_) {},
+                onNodeDraftChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('productivity-goal-editor')),
+      findsOneWidget,
+    );
+    expect(find.text('First'), findsOneWidget);
+    expect(find.text('Second'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('routine fixed editor exposes controls without scroll', (
     tester,
   ) async {
@@ -222,6 +261,42 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('routine editor supports unbounded full-page layout', (
+    tester,
+  ) async {
+    final node = _node(NodeType.routine);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: buildNodeTypeInlineEditor(
+              NodeEditContext(
+                node: node,
+                typedDraft: HabitRoutinePayload.fromNode(node),
+                effectivePreset: NodeSizePreset.standard,
+                validationErrors: const [],
+                onTitleChanged: (_) {},
+                onBodyChanged: (_) {},
+                onDraftChanged: (_) {},
+                onNodeDraftChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('productivity-routine-editor')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('routine-four-week-tracker')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('inline title editing only emits draft callback', (tester) async {
     final titles = <String>[];
     final payloads = <Object>[];
@@ -253,6 +328,56 @@ void main() {
     expect(titles, ['Updated task']);
     expect(payloads, isEmpty);
     expect(nodeDrafts, isEmpty);
+  });
+
+  testWidgets('task subtask actions fit a narrow mobile workspace', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final node = _node(NodeType.task).copyWith(
+      checklist: const [
+        TaskChecklistItem(
+          id: 'mobile-subtask',
+          title: 'Long mobile subtask title that still needs usable actions',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 760,
+            child: buildNodeTypeInlineEditor(
+              NodeEditContext(
+                node: node,
+                typedDraft: TaskChecklistPayload.fromNode(node),
+                effectivePreset: NodeSizePreset.standard,
+                validationErrors: const [],
+                onTitleChanged: (_) {},
+                onBodyChanged: (_) {},
+                onDraftChanged: (_) {},
+                onNodeDraftChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    final actions = find.byTooltip('Subtask actions');
+    await tester.ensureVisible(actions);
+    await tester.tap(actions);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit subtask'), findsOneWidget);
+    expect(find.text('Delete subtask'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('task editor exposes priority deadline and workspace sections', (

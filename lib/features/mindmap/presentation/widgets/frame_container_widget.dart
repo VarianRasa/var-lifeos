@@ -19,13 +19,16 @@ class FrameContainerWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final borderColor = color ?? theme.colorScheme.outline.withValues(alpha: 0.4);
+    final borderColor =
+        color ?? theme.colorScheme.outline.withValues(alpha: 0.4);
 
     return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: (color ?? theme.colorScheme.surfaceContainerLowest).withValues(alpha: 0.15),
+        color: (color ?? theme.colorScheme.surfaceContainerLowest).withValues(
+          alpha: 0.15,
+        ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: borderColor,

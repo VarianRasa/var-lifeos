@@ -19,7 +19,10 @@ class ConnectionRenderItem {
 Color resolveConnectionColor(String colorName, BuildContext? context) {
   if (colorName.startsWith('#')) {
     final hexStr = colorName.replaceAll('#', '');
-    final val = int.tryParse(hexStr.length == 6 ? 'FF$hexStr' : hexStr, radix: 16);
+    final val = int.tryParse(
+      hexStr.length == 6 ? 'FF$hexStr' : hexStr,
+      radix: 16,
+    );
     if (val != null) return Color(val);
   }
   switch (colorName.toLowerCase()) {
@@ -68,26 +71,50 @@ Color resolveConnectionColor(String colorName, BuildContext? context) {
   }
 }
 
-Offset computeBezierPoint(Offset start, Offset c1, Offset c2, Offset end, double t) {
+Offset computeBezierPoint(
+  Offset start,
+  Offset c1,
+  Offset c2,
+  Offset end,
+  double t,
+) {
   final u = 1 - t;
   final tt = t * t;
   final uu = u * u;
   final uuu = uu * u;
   final ttt = tt * t;
 
-  final x = uuu * start.dx + 3 * uu * t * c1.dx + 3 * u * tt * c2.dx + ttt * end.dx;
-  final y = uuu * start.dy + 3 * uu * t * c1.dy + 3 * u * tt * c2.dy + ttt * end.dy;
+  final x =
+      uuu * start.dx + 3 * uu * t * c1.dx + 3 * u * tt * c2.dx + ttt * end.dx;
+  final y =
+      uuu * start.dy + 3 * uu * t * c1.dy + 3 * u * tt * c2.dy + ttt * end.dy;
   return Offset(x, y);
 }
 
-double computeBezierAngle(Offset start, Offset c1, Offset c2, Offset end, double t) {
+double computeBezierAngle(
+  Offset start,
+  Offset c1,
+  Offset c2,
+  Offset end,
+  double t,
+) {
   final u = 1 - t;
-  final dx = 3 * u * u * (c1.dx - start.dx) + 6 * u * t * (c2.dx - c1.dx) + 3 * t * t * (end.dx - c2.dx);
-  final dy = 3 * u * u * (c1.dy - start.dy) + 6 * u * t * (c2.dy - c1.dy) + 3 * t * t * (end.dy - c2.dy);
+  final dx =
+      3 * u * u * (c1.dx - start.dx) +
+      6 * u * t * (c2.dx - c1.dx) +
+      3 * t * t * (end.dx - c2.dx);
+  final dy =
+      3 * u * u * (c1.dy - start.dy) +
+      6 * u * t * (c2.dy - c1.dy) +
+      3 * t * t * (end.dy - c2.dy);
   return math.atan2(dy, dx);
 }
 
-Path createDashedPath(Path source, {required double dashLength, required double spaceLength}) {
+Path createDashedPath(
+  Path source, {
+  required double dashLength,
+  required double spaceLength,
+}) {
   final Path dest = Path();
   for (final metric in source.computeMetrics()) {
     double distance = 0.0;
@@ -96,7 +123,10 @@ Path createDashedPath(Path source, {required double dashLength, required double 
       final double length = draw ? dashLength : spaceLength;
       if (draw) {
         dest.addPath(
-          metric.extractPath(distance, math.min(distance + length, metric.length)),
+          metric.extractPath(
+            distance,
+            math.min(distance + length, metric.length),
+          ),
           Offset.zero,
         );
       }
@@ -108,10 +138,7 @@ Path createDashedPath(Path source, {required double dashLength, required double 
 }
 
 class MindmapConnectionPainter extends CustomPainter {
-  const MindmapConnectionPainter({
-    required this.connections,
-    this.context,
-  });
+  const MindmapConnectionPainter({required this.connections, this.context});
 
   final List<ConnectionRenderItem> connections;
   final BuildContext? context;
@@ -139,9 +166,15 @@ class MindmapConnectionPainter extends CustomPainter {
 
     final lineStyle = item.metadata.lineStyle;
     if (lineStyle == 'dashed') {
-      canvas.drawPath(createDashedPath(path, dashLength: 6, spaceLength: 4), paint);
+      canvas.drawPath(
+        createDashedPath(path, dashLength: 6, spaceLength: 4),
+        paint,
+      );
     } else if (lineStyle == 'dotted') {
-      canvas.drawPath(createDashedPath(path, dashLength: 2, spaceLength: 4), paint);
+      canvas.drawPath(
+        createDashedPath(path, dashLength: 2, spaceLength: 4),
+        paint,
+      );
     } else {
       canvas.drawPath(path, paint);
     }
@@ -152,7 +185,8 @@ class MindmapConnectionPainter extends CustomPainter {
       _drawArrowHead(canvas, item.end, angle, color);
     }
     if (arrowStyle == 'both') {
-      final angle = computeBezierAngle(item.start, c1, c2, item.end, 0.0) + math.pi;
+      final angle =
+          computeBezierAngle(item.start, c1, c2, item.end, 0.0) + math.pi;
       _drawArrowHead(canvas, item.start, angle, color);
     }
 

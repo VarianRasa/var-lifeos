@@ -4,7 +4,9 @@ import 'package:var_app/features/mindmap/domain/connection_style.dart';
 import 'package:var_app/features/mindmap/presentation/widgets/connection_style_bar.dart';
 
 void main() {
-  testWidgets('ConnectionStyleBar renders and triggers callbacks', (tester) async {
+  testWidgets('ConnectionStyleBar renders and triggers callbacks', (
+    tester,
+  ) async {
     ConnectionStyle currentStyle = const ConnectionStyle();
     bool deletePressed = false;
 

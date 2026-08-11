@@ -15,6 +15,16 @@ import 'package:var_app/features/mindmap/domain/automation_rule.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/recurring_routine.dart';
 
+Future<void> setInsightsSurface(
+  WidgetTester tester,
+  Size size, {
+  double devicePixelRatio = 1,
+}) async {
+  tester.view.physicalSize = size * devicePixelRatio;
+  tester.view.devicePixelRatio = devicePixelRatio;
+  await tester.pump();
+}
+
 void main() {
   setUp(() {
     final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +41,157 @@ void main() {
     view.resetPhysicalSize();
     view.resetDevicePixelRatio();
   });
+  for (final width in [320.0, 768.0, 1024.0, 1440.0]) {
+    testWidgets(
+      'InsightsPage adapts shell at ${width.toInt()} logical pixels',
+      (tester) async {
+        await setInsightsSurface(
+          tester,
+          Size(width, 900),
+          devicePixelRatio: width == 320 ? 2 : 1,
+        );
+        final repository = InMemoryMindmapRepository();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              mindmapRepositoryProvider.overrideWithValue(repository),
+            ],
+            child: const MaterialApp(home: InsightsPage()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const ValueKey('insights-dashboard-toggle')),
+          findsOneWidget,
+        );
+        if (width < LayoutConstants.mobileBreakpoint) {
+          expect(
+            find.byKey(const ValueKey('insights-mobile-search')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey('insights-search-field')),
+            findsNothing,
+          );
+        } else {
+          expect(
+            find.byKey(const ValueKey('insights-search-field')),
+            findsOneWidget,
+          );
+        }
+      },
+    );
+  }
+
+  testWidgets('InsightsPage exposes filters and results as semantic regions', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final repository = InMemoryMindmapRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(home: InsightsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final scrollable = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('insights-filter-region')),
+      300,
+      scrollable: scrollable,
+    );
+    expect(find.bySemanticsLabel('Insight filters'), findsOneWidget);
+    final filters = tester.widget<Semantics>(
+      find.byKey(const ValueKey('insights-filter-region')),
+    );
+    expect(filters.properties.header, isTrue);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('insights-results-region')),
+      500,
+      scrollable: scrollable,
+    );
+    expect(find.bySemanticsLabel('Insight results'), findsOneWidget);
+    final results = tester.widget<Semantics>(
+      find.byKey(const ValueKey('insights-results-region')),
+    );
+    expect(results.properties.header, isTrue);
+    semantics.dispose();
+  });
+
+  testWidgets('Insights orders supplemental cards after primary results', (
+    tester,
+  ) async {
+    final repository = InMemoryMindmapRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(
+          home: InsightsPage(initialShowDashboardPanels: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final listView = tester.widget<ListView>(find.byType(ListView).first);
+    final children =
+        (listView.childrenDelegate as SliverChildListDelegate).children;
+    final resultsIndex = children.indexWhere(
+      (child) => child.key == const ValueKey('insights-results-region'),
+    );
+    final supplementalIndex = children.indexWhere(
+      (child) => child.key == const ValueKey('insights-supplemental-region'),
+    );
+
+    expect(resultsIndex, greaterThanOrEqualTo(0));
+    expect(supplementalIndex, greaterThan(resultsIndex));
+  });
+
+  testWidgets(
+    'Insights dashboard distribution stacks at 320 without overflow',
+    (tester) async {
+      await setInsightsSurface(tester, const Size(320, 1200));
+      final today = DateTime(2026, 7, 6);
+      final repository = InMemoryMindmapRepository(
+        seedNodes: [
+          MindmapNode.create(
+            id: 'task',
+            type: NodeType.task,
+            title: 'Task',
+            day: today,
+            effort: NodeEffort.thirtyMinutes,
+            now: today,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            mindmapRepositoryProvider.overrideWithValue(repository),
+            currentDateProvider.overrideWithValue(today),
+          ],
+          child: const MaterialApp(
+            home: InsightsPage(initialShowDashboardPanels: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Productivity Distribution'),
+        500,
+        scrollable: find.byType(Scrollable).first,
+      );
+
+      expect(tester.takeException(), isNull);
+      final effort = tester.getTopLeft(find.text('Effort'));
+      final review = tester.getTopLeft(find.text('Review State'));
+      expect(review.dy, greaterThan(effort.dy));
+    },
+  );
+
   testWidgets(
     'InsightsPage renders productivity distribution, overdue and weekly wins',
     (tester) async {

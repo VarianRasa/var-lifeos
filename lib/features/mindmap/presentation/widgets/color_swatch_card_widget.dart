@@ -45,11 +45,7 @@ class ColorSwatchCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              height: 100,
-              width: double.infinity,
-              color: primaryColor,
-            ),
+            Container(height: 100, width: double.infinity, color: primaryColor),
             Padding(
               padding: const EdgeInsets.all(10),
               child: Column(

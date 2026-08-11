@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
@@ -388,19 +389,28 @@ void main() {
         ),
       ),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    emitted.clear();
 
     expect(key.currentState!.currentViewport.x, closeTo(420, 0.01));
     expect(key.currentState!.currentViewport.y, closeTo(-180, 0.01));
     expect(key.currentState!.currentViewport.scale, closeTo(0.8, 0.001));
 
-    await tester.tap(find.byTooltip('Show canvas controls'));
-    await tester.pump();
-    await tester.tap(find.byTooltip('Zoom In'));
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byType(InteractiveViewer),
+    );
+    final controller = viewer.transformationController!;
+    controller.value = Matrix4.translationValues(10, 0, 0);
+    controller.value = Matrix4.translationValues(20, 0, 0);
+    controller.value = Matrix4.translationValues(30, 0, 0);
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(emitted, hasLength(1));
-    expect(emitted.single.scale, greaterThan(0.8));
+    final last = emitted.single;
+    controller.value = Matrix4.translationValues(30.001, 0, 0);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(emitted, hasLength(1));
+    expect(emitted.single, last);
   });
 
   testWidgets('Ctrl+Arrow navigates spatially across canvas objects', (
@@ -679,7 +689,7 @@ void main() {
     );
     await tester.dragFrom(
       tester.getCenter(nodeFinder),
-      const Offset(220, 220),
+      const Offset(40, 40),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pumpAndSettle();
@@ -848,7 +858,10 @@ void main() {
     await tester.tap(find.byTooltip('Show minimap'));
     await tester.pumpAndSettle();
     final minimap = find.byKey(const ValueKey('mindmap-minimap-semantics'));
-    expect(tester.getSemantics(minimap).label, contains('2 canvas objects'));
+    final semantics = tester.getSemantics(minimap);
+    expect(semantics.label, contains('2 canvas objects'));
+    expect(semantics.label, contains('Tap to move viewport'));
+    expect(semantics.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
     final rect = tester.getRect(minimap);
     await tester.tapAt(Offset(rect.right - 4, rect.bottom - 4));
     await tester.pumpAndSettle();

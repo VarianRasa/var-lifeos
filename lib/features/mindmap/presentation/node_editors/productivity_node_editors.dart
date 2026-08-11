@@ -549,9 +549,50 @@ final class _TaskInlineEditorState extends State<_TaskInlineEditor> {
 
   void _deleteSubtask(TaskChecklistItem item) => _updatePayload(
     payload.copyWith(
-      items: payload.items.where((current) => current.id != item.id).toList(),
+      items: [
+        for (final current in payload.items)
+          if (current.id != item.id)
+            current.parentId == item.id
+                ? current.copyWith(parentId: item.parentId)
+                : current,
+      ],
     ),
   );
+
+  void _reorderSubtask(int oldIndex, int newIndex) => _updatePayload(
+    payload.copyWith(
+      items: moveTaskChecklistItem(payload.items, oldIndex, newIndex),
+    ),
+  );
+
+  void _indentSubtask(TaskChecklistItem item) {
+    final index = payload.items.indexWhere((value) => value.id == item.id);
+    if (index <= 0) return;
+    final parentId = payload.items[index - 1].id;
+    final updated = setTaskChecklistParent(payload.items, item.id, parentId);
+    if (updated == null || updated == item) return;
+    _updatePayload(
+      payload.copyWith(
+        items: [
+          for (final current in payload.items)
+            current.id == item.id ? updated : current,
+        ],
+      ),
+    );
+  }
+
+  void _outdentSubtask(TaskChecklistItem item) {
+    final updated = setTaskChecklistParent(payload.items, item.id, null);
+    if (updated == null || updated == item) return;
+    _updatePayload(
+      payload.copyWith(
+        items: [
+          for (final current in payload.items)
+            current.id == item.id ? updated : current,
+        ],
+      ),
+    );
+  }
 
   Future<void> _pickDeadline() async {
     final selected = await showDatePicker(
@@ -687,18 +728,28 @@ final class _TaskInlineEditorState extends State<_TaskInlineEditor> {
                   ),
                   child: payload.items.isEmpty
                       ? const _TaskEmptyState(label: 'No subtasks yet')
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final item in payload.items)
-                              _TaskSubtaskTile(
-                                item: item,
-                                onChanged: (value) =>
-                                    _toggleSubtask(item, value),
-                                onEdit: () => _editSubtask(item),
-                                onDelete: () => _deleteSubtask(item),
-                              ),
-                          ],
+                      : ReorderableListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          buildDefaultDragHandles: false,
+                          itemCount: payload.items.length,
+                          onReorderItem: _reorderSubtask,
+                          itemBuilder: (context, index) {
+                            final item = payload.items[index];
+                            return _TaskSubtaskTile(
+                              key: ValueKey<String>('task-subtask-${item.id}'),
+                              item: item,
+                              depth: _taskChecklistDepth(item, payload.items),
+                              index: index,
+                              canIndent: index > 0,
+                              canOutdent: item.parentId != null,
+                              onChanged: (value) => _toggleSubtask(item, value),
+                              onEdit: () => _editSubtask(item),
+                              onDelete: () => _deleteSubtask(item),
+                              onIndent: () => _indentSubtask(item),
+                              onOutdent: () => _outdentSubtask(item),
+                            );
+                          },
                         ),
                 ),
                 const SizedBox(height: 10),
@@ -731,43 +782,46 @@ final class _TaskInlineEditorState extends State<_TaskInlineEditor> {
                       : Column(
                           children: [
                             for (final attachment in payload.attachments)
-                              ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(_fileIcon(attachment.mimeType)),
-                                title: Text(
-                                  attachment.fileName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(
-                                  _fileSize(attachment.byteLength),
-                                ),
-                                onTap: edit.onTaskAttachmentOpen == null
-                                    ? null
-                                    : () => edit.onTaskAttachmentOpen!(
+                              Material(
+                                type: MaterialType.transparency,
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(_fileIcon(attachment.mimeType)),
+                                  title: Text(
+                                    attachment.fileName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    _fileSize(attachment.byteLength),
+                                  ),
+                                  onTap: edit.onTaskAttachmentOpen == null
+                                      ? null
+                                      : () => edit.onTaskAttachmentOpen!(
+                                          attachment,
+                                        ),
+                                  trailing: IconButton(
+                                    tooltip: 'Remove attachment',
+                                    onPressed: () async {
+                                      await edit.onTaskAttachmentRemove?.call(
                                         attachment,
-                                      ),
-                                trailing: IconButton(
-                                  tooltip: 'Remove attachment',
-                                  onPressed: () async {
-                                    await edit.onTaskAttachmentRemove?.call(
-                                      attachment,
-                                    );
-                                    _updatePayload(
-                                      payload.copyWith(
-                                        attachments: payload.attachments
-                                            .where(
-                                              (item) =>
-                                                  item.id != attachment.id,
-                                            )
-                                            .toList(),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 18,
+                                      );
+                                      _updatePayload(
+                                        payload.copyWith(
+                                          attachments: payload.attachments
+                                              .where(
+                                                (item) =>
+                                                    item.id != attachment.id,
+                                              )
+                                              .toList(),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -837,49 +891,113 @@ final class _TaskSection extends StatelessWidget {
 final class _TaskSubtaskTile extends StatelessWidget {
   const _TaskSubtaskTile({
     required this.item,
+    required this.depth,
+    required this.index,
+    required this.canIndent,
+    required this.canOutdent,
     required this.onChanged,
     required this.onEdit,
     required this.onDelete,
+    required this.onIndent,
+    required this.onOutdent,
+    super.key,
   });
 
   final TaskChecklistItem item;
+  final int depth;
+  final int index;
+  final bool canIndent;
+  final bool canOutdent;
   final ValueChanged<bool> onChanged;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onIndent;
+  final VoidCallback onOutdent;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Checkbox(
-        value: item.isDone,
-        visualDensity: VisualDensity.compact,
-        onChanged: (value) => onChanged(value ?? false),
-      ),
-      Expanded(
-        child: Text(
-          item.title,
-          style: TextStyle(
-            decoration: item.isDone ? TextDecoration.lineThrough : null,
-            color: item.isDone
-                ? Theme.of(context).colorScheme.onSurfaceVariant
-                : null,
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(left: depth * 20),
+    child: Row(
+      children: [
+        ReorderableDragStartListener(
+          index: index,
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(Icons.drag_indicator, size: 18),
           ),
         ),
-      ),
-      IconButton(
-        tooltip: 'Edit subtask',
-        visualDensity: VisualDensity.compact,
-        onPressed: onEdit,
-        icon: const Icon(Icons.edit_outlined, size: 17),
-      ),
-      IconButton(
-        tooltip: 'Delete subtask',
-        visualDensity: VisualDensity.compact,
-        onPressed: onDelete,
-        icon: const Icon(Icons.delete_outline, size: 17),
-      ),
-    ],
+        Checkbox(
+          value: item.isDone,
+          visualDensity: VisualDensity.compact,
+          onChanged: (value) => onChanged(value ?? false),
+        ),
+        Expanded(
+          child: Text(
+            item.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              decoration: item.isDone ? TextDecoration.lineThrough : null,
+              color: item.isDone
+                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                  : null,
+            ),
+          ),
+        ),
+        PopupMenuButton<_TaskSubtaskAction>(
+          tooltip: 'Subtask actions',
+          onSelected: (action) {
+            switch (action) {
+              case _TaskSubtaskAction.outdent:
+                onOutdent();
+              case _TaskSubtaskAction.indent:
+                onIndent();
+              case _TaskSubtaskAction.edit:
+                onEdit();
+              case _TaskSubtaskAction.delete:
+                onDelete();
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: _TaskSubtaskAction.outdent,
+              enabled: canOutdent,
+              child: const Text('Outdent subtask'),
+            ),
+            PopupMenuItem(
+              value: _TaskSubtaskAction.indent,
+              enabled: canIndent,
+              child: const Text('Indent subtask'),
+            ),
+            const PopupMenuItem(
+              value: _TaskSubtaskAction.edit,
+              child: Text('Edit subtask'),
+            ),
+            const PopupMenuItem(
+              value: _TaskSubtaskAction.delete,
+              child: Text('Delete subtask'),
+            ),
+          ],
+        ),
+      ],
+    ),
   );
+}
+
+enum _TaskSubtaskAction { outdent, indent, edit, delete }
+
+int _taskChecklistDepth(TaskChecklistItem item, List<TaskChecklistItem> items) {
+  final byId = {for (final value in items) value.id: value};
+  var parentId = item.parentId;
+  var depth = 0;
+  final visited = <String>{item.id};
+  while (parentId != null && visited.add(parentId)) {
+    final parent = byId[parentId];
+    if (parent == null) break;
+    depth++;
+    parentId = parent.parentId;
+  }
+  return depth;
 }
 
 final class _TaskEmptyState extends StatelessWidget {
@@ -1185,21 +1303,22 @@ final class _GoalInlineEditorState extends State<_GoalInlineEditor> {
             ],
           ),
           const SizedBox(height: 10),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final itemWidth = (constraints.maxWidth - 10) / 2;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 8,
-                  children: [
-                    for (
-                      var index = 0;
-                      index < payload.milestones.length;
-                      index++
-                    )
-                      SizedBox(
-                        width: itemWidth,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = (constraints.maxWidth - 10) / 2;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  for (
+                    var index = 0;
+                    index < payload.milestones.length;
+                    index++
+                  )
+                    SizedBox(
+                      width: itemWidth,
+                      child: Material(
+                        type: MaterialType.transparency,
                         child: CheckboxListTile(
                           key: ValueKey<String>('goal-milestone-$index'),
                           dense: true,
@@ -1261,10 +1380,10 @@ final class _GoalInlineEditorState extends State<_GoalInlineEditor> {
                           },
                         ),
                       ),
-                  ],
-                );
-              },
-            ),
+                    ),
+                ],
+              );
+            },
           ),
           if (payload.milestones.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -1487,7 +1606,6 @@ final class _RoutineInlineEditor extends StatelessWidget {
                 ),
             ],
           ),
-          const Spacer(),
           for (final error in context.validationErrors)
             Text(error, style: TextStyle(color: theme.colorScheme.error)),
         ],

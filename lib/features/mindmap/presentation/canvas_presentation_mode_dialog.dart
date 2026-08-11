@@ -15,10 +15,7 @@ class CanvasPresentationFrame {
 class CanvasPresentationModeDialog extends StatefulWidget {
   final List<CanvasPresentationFrame> frames;
 
-  const CanvasPresentationModeDialog({
-    super.key,
-    required this.frames,
-  });
+  const CanvasPresentationModeDialog({super.key, required this.frames});
 
   @override
   State<CanvasPresentationModeDialog> createState() =>

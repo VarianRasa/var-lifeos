@@ -93,6 +93,7 @@ final class TaskChecklistItem {
     required this.id,
     required this.title,
     this.isDone = false,
+    this.parentId,
   });
 
   factory TaskChecklistItem.fromJson(Map<String, Object?> json) {
@@ -100,33 +101,48 @@ final class TaskChecklistItem {
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '',
       isDone: json['isDone'] as bool? ?? false,
+      parentId: json['parentId'] as String?,
     );
   }
 
   final String id;
   final String title;
   final bool isDone;
+  final String? parentId;
 
-  TaskChecklistItem copyWith({String? id, String? title, bool? isDone}) {
+  TaskChecklistItem copyWith({
+    String? id,
+    String? title,
+    bool? isDone,
+    String? parentId,
+    bool clearParentId = false,
+  }) {
     return TaskChecklistItem(
       id: id ?? this.id,
       title: title ?? this.title,
       isDone: isDone ?? this.isDone,
+      parentId: clearParentId ? null : parentId ?? this.parentId,
     );
   }
 
-  Map<String, Object?> toJson() => {'id': id, 'title': title, 'isDone': isDone};
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'title': title,
+    'isDone': isDone,
+    if (parentId != null) 'parentId': parentId,
+  };
 
   @override
   bool operator ==(Object other) {
     return other is TaskChecklistItem &&
         other.id == id &&
         other.title == title &&
-        other.isDone == isDone;
+        other.isDone == isDone &&
+        other.parentId == parentId;
   }
 
   @override
-  int get hashCode => Object.hash(id, title, isDone);
+  int get hashCode => Object.hash(id, title, isDone, parentId);
 }
 
 final class MindmapNode {
@@ -152,13 +168,16 @@ final class MindmapNode {
     this.progress = 0,
     this.isPinned = false,
     this.isArchived = false,
+    this.isLocked = false,
     List<TaskChecklistItem> checklist = const [],
     List<String> relatedNodeIds = const [],
+    List<String> blockedByNodeIds = const [],
     Map<String, Object?> data = const {},
   }) : tags = List<String>.unmodifiable(tags),
        contextTags = List<String>.unmodifiable(contextTags),
-       checklist = List<TaskChecklistItem>.unmodifiable(checklist),
-       relatedNodeIds = List<String>.unmodifiable(relatedNodeIds) {
+       checklist = _normalizeChecklist(checklist),
+       relatedNodeIds = List<String>.unmodifiable(relatedNodeIds),
+       blockedByNodeIds = List<String>.unmodifiable(blockedByNodeIds) {
     this.data = _freezeData(data);
     presentationDataKey = _presentationDataKey(type, this.data, this.checklist);
     presentationDataRevision = presentationDataKey.hashCode;
@@ -184,8 +203,10 @@ final class MindmapNode {
     double progress = 0,
     bool isPinned = false,
     bool isArchived = false,
+    bool isLocked = false,
     List<TaskChecklistItem> checklist = const [],
     List<String> relatedNodeIds = const [],
+    List<String> blockedByNodeIds = const [],
     Map<String, Object?> data = const {},
     DateTime? now,
   }) {
@@ -212,8 +233,10 @@ final class MindmapNode {
       progress: _normalizeProgress(progress),
       isPinned: isPinned,
       isArchived: isArchived,
+      isLocked: isLocked,
       checklist: _normalizeChecklist(checklist),
       relatedNodeIds: _normalizeNodeIds(relatedNodeIds, selfId: id),
+      blockedByNodeIds: _normalizeNodeIds(blockedByNodeIds, selfId: id),
       data: data,
     );
   }
@@ -244,8 +267,10 @@ final class MindmapNode {
       progress: _normalizeProgress((json['progress'] as num?)?.toDouble() ?? 0),
       isPinned: json['isPinned'] as bool? ?? false,
       isArchived: json['isArchived'] as bool? ?? false,
+      isLocked: json['isLocked'] as bool? ?? false,
       checklist: _checklistFromJson(json['checklist']),
       relatedNodeIds: _nodeIdsFromJson(json['relatedNodeIds'], selfId: id),
+      blockedByNodeIds: _nodeIdsFromJson(json['blockedByNodeIds'], selfId: id),
       data: _dataFromJson(json['data']),
     );
   }
@@ -271,8 +296,10 @@ final class MindmapNode {
   final double progress;
   final bool isPinned;
   final bool isArchived;
+  final bool isLocked;
   final List<TaskChecklistItem> checklist;
   final List<String> relatedNodeIds;
+  final List<String> blockedByNodeIds;
   late final Map<String, Object?> data;
   late final String presentationDataKey;
   late final int presentationDataRevision;
@@ -287,6 +314,20 @@ final class MindmapNode {
   }
 
   bool get hasDueDate => dueDate != null;
+
+  bool isBlockedBy(List<MindmapNode> allNodes) {
+    if (blockedByNodeIds.isEmpty) return false;
+    final nodeMap = {for (final n in allNodes) n.id: n};
+    for (final id in blockedByNodeIds) {
+      final blocker = nodeMap[id];
+      if (blocker != null &&
+          !blocker.isDone &&
+          blocker.status != NodeStatus.done) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   bool isNextActionCandidate(DateTime today) {
     if (isDone || status == NodeStatus.done || isArchived) return false;
@@ -401,8 +442,10 @@ final class MindmapNode {
     double? progress,
     bool? isPinned,
     bool? isArchived,
+    bool? isLocked,
     List<TaskChecklistItem>? checklist,
     List<String>? relatedNodeIds,
+    List<String>? blockedByNodeIds,
     Map<String, Object?>? data,
   }) {
     final nextId = id ?? this.id;
@@ -428,9 +471,14 @@ final class MindmapNode {
       progress: _normalizeProgress(progress ?? this.progress),
       isPinned: isPinned ?? this.isPinned,
       isArchived: isArchived ?? this.isArchived,
+      isLocked: isLocked ?? this.isLocked,
       checklist: _normalizeChecklist(checklist ?? this.checklist),
       relatedNodeIds: _normalizeNodeIds(
         relatedNodeIds ?? this.relatedNodeIds,
+        selfId: nextId,
+      ),
+      blockedByNodeIds: _normalizeNodeIds(
+        blockedByNodeIds ?? this.blockedByNodeIds,
         selfId: nextId,
       ),
       data: data ?? this.data,
@@ -459,8 +507,10 @@ final class MindmapNode {
     'progress': progress,
     'isPinned': isPinned,
     'isArchived': isArchived,
+    'isLocked': isLocked,
     'checklist': [for (final item in checklist) item.toJson()],
     'relatedNodeIds': relatedNodeIds,
+    'blockedByNodeIds': blockedByNodeIds,
     'data': data,
   };
 
@@ -685,14 +735,47 @@ String _normalizeContextName(String value) {
   return value.trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
-List<TaskChecklistItem> _normalizeChecklist(List<TaskChecklistItem> checklist) {
+List<TaskChecklistItem> _normalizeChecklist(
+  List<TaskChecklistItem> checklist,
+) => normalizeTaskChecklistTree(checklist);
+
+List<TaskChecklistItem> normalizeTaskChecklistTree(
+  List<TaskChecklistItem> checklist,
+) {
   final normalized = <TaskChecklistItem>[];
   for (final item in checklist) {
     final title = item.title.trim();
     if (title.isEmpty) continue;
     normalized.add(item.copyWith(title: title));
   }
-  return List.unmodifiable(normalized);
+  final ids = {for (final item in normalized) item.id};
+  final byId = {for (final item in normalized) item.id: item};
+  return List.unmodifiable([
+    for (final item in normalized)
+      if (item.parentId == null ||
+          !ids.contains(item.parentId) ||
+          _hasChecklistCycle(item.id, item.parentId!, byId))
+        item.copyWith(clearParentId: true)
+      else
+        item,
+  ]);
+}
+
+bool _hasChecklistCycle(
+  String potentialAncestorId,
+  String descendantId,
+  Map<String, TaskChecklistItem> byId,
+) {
+  var cursor = byId[descendantId];
+  final visited = <String>{};
+  while (cursor != null) {
+    final parentId = cursor.parentId;
+    if (parentId == null) break;
+    if (parentId == potentialAncestorId) return true;
+    if (!visited.add(parentId)) return true;
+    cursor = byId[parentId];
+  }
+  return false;
 }
 
 double _normalizeProgress(double progress) {

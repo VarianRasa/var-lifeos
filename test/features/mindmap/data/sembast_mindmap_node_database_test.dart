@@ -85,6 +85,29 @@ void main() {
     },
   );
 
+  test('deletes revision history and resets its sequence head', () async {
+    final node = _node(
+      id: 'purged-history',
+      type: NodeType.expense,
+      title: 'Private receipt',
+      day: DateTime(2026, 6, 18),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    await nodeDatabase.upsertNode(node);
+    await nodeDatabase.upsertNode(
+      node.copyWith(title: 'Updated', updatedAt: DateTime(2026, 6, 18, 9)),
+    );
+
+    await nodeDatabase.deleteNode(node.id);
+    await nodeDatabase.deleteRevisions(node.id);
+
+    expect(await nodeDatabase.listRevisions(node.id), isEmpty);
+    await nodeDatabase.upsertNode(
+      node.copyWith(title: 'Recreated', updatedAt: DateTime(2026, 6, 18, 10)),
+    );
+    expect((await nodeDatabase.listRevisions(node.id)).single.sequence, 1);
+  });
+
   test('adds baseline when existing node has no revision head', () async {
     final node = _node(
       id: 'legacy-1',

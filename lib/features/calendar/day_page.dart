@@ -51,6 +51,7 @@ import '../mindmap/domain/inline_node_workspace_policy.dart';
 import '../mindmap/domain/kanban_board.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_attachment.dart';
+import '../mindmap/domain/node_presentation.dart';
 import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/node_type_payloads.dart';
 import '../mindmap/domain/node_ui_state_codec.dart';
@@ -874,9 +875,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         if (!initialBoard.objects.any((existing) => existing.id == object.id))
           object,
       ];
-      await repository.saveBoard(
-        initialBoard.copyWith(objects: mergedObjects),
-      );
+      await repository.saveBoard(initialBoard.copyWith(objects: mergedObjects));
     } else {
       final before = board.objectById(object.id);
       await repository.saveObjects(boardId, <CanvasObject>[object]);
@@ -985,9 +984,7 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
         for (final o in objects)
           if (!existingIds.contains(o.id)) o,
       ];
-      await repository.saveBoard(
-        initialBoard.copyWith(objects: mergedObjects),
-      );
+      await repository.saveBoard(initialBoard.copyWith(objects: mergedObjects));
     } else {
       final before = objects
           .map((object) => board.objectById(object.id))
@@ -3748,8 +3745,8 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                 child: Text(
                   'Day Tools & Status',
                   style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const TabBar(
@@ -4212,11 +4209,13 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                         key: const Key('mobile-compact-header'),
                         selectedNode: selectedNode,
                         viewMode: _viewMode,
-                        onViewModeChanged: (mode) => setState(() => _viewMode = mode),
+                        onViewModeChanged: (mode) =>
+                            unawaited(_setViewMode(mode)),
                         onQuickCapture: _showQuickCaptureSheet,
                         boards: allDayBoards,
                         activeBoardId: activeCanvasBoard?.id,
-                        onSelectBoard: (id) => setState(() => _activeBoardId = id),
+                        onSelectBoard: (id) =>
+                            setState(() => _activeBoardId = id),
                         onTools: () => _showMobileToolsSheet(
                           selectedNode,
                           normalizedDate,
@@ -4226,79 +4225,79 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                       ),
                     if (!isShortScreen && !isMobileCompact)
                       _DayToolsBar(
-                          stats: missionStats,
-                          planningSuggestions: planningSuggestions,
-                          miniInsights: miniInsights,
+                        stats: missionStats,
+                        planningSuggestions: planningSuggestions,
+                        miniInsights: miniInsights,
+                        selectedDay: normalizedDate,
+                        isMissionMode: _isMissionMode,
+                        isFocusRunning: _focusStartedAt != null,
+                        focusElapsed: _focusElapsed,
+                        focusRemaining: _focusRemaining,
+                        inboxCount: inboxNodes.length,
+                        onShowStatus: () => _showDayStatusSheet(missionStats),
+                        onShowPlan: () =>
+                            _showDayPlanSheet(planningSuggestions),
+                        onShowPulse: () => _showDayPulseSheet(
+                          insights: miniInsights,
                           selectedDay: normalizedDate,
-                          isMissionMode: _isMissionMode,
-                          isFocusRunning: _focusStartedAt != null,
-                          focusElapsed: _focusElapsed,
-                          focusRemaining: _focusRemaining,
-                          inboxCount: inboxNodes.length,
-                          onShowStatus: () => _showDayStatusSheet(missionStats),
-                          onShowPlan: () =>
-                              _showDayPlanSheet(planningSuggestions),
-                          onShowPulse: () => _showDayPulseSheet(
-                            insights: miniInsights,
-                            selectedDay: normalizedDate,
-                          ),
-                          onToggleMissionMode: missionNodes.isEmpty
-                              ? null
-                              : () => setState(
-                                  () => _isMissionMode = !_isMissionMode,
-                                ),
-                          onStopFocus:
-                              _focusStartedAt == null || missionNodes.isEmpty
-                              ? null
-                              : () => _stopFocusSession(
-                                  missionNodes.firstWhere(
-                                    (node) => node.id == _focusNodeId,
-                                    orElse: () => missionNodes.first,
-                                  ),
-                                ),
-                          onInboxPressed: inboxNodes.isEmpty
-                              ? null
-                              : () => _showInboxSheet(
-                                  context,
-                                  inboxNodes,
-                                  normalizedDate,
-                                ),
-                          onQuickCapture: _showQuickCaptureSheet,
                         ),
+                        onToggleMissionMode: missionNodes.isEmpty
+                            ? null
+                            : () => setState(
+                                () => _isMissionMode = !_isMissionMode,
+                              ),
+                        onStopFocus:
+                            _focusStartedAt == null || missionNodes.isEmpty
+                            ? null
+                            : () => _stopFocusSession(
+                                missionNodes.firstWhere(
+                                  (node) => node.id == _focusNodeId,
+                                  orElse: () => missionNodes.first,
+                                ),
+                              ),
+                        onInboxPressed: inboxNodes.isEmpty
+                            ? null
+                            : () => _showInboxSheet(
+                                context,
+                                inboxNodes,
+                                normalizedDate,
+                              ),
+                        onQuickCapture: _showQuickCaptureSheet,
+                      ),
                     if (!isShortScreen && !isMobileCompact)
                       DailyCockpitPanel(
-                          day: normalizedDate,
-                          nodes: value,
-                          onRescheduleRequested: (overloadedTasks) async {
-                            final balancePlan = buildWorkloadBalancePlan(
-                              candidateDays: List.generate(
-                                7,
-                                (i) => DateTime.now().add(Duration(days: i)),
-                              ),
-                              nodes: value,
-                            );
-                            final mutation = ref.read(
-                              mindmapMutationControllerProvider,
-                            );
-                            for (final move in balancePlan.moves) {
-                              if (move.fromDay.isSameDay(normalizedDate)) {
-                                await mutation.rescheduleNode(
-                                  move.node,
-                                  day: move.toDay,
-                                );
-                              }
-                            }
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Berhasil memindahkan ${balancePlan.moves.length} task!',
-                                  ),
-                                ),
+                        day: normalizedDate,
+                        nodes: value,
+                        onRescheduleRequested: (overloadedTasks) async {
+                          final balancePlan = buildWorkloadBalancePlan(
+                            candidateDays: List.generate(
+                              7,
+                              (i) => DateTime.now().add(Duration(days: i)),
+                            ),
+                            nodes: value,
+                          );
+                          final mutation = ref.read(
+                            mindmapMutationControllerProvider,
+                          );
+                          for (final move in balancePlan.moves) {
+                            if (move.fromDay.isSameDay(normalizedDate)) {
+                              await mutation.rescheduleNode(
+                                move.node,
+                                day: move.toDay,
                               );
                             }
-                          },
-                        ),
+                          }
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Berhasil memindahkan ${balancePlan.moves.length} task!',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                     if (_viewMode == _DayViewMode.canvas &&
                         MediaQuery.sizeOf(context).width < 840 &&
                         !isMobileCompact)
@@ -4392,11 +4391,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                           Expanded(
                             child: Column(
                               children: [
-                                 if (_viewMode == _DayViewMode.canvas &&
-                                     allDayBoards.isNotEmpty &&
-                                     _isFloatingBoardTabsVisible &&
-                                     MediaQuery.sizeOf(context).width >= 600)
-                                   DayCanvasTabHeader(
+                                if (_viewMode == _DayViewMode.canvas &&
+                                    allDayBoards.isNotEmpty &&
+                                    _isFloatingBoardTabsVisible &&
+                                    MediaQuery.sizeOf(context).width >= 600)
+                                  DayCanvasTabHeader(
                                     boards: allDayBoards,
                                     activeBoardId: activeCanvasBoard?.id,
                                     onSelectBoard: (String id) =>
@@ -4909,6 +4908,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     return;
                                                   }
                                                   await _selectNode(node);
+                                                },
+                                                onOpenNodeDetail: (node) {
+                                                  context.push(
+                                                    '/calendar/${dayKey(node.day)}/node/${node.id}',
+                                                  );
                                                 },
                                                 onSelectionCleared: () {
                                                   final selected = selectedNode;
@@ -5459,9 +5463,12 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                     ),
                                               ),
                                             ),
-                                             if (_isFloatingTopBarVisible &&
-                                                 MediaQuery.sizeOf(context).width >= 600)
-                                               Positioned(
+                                            if (_isFloatingTopBarVisible &&
+                                                MediaQuery.sizeOf(
+                                                      context,
+                                                    ).width >=
+                                                    600)
+                                              Positioned(
                                                 top: _topBarOffset.dy,
                                                 right: _topBarOffset.dx,
                                                 child: Card(
@@ -5621,6 +5628,67 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                           ),
                                                         ],
                                                         IconButton(
+                                                          key: const ValueKey(
+                                                            'day-copy-canvas-json',
+                                                          ),
+                                                          tooltip:
+                                                              'Copy canvas JSON',
+                                                          constraints:
+                                                              const BoxConstraints(
+                                                                minWidth: 44,
+                                                                minHeight: 44,
+                                                              ),
+                                                          onPressed: () => unawaited(() async {
+                                                            if (!await _flushInlineWorkspace()) {
+                                                              return;
+                                                            }
+                                                            final latestNodes =
+                                                                await ref
+                                                                    .read(
+                                                                      mindmapRepositoryProvider,
+                                                                    )
+                                                                    .listNodes(
+                                                                      day:
+                                                                          normalizedDate,
+                                                                    );
+                                                            await Clipboard.setData(
+                                                              ClipboardData(
+                                                                text: jsonEncode(<
+                                                                  String,
+                                                                  Object?
+                                                                >{
+                                                                  'version': 1,
+                                                                  'nodes': [
+                                                                    for (final node
+                                                                        in latestNodes)
+                                                                      node.toJson(),
+                                                                  ],
+                                                                }),
+                                                              ),
+                                                            );
+                                                          }()),
+                                                          icon: const Icon(
+                                                            Icons.data_object,
+                                                            size: 20,
+                                                          ),
+                                                        ),
+                                                        IconButton(
+                                                          tooltip:
+                                                              'Activity log',
+                                                          constraints:
+                                                              const BoxConstraints(
+                                                                minWidth: 44,
+                                                                minHeight: 44,
+                                                              ),
+                                                          onPressed:
+                                                              _showActivityLog,
+                                                          icon: const Icon(
+                                                            Icons
+                                                                .manage_history_rounded,
+                                                            size: 20,
+                                                          ),
+                                                        ),
+                                                        IconButton(
                                                           tooltip:
                                                               _isTopBarCollapsed
                                                               ? 'Expand controls'
@@ -5764,6 +5832,26 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
                                                   mainAxisSize:
                                                       MainAxisSize.min,
                                                   children: [
+                                                    if (MediaQuery.sizeOf(
+                                                          context,
+                                                        ).width <
+                                                        600) ...[
+                                                      FloatingActionButton.small(
+                                                        key: const ValueKey(
+                                                          'day-activity-log',
+                                                        ),
+                                                        tooltip: 'Activity log',
+                                                        heroTag:
+                                                            'day-activity-log',
+                                                        onPressed:
+                                                            _showActivityLog,
+                                                        child: const Icon(
+                                                          Icons
+                                                              .manage_history_rounded,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(height: 8),
+                                                    ],
                                                     FloatingActionButton.small(
                                                       key: const ValueKey(
                                                         'day-life-explorer-toggle',
@@ -6178,6 +6266,16 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
               .getBindingByLocal(session.roomId, node.id);
     final canBind =
         session?.canWriteNodes == true && dayKey(node.day) == session!.dayKey;
+    final imagePayload = node.type == NodeType.image
+        ? ImagePayload.fromNode(node)
+        : null;
+    final videoPayload = node.type == NodeType.video
+        ? VideoPayload.fromNode(node)
+        : null;
+    final mediaAttachmentId =
+        imagePayload?.attachmentId ?? videoPayload?.attachmentId ?? '';
+    final mediaUrl = imagePayload?.url ?? videoPayload?.url ?? '';
+    final isMedia = imagePayload != null || videoPayload != null;
     if (!mounted) return;
     final action = await showMenu<String>(
       context: context,
@@ -6196,6 +6294,31 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
           value: 'archive',
           child: Text(node.isArchived ? 'Unarchive' : 'Archive'),
         ),
+        if (!node.isDone)
+          const PopupMenuItem(value: 'done', child: Text('Mark done')),
+        const PopupMenuItem(value: 'follow-up', child: Text('Follow-up')),
+        const PopupMenuItem(value: 'tomorrow', child: Text('Tomorrow')),
+        const PopupMenuItem(value: 'size-wide', child: Text('Size: Wide')),
+        if (isMedia) ...[
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            key: ValueKey('canvas-node-menu-media-replace'),
+            value: 'media-replace',
+            child: Text('Replace media'),
+          ),
+          if (mediaAttachmentId.isNotEmpty)
+            const PopupMenuItem(
+              key: ValueKey('canvas-node-menu-media-export'),
+              value: 'media-export',
+              child: Text('Export media'),
+            ),
+          if (mediaUrl.isNotEmpty)
+            const PopupMenuItem(
+              key: ValueKey('canvas-node-menu-media-open'),
+              value: 'media-open',
+              child: Text('Open media'),
+            ),
+        ],
         const PopupMenuDivider(),
         if (session != null && binding == null)
           PopupMenuItem(
@@ -6225,6 +6348,70 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
     if (action == 'unbind') return _unbindNode(node);
     if (action == 'comments') return _showNodeComments(node);
     if (action == 'history') return _showNodeHistory(node);
+    if (action == 'follow-up') return _createSelectedNodeFollowUp(node);
+    if (action == 'media-replace') return _replaceMedia(node);
+    if (action == 'media-export') return _exportSelectedMedia(node);
+    if (action == 'media-open') return _openMediaSource(node);
+    if (action == 'size-wide') {
+      final presentation = NodePresentationSpec.forType(
+        node.type,
+      ).resolve(preset: NodeSizePreset.wide);
+      await _withLatestNodeAfterFlush(node.id, (latest) async {
+        final currentUi = NodeUiStateCodec.read(latest);
+        final updated = latest.copyWith(
+          data: NodeUiStateCodec.write(
+            latest,
+            NodeUiState(
+              sizePreset: NodeSizePreset.wide,
+              width: presentation.width,
+              height: presentation.height,
+              collapsedSections: currentUi.collapsedSections,
+              editorVersion: currentUi.editorVersion,
+            ),
+          ),
+          updatedAt: DateTime.now(),
+        );
+        _pushUndo(
+          _UndoEntry(
+            kind: _UndoKind.save,
+            nodeId: latest.id,
+            before: latest,
+            after: updated,
+          ),
+        );
+        await ref.read(mindmapRepositoryProvider).saveNode(updated);
+        await _persistCanvasNodeGeometry(updated);
+        invalidateMindmapState(ref, day: updated.day);
+      });
+      return;
+    }
+    if (action == 'done' || action == 'tomorrow') {
+      FocusManager.instance.primaryFocus?.unfocus();
+      await _withLatestNodeAfterFlush(node.id, (latest) async {
+        final updated = action == 'done'
+            ? latest.copyWith(
+                isDone: true,
+                status: NodeStatus.done,
+                progress: 1,
+                updatedAt: DateTime.now(),
+              )
+            : latest.copyWith(
+                day: latest.day.add(const Duration(days: 1)).dateOnly,
+                updatedAt: DateTime.now(),
+              );
+        _pushUndo(
+          _UndoEntry(
+            kind: _UndoKind.save,
+            nodeId: latest.id,
+            before: latest,
+            after: updated,
+          ),
+        );
+        await ref.read(mindmapRepositoryProvider).saveNode(updated);
+        invalidateMindmapState(ref, day: latest.day, extraDay: updated.day);
+      });
+      return;
+    }
     if (action == 'pin' || action == 'archive') {
       if (!await _withLatestNodeAfterFlush(node.id, (latest) async {
         await ref
@@ -6863,6 +7050,11 @@ class _DayPageState extends ConsumerState<DayPage> with WidgetsBindingObserver {
       if (context.mounted) {
         if (await _selectNode(node) && mounted) {
           _showSnackBar('${type.label} created');
+          if (context.mounted) {
+            unawaited(
+              context.push('/calendar/${dayKey(node.day)}/node/${node.id}'),
+            );
+          }
         }
       }
 
@@ -8306,6 +8498,7 @@ class _NodeRelationsDockState extends ConsumerState<_NodeRelationsDock> {
         if (value.isEmpty) return const SizedBox.shrink();
 
         final theme = Theme.of(context);
+        final tokens = AppDesignTokens.of(context);
         return ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
           child: Material(
@@ -8314,7 +8507,7 @@ class _NodeRelationsDockState extends ConsumerState<_NodeRelationsDock> {
             color: theme.colorScheme.surfaceContainerHigh.withValues(
               alpha: 0.96,
             ),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(tokens.radiusContainer),
             clipBehavior: Clip.antiAlias,
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -8736,7 +8929,12 @@ class _DayToolsBar extends StatelessWidget {
         ?.score;
     return Container(
       height: MediaQuery.sizeOf(context).width < 600 ? 42 : 50,
-      margin: EdgeInsets.fromLTRB(MediaQuery.sizeOf(context).width < 600 ? 6 : 12, MediaQuery.sizeOf(context).width < 600 ? 4 : 8, MediaQuery.sizeOf(context).width < 600 ? 6 : 12, 0),
+      margin: EdgeInsets.fromLTRB(
+        MediaQuery.sizeOf(context).width < 600 ? 6 : 12,
+        MediaQuery.sizeOf(context).width < 600 ? 4 : 8,
+        MediaQuery.sizeOf(context).width < 600 ? 6 : 12,
+        0,
+      ),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface.withValues(alpha: 0.78),
         shape: RoundedRectangleBorder(
@@ -8750,10 +8948,7 @@ class _DayToolsBar extends StatelessWidget {
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 8,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           children: [
             _DayToolActionChip(
@@ -9780,27 +9975,37 @@ class _DayNodeBoardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (nodes.isEmpty) {
-      return Center(
-        child: Text('No nodes yet', style: theme.textTheme.bodyMedium),
+      return Semantics(
+        container: true,
+        label: 'Day board',
+        child: Center(
+          key: const ValueKey('day-board-view'),
+          child: Text('No nodes yet', style: theme.textTheme.bodyMedium),
+        ),
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final status in NodeStatus.values)
-              _DayBoardColumn(
-                status: status,
-                nodes: nodes.where((node) => node.status == status).toList(),
-                selectedNodeId: selectedNodeId,
-                onNodeSelected: onNodeSelected,
-                onNodeUpdated: onNodeUpdated,
-              ),
-          ],
+    return Semantics(
+      container: true,
+      label: 'Day board',
+      child: Container(
+        key: const ValueKey('day-board-view'),
+        margin: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final status in NodeStatus.values)
+                _DayBoardColumn(
+                  status: status,
+                  nodes: nodes.where((node) => node.status == status).toList(),
+                  selectedNodeId: selectedNodeId,
+                  onNodeSelected: onNodeSelected,
+                  onNodeUpdated: onNodeUpdated,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -10212,202 +10417,215 @@ class _DayNodeTableView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (nodes.isEmpty) {
-      return Center(
-        child: Text('No nodes yet', style: theme.textTheme.bodyMedium),
+      return Semantics(
+        container: true,
+        label: 'Day table',
+        child: Center(
+          key: const ValueKey('day-table-view'),
+          child: Text('No nodes yet', style: theme.textTheme.bodyMedium),
+        ),
       );
     }
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final view in _TableQuickView.values)
-                  ChoiceChip(
-                    selected: this.view == view,
-                    avatar: Icon(view.icon, size: 16),
-                    label: Text('${view.label} (${_countFor(view)})'),
-                    onSelected: (_) => onViewChanged(view),
-                  ),
-                const SizedBox(width: 8),
-                DropdownButton<_TableSortMode>(
-                  value: sortMode,
-                  underline: const SizedBox.shrink(),
-                  items: [
-                    for (final mode in _TableSortMode.values)
-                      DropdownMenuItem(
-                        value: mode,
-                        child: Text('Sort: ${mode.label}'),
-                      ),
-                  ],
-                  onChanged: (mode) {
-                    if (mode != null) onSortModeChanged(mode);
-                  },
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(16),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SingleChildScrollView(
-                  child: DataTable(
-                    showCheckboxColumn: false,
-                    headingRowColor: WidgetStatePropertyAll(
-                      theme.colorScheme.surfaceContainerHighest.withValues(
-                        alpha: 0.55,
-                      ),
+    return Semantics(
+      container: true,
+      label: 'Day table',
+      child: Container(
+        key: const ValueKey('day-table-view'),
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final view in _TableQuickView.values)
+                    ChoiceChip(
+                      selected: this.view == view,
+                      avatar: Icon(view.icon, size: 16),
+                      label: Text('${view.label} (${_countFor(view)})'),
+                      onSelected: (_) => onViewChanged(view),
                     ),
-                    columns: const [
-                      DataColumn(label: Text('Type')),
-                      DataColumn(label: Text('Title')),
-                      DataColumn(label: Text('Status')),
-                      DataColumn(label: Text('Priority')),
-                      DataColumn(label: Text('Project')),
-                      DataColumn(label: Text('Area')),
-                      DataColumn(label: Text('Tags')),
-                      DataColumn(label: Text('Due')),
-                      DataColumn(label: Text('Links')),
-                      DataColumn(label: Text('Actions')),
-                    ],
-                    rows: [
-                      for (final node in _filteredNodes)
-                        DataRow(
-                          selected: node.id == selectedNodeId,
-                          onSelectChanged: (_) => onNodeSelected(node),
-                          cells: [
-                            DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    NodeVisuals.icon(node.type),
-                                    color: NodeVisuals.color(
-                                      context,
-                                      node.type,
-                                    ),
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(node.type.label),
-                                ],
-                              ),
-                            ),
-                            DataCell(
-                              Text(node.title),
-                              showEditIcon: true,
-                              onTap: () => _editTitle(context, node),
-                            ),
-                            DataCell(
-                              DropdownButton<NodeStatus>(
-                                value: node.status,
-                                underline: const SizedBox.shrink(),
-                                items: [
-                                  for (final status in NodeStatus.values)
-                                    DropdownMenuItem(
-                                      value: status,
-                                      child: Text(status.label),
-                                    ),
-                                ],
-                                onChanged: (status) {
-                                  if (status == null || status == node.status) {
-                                    return;
-                                  }
-                                  onNodeUpdated(
-                                    node.copyWith(
-                                      status: status,
-                                      isDone: status == NodeStatus.done,
-                                      progress: status == NodeStatus.done
-                                          ? 1
-                                          : node.progress,
-                                      updatedAt: DateTime.now(),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            DataCell(
-                              DropdownButton<NodePriority>(
-                                value: node.priority,
-                                underline: const SizedBox.shrink(),
-                                items: [
-                                  for (final priority in NodePriority.values)
-                                    DropdownMenuItem(
-                                      value: priority,
-                                      child: Text(priority.label),
-                                    ),
-                                ],
-                                onChanged: (priority) {
-                                  if (priority == null ||
-                                      priority == node.priority) {
-                                    return;
-                                  }
-                                  onNodeUpdated(
-                                    node.copyWith(
-                                      priority: priority,
-                                      updatedAt: DateTime.now(),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            DataCell(
-                              Text(node.project.isEmpty ? '-' : node.project),
-                              showEditIcon: true,
-                              onTap: () => _editProject(context, node),
-                            ),
-                            DataCell(
-                              Text(node.area.isEmpty ? '-' : node.area),
-                              showEditIcon: true,
-                              onTap: () => _editArea(context, node),
-                            ),
-                            DataCell(
-                              Text(
-                                node.tags.isEmpty ? '-' : node.tags.join(', '),
-                              ),
-                              showEditIcon: true,
-                              onTap: () => _editTags(context, node),
-                            ),
-                            DataCell(
-                              Text(
-                                node.dueDate == null
-                                    ? '-'
-                                    : dayKey(node.dueDate!),
-                              ),
-                              showEditIcon: true,
-                              onTap: () => _editDueDate(context, node),
-                            ),
-                            DataCell(Text('${node.relatedNodeIds.length}')),
-                            DataCell(
-                              _TableNodeActions(
-                                node: node,
-                                onNodeUpdated: onNodeUpdated,
-                              ),
-                            ),
-                          ],
+                  const SizedBox(width: 8),
+                  DropdownButton<_TableSortMode>(
+                    value: sortMode,
+                    underline: const SizedBox.shrink(),
+                    items: [
+                      for (final mode in _TableSortMode.values)
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text('Sort: ${mode.label}'),
                         ),
                     ],
+                    onChanged: (mode) {
+                      if (mode != null) onSortModeChanged(mode);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(16),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      showCheckboxColumn: false,
+                      headingRowColor: WidgetStatePropertyAll(
+                        theme.colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.55,
+                        ),
+                      ),
+                      columns: const [
+                        DataColumn(label: Text('Type')),
+                        DataColumn(label: Text('Title')),
+                        DataColumn(label: Text('Status')),
+                        DataColumn(label: Text('Priority')),
+                        DataColumn(label: Text('Project')),
+                        DataColumn(label: Text('Area')),
+                        DataColumn(label: Text('Tags')),
+                        DataColumn(label: Text('Due')),
+                        DataColumn(label: Text('Links')),
+                        DataColumn(label: Text('Actions')),
+                      ],
+                      rows: [
+                        for (final node in _filteredNodes)
+                          DataRow(
+                            selected: node.id == selectedNodeId,
+                            onSelectChanged: (_) => onNodeSelected(node),
+                            cells: [
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      NodeVisuals.icon(node.type),
+                                      color: NodeVisuals.color(
+                                        context,
+                                        node.type,
+                                      ),
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(node.type.label),
+                                  ],
+                                ),
+                              ),
+                              DataCell(
+                                Text(node.title),
+                                showEditIcon: true,
+                                onTap: () => _editTitle(context, node),
+                              ),
+                              DataCell(
+                                DropdownButton<NodeStatus>(
+                                  value: node.status,
+                                  underline: const SizedBox.shrink(),
+                                  items: [
+                                    for (final status in NodeStatus.values)
+                                      DropdownMenuItem(
+                                        value: status,
+                                        child: Text(status.label),
+                                      ),
+                                  ],
+                                  onChanged: (status) {
+                                    if (status == null ||
+                                        status == node.status) {
+                                      return;
+                                    }
+                                    onNodeUpdated(
+                                      node.copyWith(
+                                        status: status,
+                                        isDone: status == NodeStatus.done,
+                                        progress: status == NodeStatus.done
+                                            ? 1
+                                            : node.progress,
+                                        updatedAt: DateTime.now(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              DataCell(
+                                DropdownButton<NodePriority>(
+                                  value: node.priority,
+                                  underline: const SizedBox.shrink(),
+                                  items: [
+                                    for (final priority in NodePriority.values)
+                                      DropdownMenuItem(
+                                        value: priority,
+                                        child: Text(priority.label),
+                                      ),
+                                  ],
+                                  onChanged: (priority) {
+                                    if (priority == null ||
+                                        priority == node.priority) {
+                                      return;
+                                    }
+                                    onNodeUpdated(
+                                      node.copyWith(
+                                        priority: priority,
+                                        updatedAt: DateTime.now(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              DataCell(
+                                Text(node.project.isEmpty ? '-' : node.project),
+                                showEditIcon: true,
+                                onTap: () => _editProject(context, node),
+                              ),
+                              DataCell(
+                                Text(node.area.isEmpty ? '-' : node.area),
+                                showEditIcon: true,
+                                onTap: () => _editArea(context, node),
+                              ),
+                              DataCell(
+                                Text(
+                                  node.tags.isEmpty
+                                      ? '-'
+                                      : node.tags.join(', '),
+                                ),
+                                showEditIcon: true,
+                                onTap: () => _editTags(context, node),
+                              ),
+                              DataCell(
+                                Text(
+                                  node.dueDate == null
+                                      ? '-'
+                                      : dayKey(node.dueDate!),
+                                ),
+                                showEditIcon: true,
+                                onTap: () => _editDueDate(context, node),
+                              ),
+                              DataCell(Text('${node.relatedNodeIds.length}')),
+                              DataCell(
+                                _TableNodeActions(
+                                  node: node,
+                                  onNodeUpdated: onNodeUpdated,
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -11497,13 +11715,15 @@ class _MobileCompactHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final activeBoard = boards.firstWhere(
       (b) => b.id == activeBoardId,
-      orElse: () => boards.firstOrNull ?? CanvasBoard(
-        id: 'default',
-        kind: CanvasBoardKind.daily,
-        title: 'Main Board',
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
+      orElse: () =>
+          boards.firstOrNull ??
+          CanvasBoard(
+            id: 'default',
+            kind: CanvasBoardKind.daily,
+            title: 'Main Board',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
     );
 
     return Material(
@@ -11530,7 +11750,9 @@ class _MobileCompactHeader extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      activeBoard.title.isEmpty ? 'Main Board' : activeBoard.title,
+                      activeBoard.title.isEmpty
+                          ? 'Main Board'
+                          : activeBoard.title,
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: theme.colorScheme.primary,
@@ -11543,7 +11765,9 @@ class _MobileCompactHeader extends StatelessWidget {
                   for (final board in boards)
                     PopupMenuItem(
                       value: board.id,
-                      child: Text(board.title.isEmpty ? 'Main Board' : board.title),
+                      child: Text(
+                        board.title.isEmpty ? 'Main Board' : board.title,
+                      ),
                     ),
                 ],
               )
@@ -11552,7 +11776,9 @@ class _MobileCompactHeader extends StatelessWidget {
                 child: Text(
                   selectedNode?.title.trim().isNotEmpty == true
                       ? selectedNode!.title
-                      : (activeBoard.title.isEmpty ? 'Mindmap' : activeBoard.title),
+                      : (activeBoard.title.isEmpty
+                            ? 'Mindmap'
+                            : activeBoard.title),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -11561,33 +11787,29 @@ class _MobileCompactHeader extends StatelessWidget {
                 ),
               ),
             const Spacer(),
-            SegmentedButton<_DayViewMode>(
-              showSelectedIcon: false,
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                padding: WidgetStateProperty.all(EdgeInsets.zero),
-              ),
-              segments: const [
-                ButtonSegment<_DayViewMode>(
+            PopupMenuButton<_DayViewMode>(
+              key: const ValueKey('day-mobile-view-menu'),
+              tooltip: 'Select day view',
+              initialValue: viewMode,
+              onSelected: onViewModeChanged,
+              icon: Icon(switch (viewMode) {
+                _DayViewMode.canvas => Icons.schema_outlined,
+                _DayViewMode.timeline => Icons.view_timeline_outlined,
+                _DayViewMode.board => Icons.dashboard_outlined,
+                _DayViewMode.table => Icons.table_chart_outlined,
+              }),
+              itemBuilder: (context) => const [
+                PopupMenuItem(
                   value: _DayViewMode.canvas,
-                  icon: Icon(Icons.schema_outlined, size: 16),
+                  child: Text('Canvas'),
                 ),
-                ButtonSegment<_DayViewMode>(
-                  value: _DayViewMode.board,
-                  icon: Icon(Icons.dashboard_outlined, size: 16),
+                PopupMenuItem(
+                  value: _DayViewMode.timeline,
+                  child: Text('Timeline'),
                 ),
-                ButtonSegment<_DayViewMode>(
-                  value: _DayViewMode.table,
-                  icon: Icon(Icons.table_chart_outlined, size: 16),
-                ),
+                PopupMenuItem(value: _DayViewMode.board, child: Text('Board')),
+                PopupMenuItem(value: _DayViewMode.table, child: Text('Table')),
               ],
-              selected: {viewMode},
-              onSelectionChanged: (selected) {
-                if (selected.isNotEmpty) {
-                  onViewModeChanged(selected.first);
-                }
-              },
             ),
             const SizedBox(width: 4),
             IconButton(

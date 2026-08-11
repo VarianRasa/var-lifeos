@@ -118,6 +118,7 @@ final class ProjectTask {
     this.description = '',
     this.status = ProjectTaskStatus.planned,
     this.priority = ProjectTaskPriority.none,
+    this.startDate,
     this.deadline,
     this.labels = const <String>[],
     this.checklist = const <ProjectTaskChecklistItem>[],
@@ -140,6 +141,7 @@ final class ProjectTask {
       description: _text(json['description']),
       status: _taskStatus(json['status']),
       priority: _taskPriority(json['priority']),
+      startDate: _date(json['startDate']),
       deadline: _date(json['deadline']),
       labels: <String>[
         if (rawLabels is List)
@@ -177,6 +179,7 @@ final class ProjectTask {
   final String description;
   final ProjectTaskStatus status;
   final ProjectTaskPriority priority;
+  final DateTime? startDate;
   final DateTime? deadline;
   final List<String> labels;
   final List<ProjectTaskChecklistItem> checklist;
@@ -200,6 +203,8 @@ final class ProjectTask {
     String? description,
     ProjectTaskStatus? status,
     ProjectTaskPriority? priority,
+    DateTime? startDate,
+    bool clearStartDate = false,
     DateTime? deadline,
     bool clearDeadline = false,
     List<String>? labels,
@@ -218,6 +223,7 @@ final class ProjectTask {
     description: description ?? this.description,
     status: status ?? this.status,
     priority: priority ?? this.priority,
+    startDate: clearStartDate ? null : startDate ?? this.startDate,
     deadline: clearDeadline ? null : deadline ?? this.deadline,
     labels: labels ?? this.labels,
     checklist: checklist ?? this.checklist,
@@ -239,6 +245,7 @@ final class ProjectTask {
     'description': description,
     'status': status.name,
     'priority': priority.name,
+    if (startDate != null) 'startDate': startDate!.toIso8601String(),
     if (deadline != null) 'deadline': deadline!.toIso8601String(),
     'labels': labels,
     'checklist': <Map<String, Object?>>[
@@ -262,6 +269,7 @@ final class ProjectTask {
       other.description == description &&
       other.status == status &&
       other.priority == priority &&
+      other.startDate == startDate &&
       other.deadline == deadline &&
       const ListEquality<String>().equals(other.labels, labels) &&
       const ListEquality<ProjectTaskChecklistItem>().equals(
@@ -288,6 +296,7 @@ final class ProjectTask {
     description,
     status,
     priority,
+    startDate,
     deadline,
     const ListEquality<String>().hash(labels),
     const ListEquality<ProjectTaskChecklistItem>().hash(checklist),

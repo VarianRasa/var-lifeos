@@ -122,7 +122,8 @@ class _AutomationRuleEditorDialogState
     final theme = Theme.of(context);
 
     return AlertDialog(
-      title: Row(
+      title: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Icon(Icons.precision_manufacturing, color: theme.colorScheme.primary),
           const SizedBox(width: 8),
@@ -150,6 +151,7 @@ class _AutomationRuleEditorDialogState
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<AutomationTriggerType>(
+                isExpanded: true,
                 initialValue: _triggerType,
                 decoration: const InputDecoration(
                   labelText: 'Pemicu (Trigger)',
@@ -178,6 +180,7 @@ class _AutomationRuleEditorDialogState
               ],
               const SizedBox(height: 16),
               DropdownButtonFormField<AutomationActionType>(
+                isExpanded: true,
                 initialValue: _actionType,
                 decoration: const InputDecoration(
                   labelText: 'Aksi (Action)',

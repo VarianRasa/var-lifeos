@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../domain/inline_node_workspace_policy.dart';
 import '../domain/mindmap_node.dart';
 import 'node_editors/life_data_node_editors.dart';
@@ -101,6 +102,10 @@ class _InlineNodeWorkspaceState extends State<InlineNodeWorkspace> {
       },
       onDraftChanged: (Object value) {
         editContext.onDraftChanged(value);
+        if (value is ConvertEmptyNodeAction) {
+          widget.onDraftChanged(InlineNodeDraftPatch(type: value.targetType));
+          return;
+        }
         final MindmapNode resulting = applyNodeTypeInlineDraft(
           editContext.node,
           value,
@@ -222,7 +227,11 @@ class _InlineNodeWorkspaceState extends State<InlineNodeWorkspace> {
             onCollapse: widget.onCollapse,
           ),
           bodyKey: ValueKey<String>('inline-workspace-scroll-${node.id}'),
-          body: buildNodeTypeInlineEditor(routedContext),
+          body: Material(
+            type: MaterialType.transparency,
+            child: buildNodeTypeInlineEditor(routedContext),
+          ),
+          bodyOwnsScroll: node.type != NodeType.empty,
           footer: _InlineNodeWorkspaceFooter(
             key: ValueKey<String>('inline-workspace-footer-${node.id}'),
             node: node,

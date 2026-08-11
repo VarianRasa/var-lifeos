@@ -634,10 +634,15 @@ final class _Task extends StatelessWidget {
               _Meta(Icons.sync_alt, _label(task.status.name)),
               if (task.priority != ProjectTaskPriority.none)
                 _Meta(Icons.flag_outlined, _label(task.priority.name)),
+              if (task.startDate != null)
+                _Meta(
+                  Icons.play_circle_outline,
+                  'Starts ${DateFormat('d MMM yyyy').format(task.startDate!)}',
+                ),
               if (task.deadline != null)
                 _Meta(
                   Icons.event_outlined,
-                  DateFormat('d MMM yyyy').format(task.deadline!),
+                  'Due ${DateFormat('d MMM yyyy').format(task.deadline!)}',
                 ),
               if (task.estimatedMinutes != null)
                 _Meta(
@@ -754,6 +759,8 @@ final class _TaskDialogState extends State<_TaskDialog> {
   late String labels = widget.task.labels.join(', ');
   late String estimate = widget.task.estimatedMinutes?.toString() ?? '';
   late String actual = widget.task.actualMinutes?.toString() ?? '';
+  late DateTime? startDate = widget.task.startDate;
+  late DateTime? deadline = widget.task.deadline;
   late String blocking = widget.task.blockingReason;
   late String checklist = widget.task.checklist
       .map((item) => item.title)
@@ -761,172 +768,274 @@ final class _TaskDialogState extends State<_TaskDialog> {
   late Set<String> dependencies = widget.task.normalizedDependencyTaskIds
       .toSet();
 
+  Future<DateTime?> _pickDate(DateTime? current) => showDatePicker(
+    context: context,
+    initialDate: current ?? DateTime.now(),
+    firstDate: DateTime(2000),
+    lastDate: DateTime(2100),
+  );
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Edit task'),
-    content: SizedBox(
-      width: 560,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            TextFormField(
-              initialValue: title,
-              decoration: const InputDecoration(labelText: 'Title'),
-              onChanged: (value) => setState(() => title = value),
-            ),
-            TextFormField(
-              initialValue: description,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Description'),
-              onChanged: (value) => description = value,
-            ),
-            DropdownButtonFormField<ProjectTaskStatus>(
-              initialValue: status,
-              decoration: const InputDecoration(labelText: 'Status'),
-              items: <DropdownMenuItem<ProjectTaskStatus>>[
-                for (final value in ProjectTaskStatus.values)
-                  DropdownMenuItem(
-                    value: value,
-                    child: Text(_label(value.name)),
-                  ),
-              ],
-              onChanged: (value) => setState(() => status = value ?? status),
-            ),
-            DropdownButtonFormField<ProjectTaskPriority>(
-              initialValue: priority,
-              decoration: const InputDecoration(labelText: 'Priority'),
-              items: <DropdownMenuItem<ProjectTaskPriority>>[
-                for (final value in ProjectTaskPriority.values)
-                  DropdownMenuItem(
-                    value: value,
-                    child: Text(_label(value.name)),
-                  ),
-              ],
-              onChanged: (value) =>
-                  setState(() => priority = value ?? priority),
-            ),
-            TextFormField(
-              initialValue: labels,
-              decoration: const InputDecoration(labelText: 'Labels'),
-              onChanged: (value) => labels = value,
-            ),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextFormField(
-                    initialValue: estimate,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: <TextInputFormatter>[
-                      FilteringTextInputFormatter.digitsOnly,
-                    ],
-                    decoration: const InputDecoration(labelText: 'Estimate'),
-                    onChanged: (value) => estimate = value,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: actual,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: <TextInputFormatter>[
-                      FilteringTextInputFormatter.digitsOnly,
-                    ],
-                    decoration: const InputDecoration(labelText: 'Actual'),
-                    onChanged: (value) => actual = value,
-                  ),
-                ),
-              ],
-            ),
-            TextFormField(
-              initialValue: blocking,
-              decoration: const InputDecoration(labelText: 'Blocking reason'),
-              onChanged: (value) => blocking = value,
-            ),
-            TextFormField(
-              initialValue: checklist,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Checklist',
-                hintText: 'One item per line',
+  Widget build(BuildContext context) {
+    final invalidDates =
+        startDate != null && deadline != null && deadline!.isBefore(startDate!);
+    return AlertDialog(
+      title: const Text('Edit task'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextFormField(
+                initialValue: title,
+                decoration: const InputDecoration(labelText: 'Title'),
+                onChanged: (value) => setState(() => title = value),
               ),
-              onChanged: (value) => checklist = value,
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Dependencies',
-                style: Theme.of(context).textTheme.labelLarge,
+              TextFormField(
+                initialValue: description,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Description'),
+                onChanged: (value) => description = value,
               ),
-            ),
-            for (final task in widget.project.tasks)
-              if (task.id != widget.task.id)
-                CheckboxListTile(
-                  dense: true,
-                  value: dependencies.contains(task.id),
-                  title: Text(task.title),
-                  onChanged: (selected) => setState(() {
-                    if (selected ?? false) {
-                      dependencies.add(task.id);
-                    } else {
-                      dependencies.remove(task.id);
-                    }
-                  }),
+              DropdownButtonFormField<ProjectTaskStatus>(
+                initialValue: status,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: <DropdownMenuItem<ProjectTaskStatus>>[
+                  for (final value in ProjectTaskStatus.values)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(_label(value.name)),
+                    ),
+                ],
+                onChanged: (value) => setState(() => status = value ?? status),
+              ),
+              DropdownButtonFormField<ProjectTaskPriority>(
+                initialValue: priority,
+                decoration: const InputDecoration(labelText: 'Priority'),
+                items: <DropdownMenuItem<ProjectTaskPriority>>[
+                  for (final value in ProjectTaskPriority.values)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(_label(value.name)),
+                    ),
+                ],
+                onChanged: (value) =>
+                    setState(() => priority = value ?? priority),
+              ),
+              TextFormField(
+                initialValue: labels,
+                decoration: const InputDecoration(labelText: 'Labels'),
+                onChanged: (value) => labels = value,
+              ),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: estimate,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(labelText: 'Estimate'),
+                      onChanged: (value) => estimate = value,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: actual,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(labelText: 'Actual'),
+                      onChanged: (value) => actual = value,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _DateButton(
+                      key: const ValueKey<String>('plan-task-start-date'),
+                      label: 'Start',
+                      value: startDate,
+                      onPick: () async {
+                        final value = await _pickDate(startDate);
+                        if (value != null) setState(() => startDate = value);
+                      },
+                      onClear: startDate == null
+                          ? null
+                          : () => setState(() => startDate = null),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _DateButton(
+                      key: const ValueKey<String>('plan-task-deadline'),
+                      label: 'Deadline',
+                      value: deadline,
+                      onPick: () async {
+                        final value = await _pickDate(deadline);
+                        if (value != null) setState(() => deadline = value);
+                      },
+                      onClear: deadline == null
+                          ? null
+                          : () => setState(() => deadline = null),
+                    ),
+                  ),
+                ],
+              ),
+              if (startDate != null &&
+                  deadline != null &&
+                  deadline!.isBefore(startDate!))
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Deadline must be on or after start date.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 ),
-          ],
+              TextFormField(
+                initialValue: blocking,
+                decoration: const InputDecoration(labelText: 'Blocking reason'),
+                onChanged: (value) => blocking = value,
+              ),
+              TextFormField(
+                initialValue: checklist,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Checklist',
+                  hintText: 'One item per line',
+                ),
+                onChanged: (value) => checklist = value,
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Dependencies',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              for (final task in widget.project.tasks)
+                if (task.id != widget.task.id)
+                  CheckboxListTile(
+                    dense: true,
+                    value: dependencies.contains(task.id),
+                    title: Text(task.title),
+                    onChanged: (selected) => setState(() {
+                      if (selected ?? false) {
+                        dependencies.add(task.id);
+                      } else {
+                        dependencies.remove(task.id);
+                      }
+                    }),
+                  ),
+            ],
+          ),
         ),
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: title.trim().isEmpty || invalidDates
+              ? null
+              : () {
+                  final old = <String, ProjectTaskChecklistItem>{
+                    for (final item in widget.task.checklist) item.title: item,
+                  };
+                  final items = checklist
+                      .split('\n')
+                      .map((value) => value.trim())
+                      .where((value) => value.isNotEmpty);
+                  Navigator.pop(
+                    context,
+                    widget.task.copyWith(
+                      title: title.trim(),
+                      description: description.trim(),
+                      status: status,
+                      priority: priority,
+                      labels: labels
+                          .split(',')
+                          .map((value) => value.trim())
+                          .where((value) => value.isNotEmpty)
+                          .toSet()
+                          .toList(),
+                      dependencyTaskIds: dependencies.toList(),
+                      startDate: startDate,
+                      clearStartDate: startDate == null,
+                      deadline: deadline,
+                      clearDeadline: deadline == null,
+                      estimatedMinutes: int.tryParse(estimate),
+                      clearEstimatedMinutes: estimate.isEmpty,
+                      actualMinutes: int.tryParse(actual),
+                      clearActualMinutes: actual.isEmpty,
+                      blockingReason: blocking.trim(),
+                      checklist: <ProjectTaskChecklistItem>[
+                        for (final item in items)
+                          old[item] ??
+                              ProjectTaskChecklistItem(
+                                id: 'check-${const Uuid().v4()}',
+                                title: item,
+                              ),
+                      ],
+                    ),
+                  );
+                },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+final class _DateButton extends StatelessWidget {
+  const _DateButton({
+    required this.label,
+    required this.value,
+    required this.onPick,
+    required this.onClear,
+    super.key,
+  });
+
+  final String label;
+  final DateTime? value;
+  final VoidCallback onPick;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) => InputDecorator(
+    decoration: InputDecoration(labelText: label),
+    child: Row(
+      children: <Widget>[
+        Expanded(
+          child: TextButton.icon(
+            onPressed: onPick,
+            icon: const Icon(Icons.event_outlined, size: 18),
+            label: Text(
+              value == null
+                  ? 'Choose date'
+                  : DateFormat('d MMM yyyy').format(value!),
+            ),
+          ),
+        ),
+        if (onClear != null)
+          IconButton(
+            tooltip: 'Clear $label',
+            onPressed: onClear,
+            icon: const Icon(Icons.close, size: 18),
+          ),
+      ],
     ),
-    actions: <Widget>[
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: title.trim().isEmpty
-            ? null
-            : () {
-                final old = <String, ProjectTaskChecklistItem>{
-                  for (final item in widget.task.checklist) item.title: item,
-                };
-                final items = checklist
-                    .split('\n')
-                    .map((value) => value.trim())
-                    .where((value) => value.isNotEmpty);
-                Navigator.pop(
-                  context,
-                  widget.task.copyWith(
-                    title: title.trim(),
-                    description: description.trim(),
-                    status: status,
-                    priority: priority,
-                    labels: labels
-                        .split(',')
-                        .map((value) => value.trim())
-                        .where((value) => value.isNotEmpty)
-                        .toSet()
-                        .toList(),
-                    dependencyTaskIds: dependencies.toList(),
-                    estimatedMinutes: int.tryParse(estimate),
-                    clearEstimatedMinutes: estimate.isEmpty,
-                    actualMinutes: int.tryParse(actual),
-                    clearActualMinutes: actual.isEmpty,
-                    blockingReason: blocking.trim(),
-                    checklist: <ProjectTaskChecklistItem>[
-                      for (final item in items)
-                        old[item] ??
-                            ProjectTaskChecklistItem(
-                              id: 'check-${const Uuid().v4()}',
-                              title: item,
-                            ),
-                    ],
-                  ),
-                );
-              },
-        child: const Text('Save'),
-      ),
-    ],
   );
 }
 

@@ -1,6 +1,7 @@
 /// Local focus-session metadata helpers for mission mode.
 library;
 
+import '../../../core/constants/app_constants.dart';
 import '../../mindmap/domain/mindmap_node.dart';
 
 const focusSessionsDataKey = 'focusSessions';
@@ -48,9 +49,14 @@ List<FocusSessionRecord> focusSessionsForNode(MindmapNode node) {
 }
 
 int totalFocusMinutes(MindmapNode node) {
-  return focusSessionsForNode(
+  final sessions = focusSessionsForNode(
     node,
   ).fold<int>(0, (total, session) => total + session.durationMinutes);
+  if (sessions > 0 || node.type != NodeType.task) return sessions;
+  final task = node.data['task'];
+  if (task is! Map) return 0;
+  final actualMinutes = task['actualMinutes'];
+  return actualMinutes is num ? actualMinutes.round().clamp(0, 1 << 31) : 0;
 }
 
 String nextFocusAction(MindmapNode node) {

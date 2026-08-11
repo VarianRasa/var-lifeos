@@ -18,9 +18,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: CanvasPinMarkerWidget(pin: pin),
-        ),
+        home: Scaffold(body: CanvasPinMarkerWidget(pin: pin)),
       ),
     );
 

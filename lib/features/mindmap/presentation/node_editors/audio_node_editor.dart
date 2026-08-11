@@ -8,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 
 import '../../domain/node_type_payloads.dart';
+import '../../domain/offline_audio_transcription.dart';
 import 'audio_recording_storage.dart';
 import 'productivity_node_editors.dart';
 
@@ -281,17 +282,44 @@ final class _AudioNodeEditorState extends State<AudioNodeEditor> {
 
   Future<void> _transcribe() async {
     final callback = widget.context.onKnowledgeAction;
-    if (callback == null) return;
     setState(() {
       _busy = true;
       _error = null;
     });
-    final action = TranscribeAudioAction(_draft);
-    await callback(action);
-    final payload = await action.result.future;
+    if (callback != null) {
+      final action = TranscribeAudioAction(_draft);
+      await callback(action);
+      final payload = await action.result.future;
+      if (mounted) setState(() => _busy = false);
+      if (payload != null) {
+        _emit(payload);
+        return;
+      }
+    }
+
+    // Offline transcription engine fallback
+    const engine = OfflineAudioTranscriptionEngine();
+    final result = await engine.transcribeOffline(
+      bytes: _loadedAttachmentBytes ?? const [],
+      fileName: 'voice_note.m4a',
+    );
+
     if (!mounted) return;
     setState(() => _busy = false);
-    if (payload != null) _emit(payload);
+    _emit(
+      _draft.copyWith(
+        transcriptText: result.text,
+        transcriptSegments: [
+          for (final seg in result.segments)
+            AudioTranscriptSegment(
+              id: seg.id,
+              startMilliseconds: seg.startMilliseconds,
+              endMilliseconds: seg.endMilliseconds,
+              text: seg.text,
+            ),
+        ],
+      ),
+    );
   }
 
   @override

@@ -6,6 +6,7 @@ const int maxNodeAttachmentBytes = 100 * 1024 * 1024;
 
 const Set<String> supportedNodeAttachmentMimeTypes = {
   'application/octet-stream',
+  'application/pdf',
   'image/gif',
   'image/jpeg',
   'image/png',

@@ -20,11 +20,7 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: BoardTemplateGalleryDialog(),
-        ),
-      ),
+      const MaterialApp(home: Scaffold(body: BoardTemplateGalleryDialog())),
     );
 
     expect(find.text('Template Gallery'), findsOneWidget);

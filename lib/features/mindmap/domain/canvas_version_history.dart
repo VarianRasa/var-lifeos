@@ -23,12 +23,14 @@ class CanvasVersionHistoryEngine {
     required String label,
     required List<MindmapNode> nodes,
   }) {
-    _history.add(CanvasVersionSnapshot(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      label: label,
-      timestamp: DateTime.now(),
-      nodes: List.unmodifiable(nodes),
-    ));
+    _history.add(
+      CanvasVersionSnapshot(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        label: label,
+        timestamp: DateTime.now(),
+        nodes: List.unmodifiable(nodes),
+      ),
+    );
   }
 
   List<MindmapNode>? rollbackToVersion(String snapshotId) {

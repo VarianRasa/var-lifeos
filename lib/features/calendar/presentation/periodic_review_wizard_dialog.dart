@@ -7,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../insights/domain/weekly_pulse_report.dart';
 import '../../mindmap/application/mindmap_mutation_controller.dart';
 import '../../mindmap/application/mindmap_providers.dart';
 import '../../mindmap/domain/canvas_position.dart';
@@ -574,19 +575,18 @@ class _PeriodicReviewWizardDialogState
     final lessons = _lessonsController.text.trim();
     final nextFocus = _nextFocusController.text.trim();
 
-    final body = StringBuffer()
-      ..writeln('### Wins & Accomplishments')
-      ..writeln(wins)
-      ..writeln('\n### Gratitude')
-      ..writeln(gratitude)
-      ..writeln('\n### Lessons')
-      ..writeln(lessons)
-      ..writeln('\n### Next Focus Priorities')
-      ..writeln(nextFocus)
-      ..writeln('\n### Mood & Energy Level')
-      ..writeln(
-        '${_moodRating.toStringAsFixed(1)}/5.0 (${_moodEmoji(_moodRating)})',
-      );
+    final allNodes = ref.read(allMindmapNodesProvider).valueOrNull ?? const [];
+    final pulseReport = LifeOsWeeklyPulseReport.generate(
+      start: start,
+      end: end,
+      nodes: allNodes,
+      winsText: wins,
+      lessonsText: lessons,
+      nextFocusText: nextFocus,
+      moodRating: _moodRating,
+    );
+
+    final body = pulseReport.markdownSummary;
     final existing = widget.existingReview;
     final node = MindmapNode(
       id: existing?.id ?? '${tag}_$periodKey',

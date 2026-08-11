@@ -54,9 +54,7 @@ void main() {
 
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(
-          body: CanvasPresentationModeDialog(frames: frames),
-        ),
+        home: Scaffold(body: CanvasPresentationModeDialog(frames: frames)),
       ),
     );
 

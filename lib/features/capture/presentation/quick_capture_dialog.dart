@@ -188,19 +188,19 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
         !_duplicateMatch.hasDuplicate;
     final asyncDestinations = ref.watch(availableCaptureDestinationsProvider);
 
-    return Dialog(
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
+    return AlertDialog(
+      insetPadding: const EdgeInsets.all(16),
+      title: Text(
+        'Quick Capture',
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Quick Capture',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
               TextField(
                 key: const Key('quick_capture_text_field'),
                 controller: _textController,
@@ -253,6 +253,7 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                 data: (destinations) {
                   return DropdownButtonFormField<CaptureDestination>(
                     key: const Key('quick_capture_destination_dropdown'),
+                    isExpanded: true,
                     initialValue: _selectedDestination,
                     hint: const Text('Select Destination Board *'),
                     items: destinations.map((dest) {
@@ -265,87 +266,110 @@ class _QuickCaptureDialogState extends ConsumerState<QuickCaptureDialog> {
                         setState(() => _selectedDestination = dest),
                   );
                 },
-                loading: () => const LinearProgressIndicator(),
-                error: (err, _) => Text(
-                  'Failed loading boards: $err',
-                  style: const TextStyle(color: Colors.red),
+                loading: () => Semantics(
+                  label: 'Loading destination boards',
+                  liveRegion: true,
+                  child: const LinearProgressIndicator(),
+                ),
+                error: (err, _) => Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    'Failed loading boards: $err',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.errorContainer,
+                    ),
+                  ),
                 ),
               ),
               if (_checkingDuplicates) ...[
                 const SizedBox(height: 12),
-                const Row(
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 8),
-                    Text('Checking for duplicate content...'),
-                  ],
-                ),
-              ],
-              if (_duplicateMatch.hasDuplicate) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Semantics(
+                  label: 'Checking for duplicate content',
+                  liveRegion: true,
+                  child: const Row(
                     children: [
-                      const Text(
-                        'Duplicate content detected',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _matchedNode != null
-                            ? 'Matches existing item "${_matchedNode!.title}".'
-                            : 'Existing item match found.',
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          if (_matchedNode != null)
-                            TextButton(
-                              onPressed: () {
-                                Navigator.of(context).pop(_matchedNode);
-                              },
-                              child: const Text('Open Existing'),
-                            ),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                            onPressed:
-                                _selectedDestination != null &&
-                                    hasContent &&
-                                    !_isSaving
-                                ? () => _handleSave(forceCopy: true)
-                                : null,
-                            child: const Text('Create Copy'),
-                          ),
-                        ],
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Checking for duplicate content...'),
                       ),
                     ],
                   ),
                 ),
               ],
+              if (_duplicateMatch.hasDuplicate) ...[
+                const SizedBox(height: 16),
+                Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Duplicate content detected',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _matchedNode != null
+                              ? 'Matches existing item "${_matchedNode!.title}".'
+                              : 'Existing item match found.',
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            if (_matchedNode != null)
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.of(context).pop(_matchedNode);
+                                },
+                                child: const Text('Open Existing'),
+                              ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              onPressed:
+                                  _selectedDestination != null &&
+                                      hasContent &&
+                                      !_isSaving
+                                  ? () => _handleSave(forceCopy: true)
+                                  : null,
+                              child: const Text('Create Copy'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
-              ElevatedButton(
+              FilledButton(
                 key: const Key('quick_capture_save_button'),
                 onPressed: canSave && !_isSaving ? () => _handleSave() : null,
                 child: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    ? Semantics(
+                        label: 'Saving capture',
+                        liveRegion: true,
+                        child: const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       )
                     : const Text('Save Capture'),
               ),

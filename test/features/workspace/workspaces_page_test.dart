@@ -8,6 +8,7 @@ import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/workspace_context.dart';
+import 'package:var_app/features/workspace/data/workspace_sort_repository.dart';
 import 'package:var_app/features/workspace/data/workspace_title_repository.dart';
 import 'package:var_app/features/workspace/workspaces_page.dart';
 
@@ -247,6 +248,186 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('workspace-filter-toggle')));
     await tester.pumpAndSettle();
     expect(panel, findsNothing);
+  });
+
+  testWidgets('WorkspacesPage uses compact search action at 320', (
+    tester,
+  ) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'alpha',
+          type: NodeType.task,
+          title: 'Alpha task',
+          day: DateTime(2026, 6, 19),
+          project: 'Alpha',
+          now: DateTime(2026, 6, 19),
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(home: WorkspacesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('workspace-mobile-search')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('workspace-mobile-search')));
+    await tester.pumpAndSettle();
+    expect(find.text('Filter workspaces'), findsOneWidget);
+  });
+
+  for (final width in <double>[320, 768, 1024, 1440]) {
+    testWidgets('WorkspacesPage renders at ${width.round()} with 2x text', (
+      tester,
+    ) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      final today = DateTime(2026, 6, 19);
+      final repository = InMemoryMindmapRepository(
+        seedNodes: [
+          MindmapNode.create(
+            id: 'responsive',
+            type: NodeType.task,
+            title: 'Responsive workspace task',
+            day: today,
+            project: 'Long responsive workspace title for ellipsis',
+            now: today,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+          child: const MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(2)),
+              child: WorkspacesPage(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('WorkspacesPage reorders projects through UI gesture', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'alpha-gesture',
+          type: NodeType.task,
+          title: 'Alpha task',
+          day: today,
+          project: 'Alpha',
+          now: today,
+        ),
+        MindmapNode.create(
+          id: 'beta-gesture',
+          type: NodeType.task,
+          title: 'Beta task',
+          day: today,
+          project: 'Beta',
+          now: today,
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(home: WorkspacesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final alpha = find.byKey(const ValueKey('workspace-card-project-Alpha'));
+    final handle = find.byKey(const ValueKey('workspace-reorder-project-Beta'));
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture.moveTo(tester.getCenter(alpha));
+    await tester.pump(const Duration(seconds: 1));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(WorkspacesPage)),
+    );
+    expect(container.read(workspaceSortProvider).projectsOrder, [
+      'Beta',
+      'Alpha',
+    ]);
+  });
+
+  testWidgets('WorkspacesPage preserves manual project reorder', (
+    tester,
+  ) async {
+    final today = DateTime(2026, 6, 19);
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [
+        MindmapNode.create(
+          id: 'alpha',
+          type: NodeType.task,
+          title: 'Alpha task',
+          day: today,
+          project: 'Alpha',
+          now: today,
+        ),
+        MindmapNode.create(
+          id: 'beta',
+          type: NodeType.task,
+          title: 'Beta task',
+          day: today,
+          project: 'Beta',
+          now: today,
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          mindmapRepositoryProvider.overrideWithValue(repository),
+          currentDateProvider.overrideWithValue(today),
+        ],
+        child: const MaterialApp(home: WorkspacesPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('workspace-card-project-Beta')),
+      findsOneWidget,
+    );
+    final reorderable = tester.widget<ReorderableListView>(
+      find.byType(ReorderableListView).first,
+    );
+    reorderable.onReorderItem!(1, 0);
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(WorkspacesPage)),
+    );
+    expect(container.read(workspaceSortProvider).projectsOrder, [
+      'Beta',
+      'Alpha',
+    ]);
   });
 
   testWidgets('WorkspacesPage hides stats until toggled', (tester) async {

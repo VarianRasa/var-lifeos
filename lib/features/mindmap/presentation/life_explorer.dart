@@ -634,7 +634,13 @@ class _LifeExplorerNodeTypePicker extends StatefulWidget {
       NodeType.timer,
       NodeType.empty,
     ],
-    'Media & Travel': [NodeType.itinerary, NodeType.image, NodeType.video],
+    'Media & Travel': [
+      NodeType.itinerary,
+      NodeType.image,
+      NodeType.video,
+      NodeType.frame,
+      NodeType.swatch,
+    ],
   };
 
   @override

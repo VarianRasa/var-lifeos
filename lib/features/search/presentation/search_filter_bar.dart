@@ -15,77 +15,83 @@ class SearchFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        PopupMenuButton<SearchSourceKind?>(
-          onSelected: (value) => onChanged(
-            filters.copyWith(sourceKinds: value == null ? const {} : {value}),
-          ),
-          itemBuilder: (context) => [
-            const PopupMenuItem(value: null, child: Text('All types')),
-            for (final value in SearchSourceKind.values)
-              PopupMenuItem(value: value, child: Text(value.name)),
-          ],
-          child: _FilterChipLabel(
-            label: 'Type',
-            value: filters.sourceKinds.firstOrNull?.name,
-          ),
+    final controls = <Widget>[
+      PopupMenuButton<SearchSourceKind?>(
+        onSelected: (value) => onChanged(
+          filters.copyWith(sourceKinds: value == null ? const {} : {value}),
         ),
-        _TextFilterChip(
-          label: 'Workspace',
-          values: filters.workspaceIds,
-          onChanged: (values) =>
-              onChanged(filters.copyWith(workspaceIds: values)),
+        itemBuilder: (context) => [
+          const PopupMenuItem(value: null, child: Text('All types')),
+          for (final value in SearchSourceKind.values)
+            PopupMenuItem(value: value, child: Text(value.name)),
+        ],
+        child: _FilterChipLabel(
+          label: 'Type',
+          value: filters.sourceKinds.firstOrNull?.name,
         ),
-        _TextFilterChip(
-          label: 'Board',
-          values: filters.boardIds,
-          onChanged: (values) => onChanged(filters.copyWith(boardIds: values)),
+      ),
+      _TextFilterChip(
+        label: 'Workspace',
+        values: filters.workspaceIds,
+        onChanged: (values) =>
+            onChanged(filters.copyWith(workspaceIds: values)),
+      ),
+      _TextFilterChip(
+        label: 'Board',
+        values: filters.boardIds,
+        onChanged: (values) => onChanged(filters.copyWith(boardIds: values)),
+      ),
+      _TextFilterChip(
+        label: 'Creator',
+        values: filters.creatorIds,
+        onChanged: (values) => onChanged(filters.copyWith(creatorIds: values)),
+      ),
+      _TextFilterChip(
+        label: 'Status',
+        values: filters.statuses,
+        onChanged: (values) => onChanged(filters.copyWith(statuses: values)),
+      ),
+      InputChip(
+        label: Text(
+          filters.dateFrom == null
+              ? 'Date'
+              : '${_date(filters.dateFrom!)} – ${_date(filters.dateTo!)}',
         ),
-        _TextFilterChip(
-          label: 'Creator',
-          values: filters.creatorIds,
-          onChanged: (values) =>
-              onChanged(filters.copyWith(creatorIds: values)),
-        ),
-        _TextFilterChip(
-          label: 'Status',
-          values: filters.statuses,
-          onChanged: (values) => onChanged(filters.copyWith(statuses: values)),
-        ),
-        InputChip(
-          label: Text(
-            filters.dateFrom == null
-                ? 'Date'
-                : '${_date(filters.dateFrom!)} – ${_date(filters.dateTo!)}',
-          ),
-          avatar: const Icon(Icons.date_range_outlined, size: 18),
-          onPressed: () async {
-            final now = DateTime.now();
-            final range = await showDateRangePicker(
-              context: context,
-              firstDate: DateTime(1970),
-              lastDate: DateTime(now.year + 20),
-              initialDateRange: filters.dateFrom == null
-                  ? null
-                  : DateTimeRange(
-                      start: filters.dateFrom!,
-                      end: filters.dateTo ?? filters.dateFrom!,
-                    ),
+        avatar: const Icon(Icons.date_range_outlined, size: 18),
+        onPressed: () async {
+          final now = DateTime.now();
+          final range = await showDateRangePicker(
+            context: context,
+            firstDate: DateTime(1970),
+            lastDate: DateTime(now.year + 20),
+            initialDateRange: filters.dateFrom == null
+                ? null
+                : DateTimeRange(
+                    start: filters.dateFrom!,
+                    end: filters.dateTo ?? filters.dateFrom!,
+                  ),
+          );
+          if (range != null) {
+            onChanged(
+              filters.copyWith(dateFrom: range.start, dateTo: range.end),
             );
-            if (range != null) {
-              onChanged(
-                filters.copyWith(dateFrom: range.start, dateTo: range.end),
-              );
-            }
-          },
-          onDeleted: filters.dateFrom == null
-              ? null
-              : () => onChanged(filters.copyWith(clearDates: true)),
-        ),
-      ],
+          }
+        },
+        onDeleted: filters.dateFrom == null
+            ? null
+            : () => onChanged(filters.copyWith(clearDates: true)),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth <= 768) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(spacing: 8, children: controls),
+          );
+        }
+        return Wrap(spacing: 8, runSpacing: 8, children: controls);
+      },
     );
   }
 }

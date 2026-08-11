@@ -9,6 +9,8 @@ abstract interface class MindmapNodeRevisionRepository {
 
   Future<MindmapNodeRevision?> getRevision(String revisionId);
 
+  Future<void> deleteRevisions(String nodeId);
+
   Future<MindmapNode> restoreRevision(
     String revisionId, {
     required DateTime now,

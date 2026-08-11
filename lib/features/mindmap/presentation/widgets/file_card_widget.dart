@@ -25,7 +25,13 @@ class FileCardWidget extends StatelessWidget {
       'txt' || 'md' || 'doc' || 'docx' => Icons.description_outlined,
       'xls' || 'xlsx' || 'csv' => Icons.table_chart_outlined,
       'ppt' || 'pptx' => Icons.slideshow_outlined,
-      'dart' || 'js' || 'ts' || 'py' || 'html' || 'css' || 'json' => Icons.code_outlined,
+      'dart' ||
+      'js' ||
+      'ts' ||
+      'py' ||
+      'html' ||
+      'css' ||
+      'json' => Icons.code_outlined,
       _ => Icons.insert_drive_file_outlined,
     };
   }

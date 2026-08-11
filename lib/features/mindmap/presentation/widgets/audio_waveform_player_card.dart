@@ -10,12 +10,24 @@ class AudioWaveformPlayerCard extends StatefulWidget {
     super.key,
     required this.title,
     this.durationSeconds = 0,
-    this.waveformData = const [0.3, 0.6, 0.9, 0.4, 0.7, 1.0, 0.5, 0.8, 0.3, 0.6],
+    this.waveformData = const [
+      0.3,
+      0.6,
+      0.9,
+      0.4,
+      0.7,
+      1.0,
+      0.5,
+      0.8,
+      0.3,
+      0.6,
+    ],
     this.onPlayToggle,
   });
 
   @override
-  State<AudioWaveformPlayerCard> createState() => _AudioWaveformPlayerCardState();
+  State<AudioWaveformPlayerCard> createState() =>
+      _AudioWaveformPlayerCardState();
 }
 
 class _AudioWaveformPlayerCardState extends State<AudioWaveformPlayerCard> {
@@ -75,12 +87,16 @@ class _AudioWaveformPlayerCardState extends State<AudioWaveformPlayerCard> {
                         .map(
                           (heightRatio) => Expanded(
                             child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 1.5,
+                              ),
                               height: (24 * heightRatio).clamp(4, 24),
                               decoration: BoxDecoration(
                                 color: _isPlaying
                                     ? theme.colorScheme.primary
-                                    : theme.colorScheme.outline.withValues(alpha: 0.6),
+                                    : theme.colorScheme.outline.withValues(
+                                        alpha: 0.6,
+                                      ),
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),

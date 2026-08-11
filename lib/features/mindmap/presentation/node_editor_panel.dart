@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/theme/app_design_tokens.dart';
 import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
@@ -27,6 +28,7 @@ import '../domain/recurring_routine.dart';
 import 'inline_node_workspace.dart';
 import 'mindmap_canvas.dart' show compatibleNodeTypeLabel, compatibleNodeTypes;
 import 'node_type_inline_editor.dart';
+import 'task_decomposition_dialog.dart';
 
 const String _defaultRelationLabel = 'relates to';
 const int _defaultBodyMaxWords = 1200;
@@ -1085,72 +1087,24 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text(
-              'Link to Node',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.bold,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                'Link to Node',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
-          const Divider(height: 1),
-          if (suggestions.isEmpty && query.isNotEmpty)
-            ListTile(
-              key: ValueKey(
-                'node-editor-create-link-${_autocompleteQuery!.trim()}',
-              ),
-              dense: true,
-              leading: Icon(
-                Icons.add,
-                color: theme.colorScheme.primary,
-                size: 18,
-              ),
-              title: Text(
-                'Create node "$_autocompleteQuery"',
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              onTap: () => _insertAutocomplete(_autocompleteQuery!.trim()),
-            )
-          else if (suggestions.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                'Type to search nodes...',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            )
-          else ...[
-            for (final node in suggestions)
-              InkWell(
-                key: ValueKey('node-editor-link-suggestion-${node.id}'),
-                onTap: () => _insertAutocomplete(node.title),
-                child: ListTile(
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  leading: Icon(
-                    NodeVisuals.icon(node.type),
-                    size: 18,
-                    color: NodeVisuals.color(context, node.type),
-                  ),
-                  title: Text(node.title),
-                  subtitle: node.project.isNotEmpty || node.area.isNotEmpty
-                      ? Text(
-                          '${node.project.isNotEmpty ? 'Project: ${node.project}' : ''}${node.project.isNotEmpty && node.area.isNotEmpty ? ' | ' : ''}${node.area.isNotEmpty ? 'Area: ${node.area}' : ''}',
-                          style: const TextStyle(fontSize: 10),
-                        )
-                      : null,
-                ),
-              ),
-            if (query.isNotEmpty &&
-                !suggestions.any((n) => n.title.trim().toLowerCase() == query))
+            const Divider(height: 1),
+            if (suggestions.isEmpty && query.isNotEmpty)
               ListTile(
                 key: ValueKey(
                   'node-editor-create-link-${_autocompleteQuery!.trim()}',
@@ -1166,9 +1120,62 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                   style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
                 onTap: () => _insertAutocomplete(_autocompleteQuery!.trim()),
-              ),
+              )
+            else if (suggestions.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Type to search nodes...',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              )
+            else ...[
+              for (final node in suggestions)
+                InkWell(
+                  key: ValueKey('node-editor-link-suggestion-${node.id}'),
+                  onTap: () => _insertAutocomplete(node.title),
+                  child: ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    leading: Icon(
+                      NodeVisuals.icon(node.type),
+                      size: 18,
+                      color: NodeVisuals.color(context, node.type),
+                    ),
+                    title: Text(node.title),
+                    subtitle: node.project.isNotEmpty || node.area.isNotEmpty
+                        ? Text(
+                            '${node.project.isNotEmpty ? 'Project: ${node.project}' : ''}${node.project.isNotEmpty && node.area.isNotEmpty ? ' | ' : ''}${node.area.isNotEmpty ? 'Area: ${node.area}' : ''}',
+                            style: const TextStyle(fontSize: 10),
+                          )
+                        : null,
+                  ),
+                ),
+              if (query.isNotEmpty &&
+                  !suggestions.any(
+                    (n) => n.title.trim().toLowerCase() == query,
+                  ))
+                ListTile(
+                  key: ValueKey(
+                    'node-editor-create-link-${_autocompleteQuery!.trim()}',
+                  ),
+                  dense: true,
+                  leading: Icon(
+                    Icons.add,
+                    color: theme.colorScheme.primary,
+                    size: 18,
+                  ),
+                  title: Text(
+                    'Create node "$_autocompleteQuery"',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () => _insertAutocomplete(_autocompleteQuery!.trim()),
+                ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1730,27 +1737,25 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
         ),
     ];
 
+    final tokens = AppDesignTokens.of(context);
     return Container(
       key: const ValueKey('node-object-properties-panel'),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(tokens.radiusContainer),
         border: Border.all(color: theme.dividerColor.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
               const Icon(Icons.dataset_linked_outlined, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Object properties',
-                  style: theme.textTheme.titleSmall,
-                ),
-              ),
+              Text('Object properties', style: theme.textTheme.titleSmall),
               TextButton.icon(
                 key: const ValueKey('copy-node-wikilink'),
                 onPressed: title.isEmpty
@@ -1758,6 +1763,25 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
                     : () => unawaited(_copyNodeWikiLink(title)),
                 icon: const Icon(Icons.copy_rounded, size: 16),
                 label: const Text('Copy [[link]]'),
+              ),
+              TextButton.icon(
+                key: const ValueKey('ai-auto-decompose-button'),
+                onPressed: () async {
+                  final added = await showTaskDecompositionDialog(
+                    context,
+                    node: _draft,
+                  );
+                  if (added != null && added.isNotEmpty) {
+                    final currentChecklist = _checklistController.text.trim();
+                    final newItems = added.join('\n');
+                    _checklistController.text = currentChecklist.isEmpty
+                        ? newItems
+                        : '$currentChecklist\n$newItems';
+                    _markDirty();
+                  }
+                },
+                icon: const Icon(Icons.auto_awesome, size: 16),
+                label: const Text('AI Break down'),
               ),
             ],
           ),
@@ -2079,14 +2103,15 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
             children: [
               Icon(
                 Icons.auto_awesome,
                 size: 18,
                 color: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 8),
               Text('Smart actions', style: theme.textTheme.titleSmall),
             ],
           ),
@@ -2436,15 +2461,13 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
             children: [
               const Icon(Icons.attach_file_rounded, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Attachments', style: theme.textTheme.titleSmall),
-              ),
+              Text('Attachments', style: theme.textTheme.titleSmall),
               Text('${attachments.length}', style: theme.textTheme.labelSmall),
-              const SizedBox(width: 8),
               TextButton.icon(
                 onPressed: _extractBodyLinksToAttachments,
                 icon: const Icon(Icons.auto_fix_high, size: 16),
@@ -3170,415 +3193,491 @@ class _NodeEditorPanelState extends ConsumerState<NodeEditorPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InlineNodeWorkspaceSurface(
-      header: Column(
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: ShapeDecoration(
-                    color: NodeVisuals.color(
-                      context,
-                      _draft.type,
-                    ).withValues(alpha: 0.16),
-                    shape: CircleBorder(
-                      side: BorderSide(
+    final tokens = AppDesignTokens.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        final expanded = constraints.maxWidth >= 1024;
+        final content = InlineNodeWorkspaceSurface(
+          header: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: ShapeDecoration(
                         color: NodeVisuals.color(
                           context,
                           _draft.type,
-                        ).withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ),
-                  child: Icon(
-                    NodeVisuals.icon(_draft.type),
-                    size: 18,
-                    color: NodeVisuals.color(context, _draft.type),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Edit Node', style: theme.textTheme.titleMedium),
-                      Text(
-                        _draft.type.label,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                        ).withValues(alpha: 0.16),
+                        shape: CircleBorder(
+                          side: BorderSide(
+                            color: NodeVisuals.color(
+                              context,
+                              _draft.type,
+                            ).withValues(alpha: 0.55),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                _buildFeatureMenu(),
-                PopupMenuButton<VoidCallback>(
-                  key: const ValueKey('node-editor-overflow-menu'),
-                  tooltip: 'More node actions',
-                  icon: const Icon(Icons.more_horiz_rounded),
-                  onSelected: (action) => action(),
-                  itemBuilder: (context) => [
-                    _headerActionItem(
-                      icon: Icons.delete_outline,
-                      label: 'Delete node',
-                      color: theme.colorScheme.error,
-                      onPressed: widget.onDelete,
+                      child: Icon(
+                        NodeVisuals.icon(_draft.type),
+                        size: 18,
+                        color: NodeVisuals.color(context, _draft.type),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Edit Node',
+                            key: const ValueKey('node-editor-title'),
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          Text(
+                            _draft.type.label,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!compact) _buildFeatureMenu(),
+                    PopupMenuButton<VoidCallback>(
+                      key: const ValueKey('node-editor-overflow-menu'),
+                      tooltip: 'More node actions',
+                      icon: const Icon(Icons.more_horiz_rounded),
+                      onSelected: (action) => action(),
+                      itemBuilder: (context) => [
+                        _headerActionItem(
+                          icon: Icons.delete_outline,
+                          label: 'Delete node',
+                          color: theme.colorScheme.error,
+                          onPressed: widget.onDelete,
+                        ),
+                      ],
+                    ),
+                    if (widget.onCollapse != null)
+                      IconButton(
+                        constraints: BoxConstraints.tightFor(
+                          width: tokens.minimumTarget,
+                          height: tokens.minimumTarget,
+                        ),
+                        icon: const Icon(Icons.chevron_right),
+                        tooltip: 'Collapse editor',
+                        onPressed: widget.onCollapse,
+                      ),
+                    IconButton(
+                      constraints: BoxConstraints.tightFor(
+                        width: tokens.minimumTarget,
+                        height: tokens.minimumTarget,
+                      ),
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Close editor',
+                      onPressed: widget.onClose,
                     ),
                   ],
                 ),
-                if (widget.onCollapse != null)
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right),
-                    tooltip: 'Collapse',
-                    onPressed: widget.onCollapse,
-                  ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Close',
-                  onPressed: widget.onClose,
-                ),
-              ],
-            ),
+              ),
+              Divider(height: 1, color: theme.colorScheme.outlineVariant),
+              _EditorPanelTabs(
+                compact: compact,
+                selected: _panelTab,
+                onSelected: (tab) => setState(() => _panelTab = tab),
+              ),
+            ],
           ),
-          Divider(height: 1, color: theme.colorScheme.outlineVariant),
-          _EditorPanelTabs(
-            selected: _panelTab,
-            onSelected: (tab) => setState(() => _panelTab = tab),
-          ),
-        ],
-      ),
-      bodyPadding: const EdgeInsets.all(16),
-      bodyOwnsScroll: _panelTab == _EditorPanelTab.type,
-      body: _panelTab == _EditorPanelTab.type
-          ? buildNodeTypeInlineEditor(_sharedTypeEditContext())
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (_panelTab == _EditorPanelTab.edit) ...[
-                  DropdownButtonFormField<NodeType>(
-                    key: const ValueKey('node-editor-type-dropdown'),
-                    initialValue: _draft.type,
-                    decoration: const InputDecoration(labelText: 'Type'),
-                    items: NodeType.values.map((t) {
-                      return DropdownMenuItem(value: t, child: Text(t.label));
-                    }).toList(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() {
-                          _draft = MindmapNode(
-                            id: _draft.id,
-                            type: v,
-                            title: _draft.title,
-                            day: _draft.day,
-                            createdAt: _draft.createdAt,
-                            updatedAt: _draft.updatedAt,
-                            body: _draft.body,
-                            position: _draft.position,
-                            isDone: _draft.isDone,
-                            status: _draft.status,
-                            priority: _draft.priority,
-                            effort: _draft.effort,
-                            reviewState: _draft.reviewState,
-                            project: _draft.project,
-                            area: _draft.area,
-                            tags: _draft.tags,
-                            contextTags: _draft.contextTags,
-                            dueDate: _draft.dueDate,
-                            progress: _draft.progress,
-                            isPinned: _draft.isPinned,
-                            isArchived: _draft.isArchived,
-                            checklist: _draft.checklist,
-                            relatedNodeIds: _draft.relatedNodeIds,
-                            data: _draft.data,
+          bodyPadding: EdgeInsetsDirectional.all(compact ? 12 : 16),
+          bodyOwnsScroll: _panelTab == _EditorPanelTab.type,
+          body: _panelTab == _EditorPanelTab.type
+              ? buildNodeTypeInlineEditor(_sharedTypeEditContext())
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_panelTab == _EditorPanelTab.edit) ...[
+                      DropdownButtonFormField<NodeType>(
+                        key: const ValueKey('node-editor-type-dropdown'),
+                        isExpanded: true,
+                        initialValue: _draft.type,
+                        decoration: const InputDecoration(labelText: 'Type'),
+                        items: NodeType.values.map((t) {
+                          return DropdownMenuItem(
+                            value: t,
+                            child: Text(t.label),
                           );
-                          _applyTypeDefaults(v);
-                          _hasUnsavedChanges = true;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const ValueKey('node-editor-title-field'),
-                    controller: _titleController,
-                    decoration: InputDecoration(
-                      labelText: 'Title',
-                      errorText: _titleError,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _buildObjectPropertiesPanel(),
-                  const SizedBox(height: 16),
-                  const _EditorSectionHeader(title: 'Core'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    key: const ValueKey('node-editor-body-field'),
-                    controller: _bodyController,
-                    decoration: InputDecoration(
-                      labelText: 'Rich description',
-                      helperText:
-                          'Markdown supported: headings, bold, italic, quotes, lists, links.',
-                      counterText: _bodyWordCountLabel(),
-                    ),
-                    minLines: 6,
-                    maxLines: 14,
-                  ),
-                  _buildBodyToolbar(),
-                  _buildSlashCommandSuggestions(),
-                  const SizedBox(height: 8),
-                  _buildAutocompleteSuggestions(),
-                  const SizedBox(height: 16),
-                  _buildTemplateButton(),
-                  const SizedBox(height: 12),
-                  _buildSmartActionsSection(),
-                  const SizedBox(height: 12),
-                  _buildReviewNudgesSection(),
-                  const SizedBox(height: 12),
-                  _buildActivityLogSection(),
-                  const SizedBox(height: 12),
-                  _buildAttachmentsSection(),
-                ],
-                if (_panelTab == _EditorPanelTab.links) ...[
-                  _buildConnectionSection(),
-                  const SizedBox(height: 12),
-                  _buildBacklinksSection(),
-                ],
-                if (_panelTab == _EditorPanelTab.edit) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<NodeStatus>(
-                          key: const ValueKey('node-editor-status-dropdown'),
-                          initialValue: _draft.status,
-                          decoration: const InputDecoration(
-                            labelText: 'Status',
-                          ),
-                          items: NodeStatus.values
-                              .map(
-                                (s) => DropdownMenuItem(
-                                  value: s,
-                                  child: Text(s.label),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(
-                                () => _draft = MindmapNode(
-                                  id: _draft.id,
-                                  type: _draft.type,
-                                  title: _draft.title,
-                                  day: _draft.day,
-                                  createdAt: _draft.createdAt,
-                                  updatedAt: _draft.updatedAt,
-                                  body: _draft.body,
-                                  position: _draft.position,
-                                  isDone: _draft.isDone,
-                                  status: v,
-                                  priority: _draft.priority,
-                                  effort: _draft.effort,
-                                  reviewState: _draft.reviewState,
-                                  project: _draft.project,
-                                  area: _draft.area,
-                                  tags: _draft.tags,
-                                  contextTags: _draft.contextTags,
-                                  dueDate: _draft.dueDate,
-                                  progress: _draft.progress,
-                                  isPinned: _draft.isPinned,
-                                  isArchived: _draft.isArchived,
-                                  checklist: _draft.checklist,
-                                  relatedNodeIds: _draft.relatedNodeIds,
-                                  data: _draft.data,
-                                ),
+                        }).toList(),
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() {
+                              _draft = MindmapNode(
+                                id: _draft.id,
+                                type: v,
+                                title: _draft.title,
+                                day: _draft.day,
+                                createdAt: _draft.createdAt,
+                                updatedAt: _draft.updatedAt,
+                                body: _draft.body,
+                                position: _draft.position,
+                                isDone: _draft.isDone,
+                                status: _draft.status,
+                                priority: _draft.priority,
+                                effort: _draft.effort,
+                                reviewState: _draft.reviewState,
+                                project: _draft.project,
+                                area: _draft.area,
+                                tags: _draft.tags,
+                                contextTags: _draft.contextTags,
+                                dueDate: _draft.dueDate,
+                                progress: _draft.progress,
+                                isPinned: _draft.isPinned,
+                                isArchived: _draft.isArchived,
+                                checklist: _draft.checklist,
+                                relatedNodeIds: _draft.relatedNodeIds,
+                                data: _draft.data,
                               );
-                            }
-                          },
+                              _applyTypeDefaults(v);
+                              _hasUnsavedChanges = true;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(1),
+                        child: TextField(
+                          key: const ValueKey('node-editor-title-field'),
+                          controller: _titleController,
+                          decoration: InputDecoration(
+                            labelText: 'Title',
+                            errorText: _titleError,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<NodePriority>(
-                          key: const ValueKey('node-editor-priority-dropdown'),
-                          initialValue: _draft.priority,
-                          decoration: const InputDecoration(
-                            labelText: 'Priority',
+                      const SizedBox(height: 12),
+                      _buildObjectPropertiesPanel(),
+                      const SizedBox(height: 16),
+                      const _EditorSectionHeader(title: 'Core'),
+                      const SizedBox(height: 8),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: TextField(
+                          key: const ValueKey('node-editor-body-field'),
+                          controller: _bodyController,
+                          decoration: InputDecoration(
+                            labelText: 'Rich description',
+                            helperText:
+                                'Markdown supported. Type [[ to link another node.',
+                            counterText: _bodyWordCountLabel(),
                           ),
-                          items: NodePriority.values
-                              .map(
-                                (p) => DropdownMenuItem(
-                                  value: p,
-                                  child: Text(p.label),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(
-                                () => _draft = MindmapNode(
-                                  id: _draft.id,
-                                  type: _draft.type,
-                                  title: _draft.title,
-                                  day: _draft.day,
-                                  createdAt: _draft.createdAt,
-                                  updatedAt: _draft.updatedAt,
-                                  body: _draft.body,
-                                  position: _draft.position,
-                                  isDone: _draft.isDone,
-                                  status: _draft.status,
-                                  priority: v,
-                                  effort: _draft.effort,
-                                  reviewState: _draft.reviewState,
-                                  project: _draft.project,
-                                  area: _draft.area,
-                                  tags: _draft.tags,
-                                  contextTags: _draft.contextTags,
-                                  dueDate: _draft.dueDate,
-                                  progress: _draft.progress,
-                                  isPinned: _draft.isPinned,
-                                  isArchived: _draft.isArchived,
-                                  checklist: _draft.checklist,
-                                  relatedNodeIds: _draft.relatedNodeIds,
-                                  data: _draft.data,
-                                ),
-                              );
-                            }
-                          },
+                          minLines: 6,
+                          maxLines: 14,
+                          onChanged: (_) {},
                         ),
                       ),
+                      _buildBodyToolbar(),
+                      _buildSlashCommandSuggestions(),
+                      const SizedBox(height: 8),
+                      _buildAutocompleteSuggestions(),
+                      const SizedBox(height: 16),
+                      _buildTemplateButton(),
+                      const SizedBox(height: 12),
+                      _buildSmartActionsSection(),
+                      const SizedBox(height: 12),
+                      _buildReviewNudgesSection(),
+                      const SizedBox(height: 12),
+                      _buildActivityLogSection(),
+                      const SizedBox(height: 12),
+                      _buildAttachmentsSection(),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<NodeEffort>(
-                          key: const ValueKey('node-editor-effort-dropdown'),
-                          initialValue: _draft.effort,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Effort',
-                          ),
-                          items: NodeEffort.values
-                              .map(
-                                (e) => DropdownMenuItem(
-                                  value: e,
-                                  child: Text(e.label),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(
-                                () => _draft = _draft.copyWith(effort: v),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<NodeReviewState>(
-                          key: const ValueKey(
-                            'node-editor-review-state-dropdown',
-                          ),
-                          initialValue: _draft.reviewState,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Review state',
-                          ),
-                          items: NodeReviewState.values
-                              .map(
-                                (state) => DropdownMenuItem(
-                                  value: state,
-                                  child: Text(state.label),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v != null) {
-                              setState(
-                                () => _draft = _draft.copyWith(reviewState: v),
-                              );
-                            }
-                          },
-                        ),
-                      ),
+                    if (_panelTab == _EditorPanelTab.links) ...[
+                      _buildConnectionSection(),
+                      const SizedBox(height: 12),
+                      _buildBacklinksSection(),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const ValueKey('node-editor-context-tags-field'),
-                    controller: _contextTagsController,
-                    decoration: const InputDecoration(
-                      labelText: 'Context tags',
-                      hintText: 'deep work, quick win, offline, waiting',
-                      prefixIcon: Icon(Icons.psychology_outlined),
-                    ),
-                    textInputAction: TextInputAction.next,
-                    onChanged: (_) => setState(() => _hasTags = true),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ],
-            ),
-      // Fixed footer: intentionally outside the scrollable editor body.
-      footer: SafeArea(
-        top: false,
-        child: Container(
-          key: const ValueKey('node-editor-fixed-footer'),
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            border: Border(
-              top: BorderSide(color: theme.colorScheme.outlineVariant),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: theme.colorScheme.shadow.withValues(alpha: 0.12),
-                blurRadius: 10,
-                offset: const Offset(0, -3),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: _EditorSaveStatus(
-                  hasUnsavedChanges: _hasUnsavedChanges,
-                  isSaving: _isSaving,
-                  lastSavedAt: _lastSavedAt,
+                    if (_panelTab == _EditorPanelTab.edit) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<NodeStatus>(
+                              key: const ValueKey(
+                                'node-editor-status-dropdown',
+                              ),
+                              isExpanded: true,
+                              initialValue: _draft.status,
+                              decoration: const InputDecoration(
+                                labelText: 'Status',
+                              ),
+                              items: NodeStatus.values
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(
+                                    () => _draft = MindmapNode(
+                                      id: _draft.id,
+                                      type: _draft.type,
+                                      title: _draft.title,
+                                      day: _draft.day,
+                                      createdAt: _draft.createdAt,
+                                      updatedAt: _draft.updatedAt,
+                                      body: _draft.body,
+                                      position: _draft.position,
+                                      isDone: _draft.isDone,
+                                      status: v,
+                                      priority: _draft.priority,
+                                      effort: _draft.effort,
+                                      reviewState: _draft.reviewState,
+                                      project: _draft.project,
+                                      area: _draft.area,
+                                      tags: _draft.tags,
+                                      contextTags: _draft.contextTags,
+                                      dueDate: _draft.dueDate,
+                                      progress: _draft.progress,
+                                      isPinned: _draft.isPinned,
+                                      isArchived: _draft.isArchived,
+                                      checklist: _draft.checklist,
+                                      relatedNodeIds: _draft.relatedNodeIds,
+                                      data: _draft.data,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButtonFormField<NodePriority>(
+                              key: const ValueKey(
+                                'node-editor-priority-dropdown',
+                              ),
+                              isExpanded: true,
+                              initialValue: _draft.priority,
+                              decoration: const InputDecoration(
+                                labelText: 'Priority',
+                              ),
+                              items: NodePriority.values
+                                  .map(
+                                    (p) => DropdownMenuItem(
+                                      value: p,
+                                      child: Text(p.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(
+                                    () => _draft = MindmapNode(
+                                      id: _draft.id,
+                                      type: _draft.type,
+                                      title: _draft.title,
+                                      day: _draft.day,
+                                      createdAt: _draft.createdAt,
+                                      updatedAt: _draft.updatedAt,
+                                      body: _draft.body,
+                                      position: _draft.position,
+                                      isDone: _draft.isDone,
+                                      status: _draft.status,
+                                      priority: v,
+                                      effort: _draft.effort,
+                                      reviewState: _draft.reviewState,
+                                      project: _draft.project,
+                                      area: _draft.area,
+                                      tags: _draft.tags,
+                                      contextTags: _draft.contextTags,
+                                      dueDate: _draft.dueDate,
+                                      progress: _draft.progress,
+                                      isPinned: _draft.isPinned,
+                                      isArchived: _draft.isArchived,
+                                      checklist: _draft.checklist,
+                                      relatedNodeIds: _draft.relatedNodeIds,
+                                      data: _draft.data,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<NodeEffort>(
+                              key: const ValueKey(
+                                'node-editor-effort-dropdown',
+                              ),
+                              initialValue: _draft.effort,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Effort',
+                              ),
+                              items: NodeEffort.values
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(
+                                    () => _draft = _draft.copyWith(effort: v),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButtonFormField<NodeReviewState>(
+                              key: const ValueKey(
+                                'node-editor-review-state-dropdown',
+                              ),
+                              initialValue: _draft.reviewState,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Review state',
+                              ),
+                              items: NodeReviewState.values
+                                  .map(
+                                    (state) => DropdownMenuItem(
+                                      value: state,
+                                      child: Text(state.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(
+                                    () => _draft = _draft.copyWith(
+                                      reviewState: v,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const ValueKey('node-editor-context-tags-field'),
+                        controller: _contextTagsController,
+                        decoration: const InputDecoration(
+                          labelText: 'Context tags',
+                          hintText: 'deep work, quick win, offline, waiting',
+                          prefixIcon: Icon(Icons.psychology_outlined),
+                        ),
+                        textInputAction: TextInputAction.next,
+                        onChanged: (_) => setState(() => _hasTags = true),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ],
                 ),
+          // Fixed footer: intentionally outside the scrollable editor body.
+          footer: SafeArea(
+            top: false,
+            child: Container(
+              key: const ValueKey('node-editor-fixed-footer'),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border(
+                  top: BorderSide(color: theme.colorScheme.outlineVariant),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+                    blurRadius: 10,
+                    offset: const Offset(0, -3),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              IconButton.outlined(
-                tooltip: 'Reset changes',
-                onPressed: _hasUnsavedChanges && !_isSaving
-                    ? () => setState(() => _initDraft(widget.node))
-                    : null,
-                icon: const Icon(Icons.undo_rounded),
+              child: Row(
+                children: [
+                  if (!compact)
+                    Expanded(
+                      child: _EditorSaveStatus(
+                        hasUnsavedChanges: _hasUnsavedChanges,
+                        isSaving: _isSaving,
+                        lastSavedAt: _lastSavedAt,
+                      ),
+                    ),
+                  if (!compact) const SizedBox(width: 8),
+                  if (!compact)
+                    IconButton.outlined(
+                      tooltip: 'Reset changes',
+                      onPressed: _hasUnsavedChanges && !_isSaving
+                          ? () => setState(() => _initDraft(widget.node))
+                          : null,
+                      icon: const Icon(Icons.undo_rounded),
+                    ),
+                  if (!compact) const SizedBox(width: 8),
+                  Expanded(
+                    child: FocusTraversalOrder(
+                      order: const NumericFocusOrder(3),
+                      child: TextButton(
+                        key: const ValueKey('cancel-node-editor'),
+                        onPressed: widget.onClose,
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FocusTraversalOrder(
+                      order: const NumericFocusOrder(4),
+                      child: FilledButton.icon(
+                        key: const ValueKey('save-node'),
+                        onPressed: _isSaving ? null : _save,
+                        icon: _isSaving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.save_rounded),
+                        label: Text(_isSaving ? 'Saving…' : 'Save'),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
-                key: const ValueKey('save-node'),
-                onPressed: _isSaving ? null : _save,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_rounded),
-                label: Text(_isSaving ? 'Saving…' : 'Save'),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+        return SafeArea(
+          bottom: false,
+          child: Align(
+            alignment: AlignmentDirectional.topCenter,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: expanded ? constraints.maxWidth : 840,
+              ),
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: content,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3608,48 +3707,59 @@ class _NodeConversion {
 enum _EditorPanelTab { edit, type, links }
 
 class _EditorPanelTabs extends StatelessWidget {
-  const _EditorPanelTabs({required this.selected, required this.onSelected});
+  const _EditorPanelTabs({
+    required this.compact,
+    required this.selected,
+    required this.onSelected,
+  });
 
+  final bool compact;
   final _EditorPanelTab selected;
   final ValueChanged<_EditorPanelTab> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return ConstrainedBox(
       key: const ValueKey('node-editor-tabs'),
-      height: 42,
+      constraints: BoxConstraints(
+        minHeight: AppDesignTokens.of(context).minimumTarget,
+      ),
       child: Row(
         children: [
           for (final tab in _EditorPanelTab.values)
             Expanded(
-              child: InkWell(
+              child: Semantics(
                 key: ValueKey('node-editor-tab-${tab.name}'),
-                onTap: () => onSelected(tab),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        width: 2,
-                        color: selected == tab
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
+                button: true,
+                selected: selected == tab,
+                child: InkWell(
+                  onTap: () => onSelected(tab),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          width: 2,
+                          color: selected == tab
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.transparent,
+                        ),
                       ),
                     ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      switch (tab) {
-                        _EditorPanelTab.edit => 'Edit',
-                        _EditorPanelTab.type => 'Type',
-                        _EditorPanelTab.links => 'Links',
-                      },
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: selected == tab
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                        color: selected == tab
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                    child: Center(
+                      child: Text(
+                        switch (tab) {
+                          _EditorPanelTab.edit => 'Edit',
+                          _EditorPanelTab.type => 'Type',
+                          _EditorPanelTab.links => 'Links',
+                        },
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: selected == tab
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: selected == tab
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),

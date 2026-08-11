@@ -212,35 +212,60 @@ class _WorkspaceDetailPageState extends ConsumerState<WorkspaceDetailPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/workspaces'),
         ),
-        title: Text(displayTitle, style: theme.textTheme.titleMedium),
+        title: Text(
+          displayTitle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleMedium,
+        ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: SegmentedButton<_WorkspaceView>(
-              segments: const [
-                ButtonSegment(
-                  value: _WorkspaceView.list,
-                  label: Text('List'),
-                  icon: Icon(Icons.view_list_outlined),
-                ),
-                ButtonSegment(
+          if (MediaQuery.sizeOf(context).width < 700)
+            PopupMenuButton<_WorkspaceView>(
+              key: const ValueKey('workspace-view-menu'),
+              tooltip: 'Workspace view',
+              initialValue: _view,
+              onSelected: (view) => setState(() => _view = view),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: _WorkspaceView.list, child: Text('List')),
+                PopupMenuItem(
                   value: _WorkspaceView.kanban,
-                  label: Text('Kanban'),
-                  icon: Icon(Icons.view_kanban_outlined),
+                  child: Text('Kanban'),
                 ),
-                ButtonSegment(
+                PopupMenuItem(
                   value: _WorkspaceView.gantt,
-                  label: Text('Gantt'),
-                  icon: Icon(Icons.waterfall_chart_outlined),
+                  child: Text('Gantt'),
                 ),
               ],
-              selected: {_view},
-              onSelectionChanged: (selected) {
-                setState(() => _view = selected.first);
-              },
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              icon: const Icon(Icons.view_compact_outlined),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: SegmentedButton<_WorkspaceView>(
+                segments: const [
+                  ButtonSegment(
+                    value: _WorkspaceView.list,
+                    label: Text('List'),
+                    icon: Icon(Icons.view_list_outlined),
+                  ),
+                  ButtonSegment(
+                    value: _WorkspaceView.kanban,
+                    label: Text('Kanban'),
+                    icon: Icon(Icons.view_kanban_outlined),
+                  ),
+                  ButtonSegment(
+                    value: _WorkspaceView.gantt,
+                    label: Text('Gantt'),
+                    icon: Icon(Icons.waterfall_chart_outlined),
+                  ),
+                ],
+                selected: {_view},
+                onSelectionChanged: (selected) {
+                  setState(() => _view = selected.first);
+                },
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              ),
             ),
-          ),
         ],
       ),
       body: contextsFuture.when(
@@ -3182,13 +3207,14 @@ class _WorkspaceDetailHeader extends ConsumerWidget {
     final progress = (health.progress * 100).round();
 
     return Padding(
+      key: const ValueKey('workspace-detail-header'),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: DecoratedBox(
         decoration: ShapeDecoration(
           color: theme.colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(
-              AppDesignTokens.of(context).radiusPage,
+              AppDesignTokens.of(context).radiusContainer,
             ),
             side: BorderSide(color: theme.dividerColor),
           ),
@@ -3198,26 +3224,20 @@ class _WorkspaceDetailHeader extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Icon(
                     _workspaceTypeIcon(workspace.type),
                     color: theme.colorScheme.primary,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      workspace.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                  ),
+                  Text(workspace.name, style: theme.textTheme.titleMedium),
                   _HeaderChip(
                     icon: Icons.monitor_heart_outlined,
                     label: health.status.label,
                   ),
-                  const SizedBox(width: 8),
                   _HeaderChip(
                     icon: Icons.schedule_outlined,
                     label: workspaceLastActivityLabel(
@@ -3260,14 +3280,15 @@ class _WorkspaceDetailHeader extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
-                    child: Text(
-                      '$completion% complete • $progress% average progress',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
+                  Text(
+                    '$completion% complete • $progress% average progress',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   TextButton.icon(
@@ -3398,35 +3419,47 @@ class _WorkspaceListView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Stats row
-        _StatsRow(workspace: workspace),
-        const SizedBox(height: 20),
+        Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            key: const ValueKey('workspace-detail-list-content'),
+            constraints: const BoxConstraints(maxWidth: 1120),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Stats row
+                _StatsRow(workspace: workspace),
+                const SizedBox(height: 20),
 
-        if (completed.isNotEmpty) ...[
-          Text(
-            'Completed (${completed.length})',
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: AppSemanticColors.of(context).success,
+                if (completed.isNotEmpty) ...[
+                  Text(
+                    'Completed (${completed.length})',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: AppSemanticColors.of(context).success,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...completed.map((node) => _TaskListTile(node: node)),
+                  const SizedBox(height: 20),
+                ],
+
+                if (active.isNotEmpty) ...[
+                  Text(
+                    'Active (${active.length})',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...active.map((node) => _TaskListTile(node: node)),
+                ],
+
+                const SizedBox(height: 20),
+                _WorkspaceDrillPanels(workspace: workspace),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          ...completed.map((node) => _TaskListTile(node: node)),
-          const SizedBox(height: 20),
-        ],
-
-        if (active.isNotEmpty) ...[
-          Text(
-            'Active (${active.length})',
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...active.map((node) => _TaskListTile(node: node)),
-        ],
-
-        const SizedBox(height: 20),
-        _WorkspaceDrillPanels(workspace: workspace),
+        ),
       ],
     );
   }
@@ -3517,8 +3550,11 @@ class _StatsRow extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
+        child: Wrap(
+          alignment: WrapAlignment.spaceAround,
+          runAlignment: WrapAlignment.center,
+          spacing: 12,
+          runSpacing: 12,
           children: [
             _StatItem(
               label: 'Total',
@@ -3988,16 +4024,26 @@ class _KanbanCard extends ConsumerWidget {
       ),
     );
 
-    return LongPressDraggable<String>(
-      data: node.id,
-      delay: const Duration(milliseconds: 150),
-      feedback: Material(
-        elevation: 0,
-        borderRadius: BorderRadius.circular(tokens.radiusContainer),
-        child: SizedBox(width: 250, child: Opacity(opacity: 0.85, child: card)),
+    return Semantics(
+      button: true,
+      label: 'Move ${node.title}, ${column.label}',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: LongPressDraggable<String>(
+          data: node.id,
+          delay: const Duration(milliseconds: 150),
+          feedback: Material(
+            elevation: 0,
+            borderRadius: BorderRadius.circular(tokens.radiusContainer),
+            child: SizedBox(
+              width: 250,
+              child: Opacity(opacity: 0.85, child: card),
+            ),
+          ),
+          childWhenDragging: Opacity(opacity: 0.3, child: card),
+          child: card,
+        ),
       ),
-      childWhenDragging: Opacity(opacity: 0.3, child: card),
-      child: card,
     );
   }
 }
@@ -4078,9 +4124,12 @@ class _WorkspaceGanttView extends StatelessWidget {
         // Chart area
         Expanded(
           child: SingleChildScrollView(
+            key: const ValueKey('workspace-gantt-vertical-scroll'),
             child: SingleChildScrollView(
+              key: const ValueKey('workspace-gantt-horizontal-scroll'),
               scrollDirection: Axis.horizontal,
               child: SizedBox(
+                key: const ValueKey('workspace-gantt-chart'),
                 width: labelWidth + (totalDays * dayWidth),
                 height: (active.length * rowHeight) + 32,
                 child: Semantics(

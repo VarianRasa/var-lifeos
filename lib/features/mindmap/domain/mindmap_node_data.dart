@@ -34,8 +34,12 @@ class ConnectionMetadata {
 Offset? _parseOffset(Map<String, Object?> data, String prefix) {
   final rawDx = data['${prefix}Dx'] ?? data['${prefix}X'];
   final rawDy = data['${prefix}Dy'] ?? data['${prefix}Y'];
-  final dx = rawDx is num ? rawDx.toDouble() : (rawDx is String ? double.tryParse(rawDx) : null);
-  final dy = rawDy is num ? rawDy.toDouble() : (rawDy is String ? double.tryParse(rawDy) : null);
+  final dx = rawDx is num
+      ? rawDx.toDouble()
+      : (rawDx is String ? double.tryParse(rawDx) : null);
+  final dy = rawDy is num
+      ? rawDy.toDouble()
+      : (rawDy is String ? double.tryParse(rawDy) : null);
   if (dx != null && dy != null) {
     return Offset(dx, dy);
   }
@@ -43,8 +47,12 @@ Offset? _parseOffset(Map<String, Object?> data, String prefix) {
   if (mapVal is Map) {
     final mapDx = mapVal['dx'] ?? mapVal['x'];
     final mapDy = mapVal['dy'] ?? mapVal['y'];
-    final parsedDx = mapDx is num ? mapDx.toDouble() : (mapDx is String ? double.tryParse(mapDx) : null);
-    final parsedDy = mapDy is num ? mapDy.toDouble() : (mapDy is String ? double.tryParse(mapDy) : null);
+    final parsedDx = mapDx is num
+        ? mapDx.toDouble()
+        : (mapDx is String ? double.tryParse(mapDx) : null);
+    final parsedDy = mapDy is num
+        ? mapDy.toDouble()
+        : (mapDy is String ? double.tryParse(mapDy) : null);
     if (parsedDx != null && parsedDy != null) {
       return Offset(parsedDx, parsedDy);
     }
@@ -53,13 +61,25 @@ Offset? _parseOffset(Map<String, Object?> data, String prefix) {
 }
 
 ConnectionMetadata connectionMetadataFromData(Map<String, Object?> data) {
-  final startNodeId = data['connectionStartNodeId'] as String? ?? data['startNodeId'] as String?;
-  final endNodeId = data['connectionEndNodeId'] as String? ?? data['endNodeId'] as String?;
-  final startPoint = _parseOffset(data, 'connectionStart') ?? _parseOffset(data, 'startPoint');
-  final endPoint = _parseOffset(data, 'connectionEnd') ?? _parseOffset(data, 'endPoint');
-  final lineStyle = data['connectionLineStyle'] as String? ?? data['lineStyle'] as String? ?? 'solid';
-  final arrowStyle = data['connectionArrowStyle'] as String? ?? data['arrowStyle'] as String? ?? 'end';
-  final color = data['connectionColor'] as String? ?? data['color'] as String? ?? 'slate';
+  final startNodeId =
+      data['connectionStartNodeId'] as String? ??
+      data['startNodeId'] as String?;
+  final endNodeId =
+      data['connectionEndNodeId'] as String? ?? data['endNodeId'] as String?;
+  final startPoint =
+      _parseOffset(data, 'connectionStart') ?? _parseOffset(data, 'startPoint');
+  final endPoint =
+      _parseOffset(data, 'connectionEnd') ?? _parseOffset(data, 'endPoint');
+  final lineStyle =
+      data['connectionLineStyle'] as String? ??
+      data['lineStyle'] as String? ??
+      'solid';
+  final arrowStyle =
+      data['connectionArrowStyle'] as String? ??
+      data['arrowStyle'] as String? ??
+      'end';
+  final color =
+      data['connectionColor'] as String? ?? data['color'] as String? ?? 'slate';
   final label = data['connectionLabel'] as String? ?? data['label'] as String?;
 
   return ConnectionMetadata(

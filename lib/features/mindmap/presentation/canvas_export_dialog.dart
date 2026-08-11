@@ -41,7 +41,9 @@ class _CanvasExportDialogState extends State<CanvasExportDialog> {
               children: [
                 RadioListTile<CanvasExportFormat>(
                   title: Text('PDF Document (.pdf)'),
-                  subtitle: Text('Structured printable PDF with frame grouping'),
+                  subtitle: Text(
+                    'Structured printable PDF with frame grouping',
+                  ),
                   value: CanvasExportFormat.pdf,
                 ),
                 RadioListTile<CanvasExportFormat>(

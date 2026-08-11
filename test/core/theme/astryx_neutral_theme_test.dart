@@ -82,9 +82,230 @@ void main() {
         expect(theme.inputDecorationTheme.border, isA<OutlineInputBorder>());
         expect(theme.materialTapTargetSize, MaterialTapTargetSize.padded);
         expect(theme.cardTheme.elevation, 0);
+        expect(theme.dialogTheme.elevation, greaterThan(0));
+        expect(theme.inputDecorationTheme.filled, isTrue);
+        expect(theme.inputDecorationTheme.fillColor, semantic.surface);
+        expect(
+          theme.inputDecorationTheme.constraints?.minHeight,
+          tokens!.minimumTarget,
+        );
+        expect(
+          theme.filledButtonTheme.style?.elevation?.resolve(<WidgetState>{}),
+          0,
+        );
       }
     }
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'Neutral ${brightness.name} renders and interacts with Material surfaces',
+      (tester) async {
+        final theme = AppTheme.forVariant(
+          brightness,
+          AppThemeVariant.astryxNeutral,
+          AppFontSize.medium,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Scaffold(
+              body: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const TextField(key: Key('field')),
+                    const SizedBox(height: 8),
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text('Card'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton(
+                          onPressed: () {},
+                          child: const Text('Filled'),
+                        ),
+                        OutlinedButton(
+                          onPressed: () {},
+                          child: const Text('Outlined'),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Open menu',
+                          itemBuilder: (context) =>
+                              const <PopupMenuEntry<String>>[
+                                PopupMenuItem<String>(
+                                  value: 'one',
+                                  child: Text('Menu item'),
+                                ),
+                              ],
+                        ),
+                        Builder(
+                          builder: (context) => FilledButton(
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (context) => const Dialog(
+                                child: Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Text('Dialog content'),
+                                ),
+                              ),
+                            ),
+                            child: const Text('Open dialog'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<String>(
+                      segments: const <ButtonSegment<String>>[
+                        ButtonSegment<String>(value: 'one', label: Text('One')),
+                        ButtonSegment<String>(value: 'two', label: Text('Two')),
+                      ],
+                      selected: const <String>{'one'},
+                      onSelectionChanged: (_) {},
+                    ),
+                  ],
+                ),
+              ),
+              bottomNavigationBar: NavigationBar(
+                selectedIndex: 0,
+                destinations: const <NavigationDestination>[
+                  NavigationDestination(
+                    icon: Icon(Icons.today_outlined),
+                    label: 'Today',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.settings_outlined),
+                    label: 'Settings',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        expect(tester.getSize(find.byKey(const Key('field'))).height, 44);
+        await tester.tap(find.byTooltip('Open menu'));
+        await tester.pumpAndSettle();
+        expect(find.text('Menu item'), findsOneWidget);
+        await tester.tap(find.text('Menu item'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Open dialog'));
+        await tester.pumpAndSettle();
+        expect(find.text('Dialog content'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('Neutral ${brightness.name} drives real button states', (
+      tester,
+    ) async {
+      final focusNode = FocusNode();
+      final focusedStates = WidgetStatesController();
+      final pressedStates = WidgetStatesController();
+      final disabledStates = WidgetStatesController();
+      addTearDown(focusNode.dispose);
+      addTearDown(focusedStates.dispose);
+      addTearDown(pressedStates.dispose);
+      addTearDown(disabledStates.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.forVariant(
+            brightness,
+            AppThemeVariant.astryxNeutral,
+            AppFontSize.medium,
+          ),
+          home: Scaffold(
+            body: Column(
+              children: <Widget>[
+                OutlinedButton(
+                  focusNode: focusNode,
+                  statesController: focusedStates,
+                  onPressed: () {},
+                  child: const Text('Focus target'),
+                ),
+                FilledButton(
+                  statesController: pressedStates,
+                  onPressed: () {},
+                  child: const Text('Press target'),
+                ),
+                FilledButton.icon(
+                  statesController: disabledStates,
+                  onPressed: null,
+                  icon: const Icon(Icons.block, key: Key('disabled-icon')),
+                  label: const Text('Disabled target'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final semantic = AppTheme.forVariant(
+        brightness,
+        AppThemeVariant.astryxNeutral,
+        AppFontSize.medium,
+      ).extension<AppSemanticColors>()!;
+      final focusButton = find.widgetWithText(OutlinedButton, 'Focus target');
+      final pressButton = find.widgetWithText(FilledButton, 'Press target');
+
+      focusNode.requestFocus();
+      await tester.pump();
+      expect(focusNode.hasFocus, isTrue);
+      expect(focusedStates.value, contains(WidgetState.focused));
+      final focusedMaterial = tester.widget<Material>(
+        find.descendant(of: focusButton, matching: find.byType(Material)).first,
+      );
+      expect(
+        (focusedMaterial.shape! as RoundedRectangleBorder).side,
+        BorderSide(color: semantic.focusRing, width: 2),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('Press target')),
+      );
+      await tester.pump();
+      expect(pressedStates.value, contains(WidgetState.pressed));
+      final pressedInkWell = tester.widget<InkWell>(
+        find.descendant(of: pressButton, matching: find.byType(InkWell)),
+      );
+      expect(
+        pressedInkWell.overlayColor?.resolve(pressedStates.value),
+        semantic.pressedOverlay,
+      );
+      await gesture.up();
+      await tester.pump();
+      expect(pressedStates.value, isNot(contains(WidgetState.pressed)));
+
+      expect(disabledStates.value, contains(WidgetState.disabled));
+      final disabledColor = DefaultTextStyle.of(
+        tester.element(find.text('Disabled target')),
+      ).style.color;
+      final disabledIconColor = IconTheme.of(
+        tester.element(find.byKey(const Key('disabled-icon'))),
+      ).color;
+      expect(disabledColor, semantic.textDisabled);
+      expect(disabledIconColor, semantic.textDisabled);
+      expect(
+        tester.getSemantics(find.text('Disabled target')),
+        matchesSemantics(
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+          label: 'Disabled target',
+        ),
+      );
+    });
+  }
 
   test('Astryx type scale and motion match design contract', () {
     final theme = AppTheme.dark;
@@ -118,9 +339,16 @@ void main() {
     expect(tokens.radiusElement, 8);
     expect(tokens.radiusContainer, 12);
     expect(tokens.radiusPage, 28);
+    expect(tokens.shadowLow, isEmpty);
+    expect(tokens.shadowMedium, hasLength(1));
+    expect(tokens.shadowHigh, hasLength(1));
     expect(tokens.motionFast, const Duration(milliseconds: 175));
     expect(tokens.motionMedium, const Duration(milliseconds: 410));
     expect(tokens.motionSlow, const Duration(milliseconds: 975));
+    expect(tokens.motionCurve, const Cubic(0.24, 1, 0.4, 1));
+    expect(tokens.controlSmall, 28);
+    expect(tokens.controlMedium, 32);
+    expect(tokens.controlLarge, 36);
     expect(tokens.minimumTarget, 44);
   });
 

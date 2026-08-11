@@ -16,12 +16,14 @@ import '../../core/theme/theme_controller.dart';
 import '../../core/utils/date_utils.dart';
 import '../mindmap/application/database_lock_provider.dart';
 import '../mindmap/application/mindmap_providers.dart';
+import '../mindmap/data/byok_ai_service.dart';
 import '../mindmap/domain/canvas_board.dart';
 import '../mindmap/domain/canvas_board_template.dart';
 import '../mindmap/domain/custom_node_template_codec.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
 import '../search/application/search_providers.dart';
 import '../sync/application/sync_controller.dart';
 import 'application/reminder_auto_scheduler.dart';
@@ -133,211 +135,243 @@ class SettingsPage extends ConsumerWidget {
     final effectiveMode = variant.effectiveThemeMode(mode);
     final fontSize = ref.watch(themeFontSizeProvider);
     return Scaffold(
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const _SettingsOverviewCard(),
-          const SizedBox(height: 16),
-          const _FeatureGuideCard(),
-          const SizedBox(height: 24),
-          Text('Appearance', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.dark_mode_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Theme', style: theme.textTheme.bodyLarge),
-                  ),
-                  SegmentedButton<ThemeMode>(
-                    segments: const [
-                      ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-                      ButtonSegment(
-                        value: ThemeMode.light,
-                        label: Text('Light'),
-                      ),
-                      ButtonSegment(
-                        value: ThemeMode.system,
-                        label: Text('Auto'),
-                      ),
-                    ],
-                    selected: {effectiveMode},
-                    onSelectionChanged: variant.forcesDarkMode
-                        ? null
-                        : (s) => ref
-                              .read(themeModeProvider.notifier)
-                              .setThemeMode(s.first),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.format_size_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Text size', style: theme.textTheme.bodyLarge),
-                  ),
-                  SegmentedButton<AppFontSize>(
-                    segments: [
-                      for (final size in AppFontSize.values)
-                        ButtonSegment(value: size, label: Text(size.label)),
-                    ],
-                    selected: {fontSize},
-                    onSelectionChanged: (selection) => ref
-                        .read(themeFontSizeProvider.notifier)
-                        .setFontSize(selection.first),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Palette'),
-              subtitle: Text(
-                'Active: ${variant.displayName}. '
-                '${variant.forcesDarkMode ? 'Dark only. ' : ''}'
-                'Marker colors are adapted to the active theme.',
-              ),
-              onTap: () => _showPaletteDialog(context, ref),
-              trailing: Container(
-                width: 44,
-                height: 24,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                  gradient: LinearGradient(
-                    colors: [
-                      theme.colorScheme.primary,
-                      theme.colorScheme.secondary,
-                      theme.colorScheme.tertiary,
-                    ],
-                  ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: ListView(
+            key: const ValueKey('settings-page'),
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SettingsOverviewCard(),
+              const SizedBox(height: 16),
+              const _FeatureGuideCard(),
+              const SizedBox(height: 24),
+              Text('Appearance', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _AppearanceControl(
+                icon: Icons.dark_mode_outlined,
+                label: 'Theme',
+                control: SegmentedButton<ThemeMode>(
+                  segments: const [
+                    ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+                    ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                    ButtonSegment(value: ThemeMode.system, label: Text('Auto')),
+                  ],
+                  selected: {effectiveMode},
+                  onSelectionChanged: variant.forcesDarkMode
+                      ? null
+                      : (selection) => ref
+                            .read(themeModeProvider.notifier)
+                            .setThemeMode(selection.first),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text('Search privacy', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          _CloudExtractionCard(
-            enabled: ref.watch(cloudExtractionEnabledProvider).value ?? false,
-            onChanged: (value) async {
-              await ref
-                  .read(searchPrivacyPreferencesProvider)
-                  .setCloudExtractionEnabled(value);
-              ref.invalidate(cloudExtractionEnabledProvider);
-            },
-          ),
-          const SizedBox(height: 24),
-          Text('Sync & backup', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              key: const ValueKey('settings-recovery-center-entry'),
-              leading: const Icon(Icons.health_and_safety_outlined),
-              title: const Text('Recovery Center'),
-              subtitle: const Text(
-                'Preview sync, restore points, and encrypted backups safely.',
+              const SizedBox(height: 12),
+              _AppearanceControl(
+                icon: Icons.format_size_outlined,
+                label: 'Text size',
+                control: SegmentedButton<AppFontSize>(
+                  segments: [
+                    for (final size in AppFontSize.values)
+                      ButtonSegment(value: size, label: Text(size.label)),
+                  ],
+                  selected: {fontSize},
+                  onSelectionChanged: (selection) => ref
+                      .read(themeFontSizeProvider.notifier)
+                      .setFontSize(selection.first),
+                ),
               ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.go('/recovery'),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text('Templates & saved views', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _TemplateManagerCard(),
-          const SizedBox(height: 12),
-          const _BoardTemplatesManagerCard(),
-          const SizedBox(height: 12),
-          const _SavedViewsManagerCard(),
-          const SizedBox(height: 12),
-          const _GraphFiltersManagerCard(),
-          const SizedBox(height: 24),
-          Text('Reminders', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _ReminderPreviewCard(),
-          const SizedBox(height: 24),
-          Text('Security', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _DatabaseLockCard(),
-          const SizedBox(height: 24),
-          const _DataManagementCard(),
-          const SizedBox(height: 24),
-          Text('Keyboard shortcuts', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'K'],
-                    desc: 'Open command palette',
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Palette'),
+                  subtitle: Text(
+                    'Active: ${variant.displayName}. '
+                    '${variant.forcesDarkMode ? 'Dark only. ' : ''}'
+                    'Marker colors are adapted to the active theme.',
                   ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'N'],
-                    desc: 'Create new node',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'T'],
-                    desc: 'Jump to today',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['1–6'],
-                    desc: 'Agenda quick filters',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Esc'],
-                    desc: 'Close panels / clear focus',
-                  ),
-                  const Divider(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => showKeyboardShortcutsDialog(context),
-                      icon: const Icon(Icons.keyboard, size: 18),
-                      label: const Text('View all shortcuts'),
+                  onTap: () => _showPaletteDialog(context, ref),
+                  trailing: Container(
+                    width: 44,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.primary,
+                          theme.colorScheme.secondary,
+                          theme.colorScheme.tertiary,
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text('About', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: Icon(Icons.info_outline),
-                  title: Text(AppInfo.name),
-                  subtitle: Text(AppInfo.tagline),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 24),
+              Text('Search privacy', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _CloudExtractionCard(
+                enabled:
+                    ref.watch(cloudExtractionEnabledProvider).value ?? false,
+                onChanged: (value) async {
+                  await ref
+                      .read(searchPrivacyPreferencesProvider)
+                      .setCloudExtractionEnabled(value);
+                  ref.invalidate(cloudExtractionEnabledProvider);
+                },
+              ),
+              const SizedBox(height: 24),
+              Text('Sync & backup', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  key: const ValueKey('settings-recovery-center-entry'),
+                  leading: const Icon(Icons.health_and_safety_outlined),
+                  title: const Text('Recovery Center'),
+                  subtitle: const Text(
+                    'Preview sync, restore points, and encrypted backups safely.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.go('/recovery'),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Templates & saved views',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              const _TemplateManagerCard(),
+              const SizedBox(height: 12),
+              const _BoardTemplatesManagerCard(),
+              const SizedBox(height: 12),
+              const _AutomationRulesManagerCard(),
+              const SizedBox(height: 12),
+              const _ByokAiManagerCard(),
+              const SizedBox(height: 12),
+              const _SavedViewsManagerCard(),
+              const SizedBox(height: 12),
+              const _GraphFiltersManagerCard(),
+              const SizedBox(height: 24),
+              Text('Reminders', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const _ReminderPreviewCard(),
+              const SizedBox(height: 24),
+              Text('Security', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const _DatabaseLockCard(),
+              const SizedBox(height: 24),
+              const _DataManagementCard(),
+              const SizedBox(height: 24),
+              Text('Keyboard shortcuts', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'K'],
+                        desc: 'Open command palette',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'N'],
+                        desc: 'Create new node',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'T'],
+                        desc: 'Jump to today',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['1–6'],
+                        desc: 'Agenda quick filters',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Esc'],
+                        desc: 'Close panels / clear focus',
+                      ),
+                      const Divider(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => showKeyboardShortcutsDialog(context),
+                          icon: const Icon(Icons.keyboard, size: 18),
+                          label: const Text('View all shortcuts'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text('About', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text(AppInfo.name),
+                      subtitle: Text(AppInfo.tagline),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _AppearanceControl extends StatelessWidget {
+  const _AppearanceControl({
+    required this.icon,
+    required this.label,
+    required this.control,
+  });
+
+  final IconData icon;
+  final String label;
+  final Widget control;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final labelWidget = Row(
+            children: [
+              Icon(icon),
+              const SizedBox(width: 12),
+              Text(label, style: Theme.of(context).textTheme.bodyLarge),
+            ],
+          );
+          if (constraints.maxWidth < 600) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [labelWidget, const SizedBox(height: 8), control],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: labelWidget),
+              control,
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 Future<void> _showMarkdownImportDialog(
@@ -464,9 +498,10 @@ Future<void> _showClearDataDialog(BuildContext context, WidgetRef ref) async {
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
-        TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.error,
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
           ),
           onPressed: () => Navigator.pop(context, true),
           child: const Text('Delete Everything'),
@@ -899,16 +934,12 @@ class _BoardTemplatesManagerCardState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.dashboard_outlined),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Board templates',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                ),
+                Text('Board templates', style: theme.textTheme.bodyLarge),
                 TextButton.icon(
                   key: const ValueKey('settings-board-template-add'),
                   onPressed: boards.isEmpty
@@ -1171,16 +1202,12 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.dashboard_customize_outlined),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Template manager',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                ),
+                Text('Template manager', style: theme.textTheme.bodyLarge),
                 TextButton.icon(
                   onPressed: nodes.isEmpty
                       ? null
@@ -1275,6 +1302,181 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AutomationRulesManagerCard extends StatelessWidget {
+  const _AutomationRulesManagerCard();
+
+  @override
+  Widget build(BuildContext context) => Card(
+    key: const ValueKey('settings-automation-rules-card'),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final addButton = FilledButton.icon(
+          onPressed: () => showAutomationRuleEditorDialog(context),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add Rule'),
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high_outlined),
+              title: const Text('Automation & Smart Rules'),
+              subtitle: const Text(
+                'Configure custom event triggers, routine auto-creations, and rules.',
+              ),
+              trailing: constraints.maxWidth >= 400 ? addButton : null,
+            ),
+            if (constraints.maxWidth < 400)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: addButton,
+              ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _ByokAiManagerCard extends StatefulWidget {
+  const _ByokAiManagerCard();
+
+  @override
+  State<_ByokAiManagerCard> createState() => _ByokAiManagerCardState();
+}
+
+class _ByokAiManagerCardState extends State<_ByokAiManagerCard> {
+  final _keyController = TextEditingController();
+  final _modelController = TextEditingController(text: 'gpt-4o-mini');
+  final _urlController = TextEditingController(
+    text: 'https://api.openai.com/v1',
+  );
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfig();
+  }
+
+  Future<void> _loadConfig() async {
+    final config = await ByokAiService().loadConfig();
+    _keyController.text = config.apiKey;
+    _modelController.text = config.modelName;
+    _urlController.text = config.baseUrl;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _modelController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveConfig() async {
+    setState(() => _saving = true);
+    try {
+      final config = ByokAiConfig(
+        apiKey: _keyController.text.trim(),
+        modelName: _modelController.text.trim(),
+        baseUrl: _urlController.text.trim(),
+      );
+      await ByokAiService().saveConfig(config);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI Key & BYOK config saved')),
+      );
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save AI Key & BYOK config: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.key_outlined),
+              title: Text('Bring Your Own Key (BYOK) AI'),
+              subtitle: Text(
+                'Configure your API Key for live AI Task Auto-Decomposition.',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              key: const ValueKey('settings-byok-api-key'),
+              controller: _keyController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'API Key (OpenAI / Compatible)',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final fields = [
+                  TextFormField(
+                    controller: _modelController,
+                    decoration: const InputDecoration(
+                      labelText: 'Model Name',
+                      isDense: true,
+                    ),
+                  ),
+                  TextFormField(
+                    controller: _urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Base URL',
+                      isDense: true,
+                    ),
+                  ),
+                ];
+                if (constraints.maxWidth < 400) {
+                  return Column(
+                    children: [
+                      fields.first,
+                      const SizedBox(height: 8),
+                      fields.last,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: fields.first),
+                    const SizedBox(width: 8),
+                    Expanded(child: fields.last),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                key: const ValueKey('settings-byok-save'),
+                onPressed: _saving ? null : _saveConfig,
+                icon: const Icon(Icons.save, size: 16),
+                label: Text(_saving ? 'Saving...' : 'Save AI Key'),
+              ),
+            ),
           ],
         ),
       ),
@@ -1625,17 +1827,19 @@ class _SavedViewsManagerCardState extends State<_SavedViewsManagerCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.view_quilt_outlined),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text('Saved views', style: theme.textTheme.bodyLarge),
-                ),
+                Text('Saved views', style: theme.textTheme.bodyLarge),
                 if (!_loaded)
-                  const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: SizedBox.square(
+                      dimension: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   )
                 else ...[
                   TextButton.icon(
@@ -2898,7 +3102,7 @@ class _DataManagementCardState extends ConsumerState<_DataManagementCard> {
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
+                child: Wrap(
                   children: [
                     const SizedBox(width: 8),
                     TextButton.icon(
@@ -3026,8 +3230,11 @@ class _ShortcutRow extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
         children: [
           Text(desc, style: theme.textTheme.bodyMedium),
           Row(

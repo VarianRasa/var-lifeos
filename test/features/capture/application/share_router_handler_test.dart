@@ -55,7 +55,7 @@ void main() {
       expect(find.text('Incoming OS Share'), findsOneWidget);
       expect(find.text('https://example.com/shared'), findsOneWidget);
       expect(find.text('shared.png'), findsOneWidget);
-      final saveButton = tester.widget<ElevatedButton>(
+      final saveButton = tester.widget<FilledButton>(
         find.byKey(const Key('quick_capture_save_button')),
       );
       expect(saveButton.onPressed, isNull);

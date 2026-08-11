@@ -2359,220 +2359,234 @@ class _DayPreviewPanel extends ConsumerWidget {
         ? customTitle
         : DateFormat('EEEE, MMMM d').format(normalizedDay);
 
-    return Card(
-      key: const ValueKey('calendar-day-preview'),
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
+    return Semantics(
+      container: true,
+      label: 'Day preview',
+      child: Card(
+        key: const ValueKey('calendar-day-preview'),
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
+          side: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
-                          ),
-                          if (normalizedDay.isSameDay(today)) ...[
-                            const SizedBox(width: 8),
-                            const _PulsingDot(),
+                            if (normalizedDay.isSameDay(today)) ...[
+                              const SizedBox(width: 8),
+                              const _PulsingDot(),
+                            ],
                           ],
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        DateFormat('EEE, MMM d, y').format(normalizedDay),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  key: const ValueKey('calendar-quick-inbox-triage-button'),
-                  tooltip: 'Quick Inbox Triage',
-                  icon: const Icon(Icons.all_inbox_outlined),
-                  onPressed: () => showInboxTriageDialog(context),
-                ),
-                IconButton(
-                  key: const ValueKey('calendar-day-preview-close'),
-                  tooltip: 'Close preview',
-                  icon: const Icon(Icons.close),
-                  onPressed: onClose,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            nodesAsync.when(
-              loading: () => const Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: SkeletonAgendaList(itemCount: 3),
-                ),
-              ),
-              error: (error, stackTrace) => const Expanded(
-                child: AnimatedErrorState(error: 'Unable to load day preview'),
-              ),
-              data: (nodes) {
-                final visibleNodes = _applyCalendarFilters(
-                  nodes,
-                  query: normalizedQuery,
-                  typeFilters: typeFilters,
-                  doneOnly: doneOnly,
-                  advancedFilter: advancedFilter,
-                  today: today,
-                );
-                final summary = DayNodeSummary.fromNodes(
-                  normalizedDay,
-                  visibleNodes,
-                );
-                return Expanded(
-                  child: ListView(
-                    children: [
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          _SummaryChip(
-                            label: _countLabel(summary.totalCount),
-                            color: theme.colorScheme.primary,
-                          ),
-                          if (summary.doneCount > 0)
-                            _SummaryChip(
-                              label: '${summary.doneCount} done',
-                              color: theme.colorScheme.tertiary,
-                            ),
-                          if (summary.highPriorityCount > 0)
-                            _SummaryChip(
-                              label: '${summary.highPriorityCount} high',
-                              color: theme.colorScheme.secondary,
-                            ),
-                          if (summary.overdueCount > 0)
-                            _SummaryChip(
-                              label: '${summary.overdueCount} overdue',
-                              color: theme.colorScheme.error,
-                            ),
-                        ],
-                      ),
-                      if (searchQuery.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 4),
                         Text(
-                          'Matching "$searchQuery"',
+                          DateFormat('EEE, MMM d, y').format(normalizedDay),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
-                      if (allNodesAsync?.valueOrNull case final allNodes?) ...[
-                        const SizedBox(height: 12),
-                        TodayCockpitPanel(
-                          summary: TodayCockpitSummary.fromNodes(
-                            today: today,
-                            now: DateTime.now(),
-                            dayNodes: nodes,
-                            allNodes: allNodes,
-                          ),
-                          onTriageInbox: () => showInboxTriageDialog(context),
-                          onOpenDay: onOpenDay,
-                          onOpenNode: onOpenNode,
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('calendar-quick-inbox-triage-button'),
+                    tooltip: 'Quick Inbox Triage',
+                    icon: const Icon(Icons.all_inbox_outlined),
+                    onPressed: () => showInboxTriageDialog(context),
+                  ),
+                  IconButton(
+                    key: const ValueKey('calendar-day-preview-close'),
+                    tooltip: 'Close preview',
+                    icon: const Icon(Icons.close),
+                    onPressed: onClose,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              nodesAsync.when(
+                loading: () => const Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: SkeletonAgendaList(itemCount: 3),
+                  ),
+                ),
+                error: (error, stackTrace) => const Expanded(
+                  child: AnimatedErrorState(
+                    error: 'Unable to load day preview',
+                  ),
+                ),
+                data: (nodes) {
+                  final visibleNodes = _applyCalendarFilters(
+                    nodes,
+                    query: normalizedQuery,
+                    typeFilters: typeFilters,
+                    doneOnly: doneOnly,
+                    advancedFilter: advancedFilter,
+                    today: today,
+                  );
+                  final summary = DayNodeSummary.fromNodes(
+                    normalizedDay,
+                    visibleNodes,
+                  );
+                  return Expanded(
+                    child: ListView(
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _SummaryChip(
+                              label: _countLabel(summary.totalCount),
+                              color: theme.colorScheme.primary,
+                            ),
+                            if (summary.doneCount > 0)
+                              _SummaryChip(
+                                label: '${summary.doneCount} done',
+                                color: theme.colorScheme.tertiary,
+                              ),
+                            if (summary.highPriorityCount > 0)
+                              _SummaryChip(
+                                label: '${summary.highPriorityCount} high',
+                                color: theme.colorScheme.secondary,
+                              ),
+                            if (summary.overdueCount > 0)
+                              _SummaryChip(
+                                label: '${summary.overdueCount} overdue',
+                                color: theme.colorScheme.error,
+                              ),
+                          ],
                         ),
-                      ],
-                      const SizedBox(height: 12),
-                      _CollapsibleDayMindmapMiniMap(
-                        nodes: nodes,
-                        visibleNodeIds: visibleNodes
-                            .map((node) => node.id)
-                            .toSet(),
-                        onOpenDay: onOpenDay,
-                      ),
-                      const SizedBox(height: 12),
-                      if (visibleNodes.isEmpty)
-                        _DayPreviewEmptyState(
-                          hasQuery: searchQuery.isNotEmpty,
-                          onClearSearch: onClearSearch,
-                        )
-                      else
-                        for (
-                          var index = 0;
-                          index < visibleNodes.length;
-                          index++
-                        ) ...[
-                          if (index > 0) const SizedBox(height: 8),
-                          _DayPreviewNodeTile(
-                            node: visibleNodes[index],
-                            isSelected:
-                                visibleNodes[index].id == selectedNodeId,
-                            onTap: () {
-                              ref
-                                  .read(selectedAgendaNodeIdProvider.notifier)
-                                  .state = visibleNodes[index]
-                                  .id;
-                              onOpenNode(visibleNodes[index].id);
-                            },
+                        if (searchQuery.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Matching "$searchQuery"',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ],
+                        if (allNodesAsync?.valueOrNull
+                            case final allNodes?) ...[
+                          const SizedBox(height: 12),
+                          TodayCockpitPanel(
+                            summary: TodayCockpitSummary.fromNodes(
+                              today: today,
+                              now: DateTime.now(),
+                              dayNodes: nodes,
+                              allNodes: allNodes,
+                            ),
+                            onTriageInbox: () => showInboxTriageDialog(context),
+                            onOpenDay: onOpenDay,
+                            onOpenNode: onOpenNode,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        _CollapsibleDayMindmapMiniMap(
+                          nodes: nodes,
+                          visibleNodeIds: visibleNodes
+                              .map((node) => node.id)
+                              .toSet(),
+                          onOpenDay: onOpenDay,
+                        ),
+                        const SizedBox(height: 12),
+                        if (visibleNodes.isEmpty)
+                          _DayPreviewEmptyState(
+                            hasQuery: searchQuery.isNotEmpty,
+                            onClearSearch: onClearSearch,
+                          )
+                        else
+                          for (
+                            var index = 0;
+                            index < visibleNodes.length;
+                            index++
+                          ) ...[
+                            if (index > 0) const SizedBox(height: 8),
+                            _DayPreviewNodeTile(
+                              node: visibleNodes[index],
+                              isSelected:
+                                  visibleNodes[index].id == selectedNodeId,
+                              onTap: () {
+                                ref
+                                    .read(selectedAgendaNodeIdProvider.notifier)
+                                    .state = visibleNodes[index]
+                                    .id;
+                                onOpenNode(visibleNodes[index].id);
+                              },
+                            ),
+                          ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.tonalIcon(
+                      key: const ValueKey('calendar-day-preview-open-day'),
+                      onPressed: onOpenDay,
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('Open full day'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.outlined(
+                    key: const ValueKey('calendar-day-preview-add-node'),
+                    tooltip: 'Add node',
+                    icon: const Icon(Icons.add),
+                    onPressed: () => unawaited(onAddNode()),
+                  ),
+                  PopupMenuButton<_DayPreviewAction>(
+                    key: const ValueKey('calendar-day-preview-more-actions'),
+                    tooltip: 'More day actions',
+                    icon: const Icon(Icons.more_horiz),
+                    onSelected: (action) {
+                      switch (action) {
+                        case _DayPreviewAction.template:
+                          unawaited(onApplyTemplate());
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        key: ValueKey('calendar-day-preview-template'),
+                        value: _DayPreviewAction.template,
+                        child: ListTile(
+                          leading: Icon(Icons.dashboard_customize_outlined),
+                          title: Text('Apply template'),
+                          dense: true,
+                        ),
+                      ),
                     ],
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    key: const ValueKey('calendar-day-preview-open-day'),
-                    onPressed: onOpenDay,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open full day'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.outlined(
-                  key: const ValueKey('calendar-day-preview-add-node'),
-                  tooltip: 'Add node',
-                  icon: const Icon(Icons.add),
-                  onPressed: () => unawaited(onAddNode()),
-                ),
-                PopupMenuButton<_DayPreviewAction>(
-                  key: const ValueKey('calendar-day-preview-more-actions'),
-                  tooltip: 'More day actions',
-                  icon: const Icon(Icons.more_horiz),
-                  onSelected: (action) {
-                    switch (action) {
-                      case _DayPreviewAction.template:
-                        unawaited(onApplyTemplate());
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      key: ValueKey('calendar-day-preview-template'),
-                      value: _DayPreviewAction.template,
-                      child: ListTile(
-                        leading: Icon(Icons.dashboard_customize_outlined),
-                        title: Text('Apply template'),
-                        dense: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2654,6 +2668,7 @@ class _DayMindmapMiniMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
     final activeNodes = nodes.where((node) => !node.isArchived).toList();
     final connectionCount = activeNodes.fold<int>(
       0,
@@ -2662,7 +2677,7 @@ class _DayMindmapMiniMap extends StatelessWidget {
 
     return Material(
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.34),
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(tokens.radiusContainer),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onOpenDay,
@@ -2672,7 +2687,7 @@ class _DayMindmapMiniMap extends StatelessWidget {
             border: Border.all(
               color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
             ),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(tokens.radiusContainer),
           ),
           child: Stack(
             children: [

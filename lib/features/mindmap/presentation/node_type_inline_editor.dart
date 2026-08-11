@@ -86,10 +86,11 @@ MindmapNode applyNodeTypeInlineDraft(MindmapNode node, Object draft) {
     (NodeType.itinerary, final ItineraryPayload value) => value.toData(
       node.data,
     ),
-    (NodeType.empty, final Map<String, Object?> value) => <String, Object?>{
-      ...node.data,
-      ...value,
-    },
+    (
+      NodeType.empty || NodeType.frame || NodeType.swatch,
+      final Map<String, Object?> value,
+    ) =>
+      <String, Object?>{...node.data, ...value},
     _ => throw ArgumentError.value(
       draft,
       'draft',

@@ -4,10 +4,7 @@ class TrashedCanvasNode {
   final MindmapNode node;
   final DateTime deletedAt;
 
-  const TrashedCanvasNode({
-    required this.node,
-    required this.deletedAt,
-  });
+  const TrashedCanvasNode({required this.node, required this.deletedAt});
 }
 
 class CanvasTrashBin {
@@ -16,10 +13,7 @@ class CanvasTrashBin {
   List<TrashedCanvasNode> get items => List.unmodifiable(_items);
 
   void moveNodeToTrash(MindmapNode node) {
-    _items.add(TrashedCanvasNode(
-      node: node,
-      deletedAt: DateTime.now(),
-    ));
+    _items.add(TrashedCanvasNode(node: node, deletedAt: DateTime.now()));
   }
 
   MindmapNode? restoreNode(String nodeId) {

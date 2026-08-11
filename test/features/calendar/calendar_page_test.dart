@@ -175,6 +175,39 @@ void main() {
     );
   });
 
+  for (final width in <double>[320, 768, 1024, 1440]) {
+    testWidgets('CalendarPage stays usable at ${width.round()} width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final today = DateTime(2026, 6, 19);
+      final repository = InMemoryMindmapRepository();
+
+      await _pumpCalendar(tester, repository: repository, today: today);
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('calendar-actions-menu')),
+        findsOneWidget,
+      );
+      expect(find.text('Calendar'), findsOneWidget);
+      if (width < LayoutConstants.mobileBreakpoint) {
+        expect(
+          find.byKey(const ValueKey('calendar-mobile-search')),
+          findsOneWidget,
+        );
+      } else {
+        expect(
+          find.byKey(const ValueKey('calendar-search-field')),
+          findsOneWidget,
+        );
+      }
+    });
+  }
+
   testWidgets('CalendarPage today cell keeps the Today badge readable', (
     tester,
   ) async {
@@ -2112,6 +2145,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('calendar-day-preview')), findsOneWidget);
+    expect(find.bySemanticsLabel('Day preview'), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();

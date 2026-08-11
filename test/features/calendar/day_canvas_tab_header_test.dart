@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/features/calendar/widgets/day_canvas_tab_header.dart';
@@ -57,6 +59,65 @@ void main() {
       expect(addCalled, isTrue);
     },
   );
+
+  testWidgets('DayCanvasTabHeader stays accessible at 320 width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+    final now = DateTime(2026, 8, 5);
+    String? selectedId;
+    final boards = <CanvasBoard>[
+      CanvasBoard(
+        id: 'b1',
+        title: 'Main Canvas',
+        kind: CanvasBoardKind.daily,
+        createdAt: now,
+        updatedAt: now,
+        isPrimaryDayBoard: true,
+      ),
+      CanvasBoard(
+        id: 'b2',
+        title: 'Project Board',
+        kind: CanvasBoardKind.project,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DayCanvasTabHeader(
+            boards: boards,
+            activeBoardId: 'b1',
+            onSelectBoard: (id) => selectedId = id,
+            onAddBoard: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSemantics(find.text('Main Canvas')).flagsCollection.isSelected,
+      Tristate.isTrue,
+    );
+    await tester.drag(find.byType(ListView), const Offset(-120, 0));
+    await tester.pump();
+    await tester.tap(find.text('Project Board'));
+    expect(selectedId, 'b2');
+    final addButton = find.ancestor(
+      of: find.byIcon(Icons.add),
+      matching: find.byType(IconButton),
+    );
+    expect(tester.getSize(addButton).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(addButton).height, greaterThanOrEqualTo(44));
+    semantics.dispose();
+  });
 
   testWidgets(
     'DayCanvasTabHeader triggers onRenameBoard and onDeleteBoard from menu',

@@ -52,7 +52,10 @@ final class InMemoryCanvasBoardRepository implements CanvasBoardRepository {
   Future<List<CanvasBoard>> getBoardsForDay(String dayKeyString) async {
     final boards =
         _boards.values
-            .where((board) => board.day != null && dayKey(board.day!) == dayKeyString)
+            .where(
+              (board) =>
+                  board.day != null && dayKey(board.day!) == dayKeyString,
+            )
             .where((board) => !board.isTrashed)
             .toList()
           ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
@@ -111,8 +114,25 @@ final class InMemoryCanvasBoardRepository implements CanvasBoardRepository {
     String boardId,
     Iterable<CanvasObject> objects,
   ) async {
-    final board = _boards[boardId];
-    if (board == null) throw StateError('Canvas board not found: $boardId');
+    var board = _boards[boardId];
+    if (board == null) {
+      if (boardId.startsWith('daily:')) {
+        final dayString = boardId.substring(6);
+        final date = DateTime.tryParse(dayString);
+        if (date != null) {
+          board = CanvasBoard.daily(
+            day: date,
+            nodes: const [],
+            now: DateTime.now(),
+          );
+          _boards[boardId] = board;
+        } else {
+          throw StateError('Canvas board not found: $boardId');
+        }
+      } else {
+        throw StateError('Canvas board not found: $boardId');
+      }
+    }
     final replacements = <String, CanvasObject>{
       for (final object in objects) object.id: object,
     };
@@ -313,7 +333,22 @@ final class SembastCanvasBoardRepository implements CanvasBoardRepository {
   ) async {
     final db = await _db;
     if (!await _boardStore.record(boardId).exists(db)) {
-      throw StateError('Canvas board not found: $boardId');
+      if (boardId.startsWith('daily:')) {
+        final dayString = boardId.substring(6);
+        final date = DateTime.tryParse(dayString);
+        if (date != null) {
+          final board = CanvasBoard.daily(
+            day: date,
+            nodes: const [],
+            now: DateTime.now(),
+          );
+          await _saveBoard(db, board);
+        } else {
+          throw StateError('Canvas board not found: $boardId');
+        }
+      } else {
+        throw StateError('Canvas board not found: $boardId');
+      }
     }
     await db.transaction((transaction) async {
       for (final object in objects) {

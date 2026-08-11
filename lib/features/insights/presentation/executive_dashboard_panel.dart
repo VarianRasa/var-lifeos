@@ -33,12 +33,14 @@ class ExecutiveDashboardPanel extends StatelessWidget {
           color: theme.colorScheme.surfaceContainerHigh,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(tokens.radiusContainer),
+            side: BorderSide(color: theme.colorScheme.outlineVariant),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Stack(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 680;
+                final score = Stack(
                   alignment: Alignment.center,
                   children: [
                     SizedBox(
@@ -51,9 +53,9 @@ class ExecutiveDashboardPanel extends StatelessWidget {
                             theme.colorScheme.surfaceContainerHighest,
                         color: summary.healthIndexScore >= 70
                             ? semantic.success
-                            : (summary.healthIndexScore >= 40
-                                  ? semantic.warning
-                                  : semantic.danger),
+                            : summary.healthIndexScore >= 40
+                            ? semantic.warning
+                            : semantic.danger,
                       ),
                     ),
                     Text(
@@ -63,34 +65,56 @@ class ExecutiveDashboardPanel extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Life OS Executive Health Index',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                );
+                final details = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Life OS Executive Health Index',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${summary.totalActiveGoals} Active Goals • ${summary.totalHabits} Habits • ${summary.totalOverdueTasks} Overdue',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${summary.totalActiveGoals} Active Goals • ${summary.totalHabits} Habits • ${summary.totalOverdueTasks} Overdue',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
-                ),
-                FilledButton.icon(
+                    ),
+                  ],
+                );
+                final action = FilledButton.icon(
                   onPressed: onStartWeeklyReview,
                   icon: const Icon(Icons.rate_review_outlined, size: 16),
                   label: const Text('Weekly Review'),
-                ),
-              ],
+                );
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          score,
+                          const SizedBox(width: 16),
+                          Expanded(child: details),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      action,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    score,
+                    const SizedBox(width: 16),
+                    Expanded(child: details),
+                    action,
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -99,7 +123,7 @@ class ExecutiveDashboardPanel extends StatelessWidget {
         // 4 Domain Quad-Cards Grid
         LayoutBuilder(
           builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 600;
+            final columnCount = constraints.maxWidth < 680 ? 1 : 2;
             final cards = LifeOsArea.values.map((area) {
               final metrics = summary.areaMetrics[area]!;
               final iconData = switch (area) {
@@ -120,98 +144,98 @@ class ExecutiveDashboardPanel extends StatelessWidget {
 
               return InkWell(
                 onTap: () => onAreaTap(area),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: theme.colorScheme.outlineVariant.withValues(
-                        alpha: 0.5,
-                      ),
-                    ),
+                borderRadius: BorderRadius.circular(tokens.radiusContainer),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  color: theme.colorScheme.surfaceContainerLow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(tokens.radiusContainer),
+                    side: BorderSide(color: theme.colorScheme.outlineVariant),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(iconData, size: 18, color: color),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              area.label,
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(iconData, size: 18, color: color),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                area.label,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
-                          ),
-                          Text(
-                            '${metrics.totalNodes} items',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                            Text(
+                              '${metrics.totalNodes} items',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _MetricStatTile(
-                            label: 'Tasks Done',
-                            value:
-                                '${metrics.completedTasks}/${metrics.totalTasks}',
-                          ),
-                          _MetricStatTile(
-                            label: 'Goal Progress',
-                            value:
-                                '${(metrics.averageGoalProgress * 100).round()}%',
-                          ),
-                          _MetricStatTile(
-                            label: 'Habits',
-                            value: '${metrics.activeHabits}',
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: metrics.taskCompletionRate,
-                          minHeight: 4,
-                          color: color,
-                          backgroundColor:
-                              theme.colorScheme.surfaceContainerHighest,
+                          ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 8,
+                          children: [
+                            _MetricStatTile(
+                              label: 'Tasks Done',
+                              value:
+                                  '${metrics.completedTasks}/${metrics.totalTasks}',
+                            ),
+                            _MetricStatTile(
+                              label: 'Goal Progress',
+                              value:
+                                  '${(metrics.averageGoalProgress * 100).round()}%',
+                            ),
+                            _MetricStatTile(
+                              label: 'Habits',
+                              value: '${metrics.activeHabits}',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: metrics.taskCompletionRate,
+                            minHeight: 4,
+                            color: color,
+                            backgroundColor:
+                                theme.colorScheme.surfaceContainerHighest,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
             }).toList();
 
-            if (isWide) {
-              return GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.2,
-                children: cards,
-              );
-            } else {
+            if (columnCount == 1) {
               return Column(
                 children: [
                   for (final card in cards) ...[
                     card,
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                   ],
                 ],
               );
             }
+            return GridView.count(
+              crossAxisCount: columnCount,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: constraints.maxWidth >= 1024 ? 2.6 : 2.2,
+              children: cards,
+            );
           },
         ),
       ],

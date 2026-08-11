@@ -35,91 +35,100 @@ class PomodoroTimerDial extends StatelessWidget {
               ? semantic.info
               : semantic.warning);
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 240,
-          height: 240,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CustomPaint(
-                size: const Size(240, 240),
-                painter: _TimerDialPainter(
-                  progress: timerState.progress,
-                  color: phaseColor,
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                ),
+    final remaining = _formatTime(timerState.remainingSeconds);
+    return Semantics(
+      key: const ValueKey('pomodoro-timer-semantics'),
+      container: true,
+      explicitChildNodes: true,
+      label: 'Focus timer',
+      value:
+          '${timerState.phase.label}, $remaining remaining, '
+          '${timerState.isRunning ? 'running' : 'paused'}',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 240, maxWidth: 320),
+            child: CustomPaint(
+              painter: _TimerDialPainter(
+                progress: timerState.progress,
+                color: phaseColor,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
               ),
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: phaseColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      timerState.phase.label.toUpperCase(),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: phaseColor,
-                        letterSpacing: 1.2,
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: phaseColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        timerState.phase.label.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: phaseColor,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _formatTime(timerState.remainingSeconds),
-                    style: theme.textTheme.displayMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
+                    const SizedBox(height: 12),
+                    Text(
+                      remaining,
+                      style: theme.textTheme.displayMedium?.copyWith(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Sesi ${timerState.completedSessionsCount + 1}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sesi ${timerState.completedSessionsCount + 1}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton.filledTonal(
+                iconSize: 24,
+                tooltip: 'Reset',
+                icon: const Icon(Icons.replay),
+                onPressed: onReset,
+              ),
+              const SizedBox(width: 16),
+              IconButton.filled(
+                iconSize: 36,
+                tooltip: timerState.isRunning ? 'Pause' : 'Start',
+                icon: Icon(
+                  timerState.isRunning ? Icons.pause : Icons.play_arrow,
+                ),
+                onPressed: onStartPause,
+              ),
+              const SizedBox(width: 16),
+              IconButton.filledTonal(
+                iconSize: 24,
+                tooltip: 'Skip',
+                icon: const Icon(Icons.skip_next),
+                onPressed: onSkip,
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 24),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton.filledTonal(
-              iconSize: 24,
-              tooltip: 'Reset',
-              icon: const Icon(Icons.replay),
-              onPressed: onReset,
-            ),
-            const SizedBox(width: 16),
-            IconButton.filled(
-              iconSize: 36,
-              tooltip: timerState.isRunning ? 'Pause' : 'Start',
-              icon: Icon(timerState.isRunning ? Icons.pause : Icons.play_arrow),
-              onPressed: onStartPause,
-            ),
-            const SizedBox(width: 16),
-            IconButton.filledTonal(
-              iconSize: 24,
-              tooltip: 'Skip',
-              icon: const Icon(Icons.skip_next),
-              onPressed: onSkip,
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -645,6 +645,7 @@ final class IdeaPayload {
     'spark',
     'exploring',
     'validated',
+    'executed',
     'archived',
   ];
   static const List<String> levels = <String>['low', 'medium', 'high'];
@@ -852,6 +853,44 @@ final class DecisionCriterion {
   };
 }
 
+final class DecisionRisk {
+  const DecisionRisk({
+    required this.id,
+    required this.title,
+    this.probability = 1,
+    this.impact = 1,
+  });
+
+  factory DecisionRisk.fromMap(Map<String, Object?> map) => DecisionRisk(
+    id: _text(map['id']),
+    title: _text(map['title']),
+    probability: _integer(map['probability']) ?? 1,
+    impact: _integer(map['impact']) ?? 1,
+  );
+
+  final String id;
+  final String title;
+  final int probability;
+  final int impact;
+
+  int get exposure => probability * impact;
+
+  DecisionRisk copyWith({String? title, int? probability, int? impact}) =>
+      DecisionRisk(
+        id: id,
+        title: title ?? this.title,
+        probability: probability ?? this.probability,
+        impact: impact ?? this.impact,
+      );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'title': title,
+    'probability': probability,
+    'impact': impact,
+  };
+}
+
 final class DecisionOption {
   const DecisionOption({
     required this.id,
@@ -860,6 +899,7 @@ final class DecisionOption {
     this.pros = const <String>[],
     this.cons = const <String>[],
     this.risks = const <String>[],
+    this.riskAssessments = const <DecisionRisk>[],
     this.scores = const <String, int>{},
   });
 
@@ -870,6 +910,10 @@ final class DecisionOption {
     pros: _strings(map['pros']),
     cons: _strings(map['cons']),
     risks: _strings(map['risks']),
+    riskAssessments: <DecisionRisk>[
+      for (final risk in _maps(map['riskAssessments']))
+        DecisionRisk.fromMap(risk),
+    ],
     scores: <String, int>{
       for (final entry in _section(map, 'scores').entries)
         entry.key: ?_integer(entry.value),
@@ -882,7 +926,11 @@ final class DecisionOption {
   final List<String> pros;
   final List<String> cons;
   final List<String> risks;
+  final List<DecisionRisk> riskAssessments;
   final Map<String, int> scores;
+
+  int get riskExposure =>
+      riskAssessments.fold<int>(0, (total, risk) => total + risk.exposure);
 
   DecisionOption copyWith({
     String? id,
@@ -891,6 +939,7 @@ final class DecisionOption {
     List<String>? pros,
     List<String>? cons,
     List<String>? risks,
+    List<DecisionRisk>? riskAssessments,
     Map<String, int>? scores,
   }) => DecisionOption(
     id: id ?? this.id,
@@ -899,6 +948,7 @@ final class DecisionOption {
     pros: pros ?? this.pros,
     cons: cons ?? this.cons,
     risks: risks ?? this.risks,
+    riskAssessments: riskAssessments ?? this.riskAssessments,
     scores: scores ?? this.scores,
   );
 
@@ -909,7 +959,51 @@ final class DecisionOption {
     'pros': pros,
     'cons': cons,
     'risks': risks,
+    'riskAssessments': <Map<String, Object?>>[
+      for (final risk in riskAssessments) risk.toJson(),
+    ],
     'scores': scores,
+  };
+}
+
+final class DecisionReviewEntry {
+  const DecisionReviewEntry({
+    required this.id,
+    required this.date,
+    required this.notes,
+    this.rating,
+  });
+
+  factory DecisionReviewEntry.fromMap(Map<String, Object?> map) =>
+      DecisionReviewEntry(
+        id: _text(map['id']),
+        date: _text(map['date']),
+        notes: _text(map['notes']),
+        rating: _integer(map['rating']),
+      );
+
+  final String id;
+  final String date;
+  final String notes;
+  final int? rating;
+
+  DecisionReviewEntry copyWith({
+    String? date,
+    String? notes,
+    int? rating,
+    bool clearRating = false,
+  }) => DecisionReviewEntry(
+    id: id,
+    date: date ?? this.date,
+    notes: notes ?? this.notes,
+    rating: clearRating ? null : rating ?? this.rating,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'date': date,
+    'notes': notes,
+    if (rating != null) 'rating': rating,
   };
 }
 
@@ -929,6 +1023,7 @@ final class DecisionPayload {
     this.assumptions = '',
     this.expectedOutcome = '',
     this.reviewNotes = '',
+    this.reviewEntries = const <DecisionReviewEntry>[],
   });
 
   factory DecisionPayload.fromNode(MindmapNode node) {
@@ -980,6 +1075,10 @@ final class DecisionPayload {
       assumptions: _text(section['assumptions']),
       expectedOutcome: _text(section['expectedOutcome']),
       reviewNotes: _text(section['reviewNotes']),
+      reviewEntries: <DecisionReviewEntry>[
+        for (final entry in _maps(section['reviewEntries']))
+          DecisionReviewEntry.fromMap(entry),
+      ],
     );
   }
 
@@ -1005,6 +1104,7 @@ final class DecisionPayload {
   final String assumptions;
   final String expectedOutcome;
   final String reviewNotes;
+  final List<DecisionReviewEntry> reviewEntries;
 
   DecisionOption? get selectedOption =>
       options.where((option) => option.id == selectedOptionId).firstOrNull;
@@ -1080,6 +1180,7 @@ final class DecisionPayload {
     String? assumptions,
     String? expectedOutcome,
     String? reviewNotes,
+    List<DecisionReviewEntry>? reviewEntries,
   }) => DecisionPayload(
     status: status ?? this.status,
     question: question ?? this.question,
@@ -1097,6 +1198,7 @@ final class DecisionPayload {
     assumptions: assumptions ?? this.assumptions,
     expectedOutcome: expectedOutcome ?? this.expectedOutcome,
     reviewNotes: reviewNotes ?? this.reviewNotes,
+    reviewEntries: reviewEntries ?? this.reviewEntries,
   );
 
   DecisionPayload removeCriterion(String criterionId) => copyWith(
@@ -1140,6 +1242,9 @@ final class DecisionPayload {
         'assumptions': assumptions,
         'expectedOutcome': expectedOutcome,
         'reviewNotes': reviewNotes,
+        'reviewEntries': <Map<String, Object?>>[
+          for (final entry in reviewEntries) entry.toJson(),
+        ],
       }),
       'options': options.map((option) => option.title).join('\n'),
       'criteria': criteria.map((criterion) => criterion.name).join('\n'),
@@ -1183,6 +1288,27 @@ final class DecisionPayload {
         if (entry.value < 1 || entry.value > 10) {
           errors.add('Option score must be from 1 to 10.');
         }
+      }
+      for (final risk in option.riskAssessments) {
+        if (risk.id.trim().isEmpty || risk.title.trim().isEmpty) {
+          errors.add('Decision risk ID and title are required.');
+        }
+        if (risk.probability < 1 ||
+            risk.probability > 5 ||
+            risk.impact < 1 ||
+            risk.impact > 5) {
+          errors.add('Decision risk probability and impact must be 1 to 5.');
+        }
+      }
+    }
+    for (final entry in reviewEntries) {
+      if (entry.id.trim().isEmpty ||
+          !_isIsoDate(entry.date) ||
+          entry.notes.trim().isEmpty) {
+        errors.add('Decision review entry is invalid.');
+      }
+      if (entry.rating != null && (entry.rating! < 1 || entry.rating! > 5)) {
+        errors.add('Decision review rating must be 1 to 5.');
       }
     }
     if (selectedOptionId.isNotEmpty && !optionIds.contains(selectedOptionId)) {
@@ -1613,6 +1739,8 @@ final class MetricPayload {
   ];
 }
 
+enum ExpenseTransactionType { expense, income }
+
 final class ExpensePayload {
   const ExpensePayload({
     this.amount,
@@ -1620,6 +1748,7 @@ final class ExpensePayload {
     this.merchant = '',
     this.payment = '',
     this.currency = '',
+    this.transactionType = ExpenseTransactionType.expense,
     this.receipts = const [],
   });
   factory ExpensePayload.fromNode(MindmapNode node) => ExpensePayload(
@@ -1628,6 +1757,11 @@ final class ExpensePayload {
     merchant: _text(node.data['merchant']),
     payment: _text(node.data['payment']),
     currency: _text(node.data['currency']),
+    transactionType:
+        ExpenseTransactionType.values
+            .where((value) => value.name == _text(node.data['transactionType']))
+            .firstOrNull ??
+        ExpenseTransactionType.expense,
     receipts: _maps(_section(node.data, 'expense')['receipts'])
         .map(ResourceAsset.fromJson)
         .where((asset) => asset.attachmentId.isNotEmpty)
@@ -1638,6 +1772,7 @@ final class ExpensePayload {
   final String merchant;
   final String payment;
   final String currency;
+  final ExpenseTransactionType transactionType;
   final List<ResourceAsset> receipts;
   ExpensePayload copyWith({
     double? amount,
@@ -1645,6 +1780,7 @@ final class ExpensePayload {
     String? merchant,
     String? payment,
     String? currency,
+    ExpenseTransactionType? transactionType,
     List<ResourceAsset>? receipts,
     bool clearAmount = false,
   }) => ExpensePayload(
@@ -1653,6 +1789,7 @@ final class ExpensePayload {
     merchant: merchant ?? this.merchant,
     payment: payment ?? this.payment,
     currency: currency ?? this.currency,
+    transactionType: transactionType ?? this.transactionType,
     receipts: receipts ?? this.receipts,
   );
   Map<String, Object?> toData(Map<String, Object?> data) => {
@@ -1662,6 +1799,7 @@ final class ExpensePayload {
     'merchant': merchant,
     'payment': payment,
     'currency': currency.trim().toUpperCase(),
+    'transactionType': transactionType.name,
     'expense': {
       ..._section(data, 'expense'),
       'version': 1,
@@ -1851,6 +1989,76 @@ String _normalizeWeatherUnit(String value) {
   return normalized.contains('F') ? '°F' : '°C';
 }
 
+final class FitnessWorkoutSet {
+  const FitnessWorkoutSet({
+    required this.id,
+    required this.reps,
+    this.weight,
+    this.completed = false,
+  });
+
+  factory FitnessWorkoutSet.fromMap(Map<String, Object?> map) =>
+      FitnessWorkoutSet(
+        id: _text(map['id']),
+        reps: _integer(map['reps']) ?? 0,
+        weight: _number(map['weight']),
+        completed: map['completed'] == true,
+      );
+
+  final String id;
+  final int reps;
+  final double? weight;
+  final bool completed;
+
+  FitnessWorkoutSet copyWith({
+    int? reps,
+    double? weight,
+    bool clearWeight = false,
+    bool? completed,
+  }) => FitnessWorkoutSet(
+    id: id,
+    reps: reps ?? this.reps,
+    weight: clearWeight ? null : weight ?? this.weight,
+    completed: completed ?? this.completed,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'reps': reps,
+    if (weight != null) 'weight': weight,
+    'completed': completed,
+  };
+}
+
+final class FitnessExercise {
+  const FitnessExercise({
+    required this.id,
+    required this.name,
+    this.sets = const <FitnessWorkoutSet>[],
+  });
+
+  factory FitnessExercise.fromMap(Map<String, Object?> map) => FitnessExercise(
+    id: _text(map['id']),
+    name: _text(map['name']),
+    sets: <FitnessWorkoutSet>[
+      for (final item in _maps(map['sets'])) FitnessWorkoutSet.fromMap(item),
+    ],
+  );
+
+  final String id;
+  final String name;
+  final List<FitnessWorkoutSet> sets;
+
+  FitnessExercise copyWith({String? name, List<FitnessWorkoutSet>? sets}) =>
+      FitnessExercise(id: id, name: name ?? this.name, sets: sets ?? this.sets);
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'sets': <Map<String, Object?>>[for (final set in sets) set.toJson()],
+  };
+}
+
 final class FitPayload {
   const FitPayload({
     this.steps,
@@ -1872,6 +2080,7 @@ final class FitPayload {
     this.syncedAt = '',
     this.waterUnit = 'L',
     this.distanceUnit = 'km',
+    this.exercises = const <FitnessExercise>[],
   });
   factory FitPayload.fromNode(MindmapNode node) => FitPayload(
     steps: _number(node.data['steps']),
@@ -1911,6 +2120,10 @@ final class FitPayload {
     syncedAt: _text(node.data['fitSyncedAt']),
     waterUnit: _text(node.data['waterUnit'], fallback: 'L'),
     distanceUnit: _text(node.data['distanceUnit'], fallback: 'km'),
+    exercises: <FitnessExercise>[
+      for (final item in _maps(_section(node.data, 'fitness')['exercises']))
+        FitnessExercise.fromMap(item),
+    ],
   );
   final double? steps;
   final double stepGoal;
@@ -1931,6 +2144,7 @@ final class FitPayload {
   final String syncedAt;
   final String waterUnit;
   final String distanceUnit;
+  final List<FitnessExercise> exercises;
   FitPayload copyWith({
     double? steps,
     double? stepGoal,
@@ -1951,6 +2165,7 @@ final class FitPayload {
     String? syncedAt,
     String? waterUnit,
     String? distanceUnit,
+    List<FitnessExercise>? exercises,
     bool clearSteps = false,
     bool clearWater = false,
     bool clearDistance = false,
@@ -1982,6 +2197,7 @@ final class FitPayload {
     syncedAt: syncedAt ?? this.syncedAt,
     waterUnit: waterUnit ?? this.waterUnit,
     distanceUnit: distanceUnit ?? this.distanceUnit,
+    exercises: exercises ?? this.exercises,
   );
   Map<String, Object?> toData(Map<String, Object?> data) {
     final result = Map<String, Object?>.from(data)
@@ -2012,26 +2228,60 @@ final class FitPayload {
       ..['waterUnit'] = waterUnit.trim().isEmpty ? 'L' : waterUnit.trim()
       ..['distanceUnit'] = distanceUnit.trim().isEmpty
           ? 'km'
-          : distanceUnit.trim();
+          : distanceUnit.trim()
+      ..['fitness'] = <String, Object?>{
+        ..._section(data, 'fitness'),
+        'version': 1,
+        'exercises': <Map<String, Object?>>[
+          for (final exercise in exercises) exercise.toJson(),
+        ],
+      };
     return result;
   }
 
-  List<String> validate({required String title}) => [
-    ...NodeValidation.requiredTitle(title),
-    ...NodeValidation.number(steps, min: 0),
-    ...NodeValidation.number(stepGoal, min: 1),
-    ...NodeValidation.number(water, min: 0),
-    ...NodeValidation.number(waterGoal, min: 0.01),
-    ...NodeValidation.number(distance, min: 0),
-    ...NodeValidation.number(durationMinutes, min: 0),
-    ...NodeValidation.number(durationGoalMinutes, min: 1),
-    ...NodeValidation.number(calories, min: 0),
-    ...NodeValidation.number(calorieGoal, min: 1),
-    ...NodeValidation.number(sleepHours, min: 0, max: 24),
-    ...NodeValidation.number(restingHeartRate, min: 20, max: 250),
-    if (!{'low', 'moderate', 'high'}.contains(intensity.trim().toLowerCase()))
-      'Fitness intensity is invalid.',
-  ];
+  List<String> validate({required String title}) {
+    final errors = <String>[
+      ...NodeValidation.requiredTitle(title),
+      if (steps != null) ...NodeValidation.number(steps, min: 0),
+      ...NodeValidation.number(stepGoal, min: 1),
+      if (water != null) ...NodeValidation.number(water, min: 0),
+      ...NodeValidation.number(waterGoal, min: 0.01),
+      if (distance != null) ...NodeValidation.number(distance, min: 0),
+      if (durationMinutes != null)
+        ...NodeValidation.number(durationMinutes, min: 0),
+      ...NodeValidation.number(durationGoalMinutes, min: 1),
+      if (calories != null) ...NodeValidation.number(calories, min: 0),
+      ...NodeValidation.number(calorieGoal, min: 1),
+      if (sleepHours != null)
+        ...NodeValidation.number(sleepHours, min: 0, max: 24),
+      if (restingHeartRate != null)
+        ...NodeValidation.number(restingHeartRate, min: 20, max: 250),
+      if (!{'low', 'moderate', 'high'}.contains(intensity.trim().toLowerCase()))
+        'Fitness intensity is invalid.',
+    ];
+    final exerciseIds = <String>{};
+    for (final exercise in exercises) {
+      if (exercise.id.trim().isEmpty || exercise.name.trim().isEmpty) {
+        errors.add('Fitness exercise is invalid.');
+      }
+      if (!exerciseIds.add(exercise.id)) {
+        errors.add('Fitness exercise IDs must be unique.');
+      }
+      final setIds = <String>{};
+      for (final set in exercise.sets) {
+        if (set.id.trim().isEmpty || set.reps < 1 || set.reps > 1000) {
+          errors.add('Fitness workout set is invalid.');
+        }
+        if (!setIds.add(set.id)) {
+          errors.add('Fitness workout set IDs must be unique per exercise.');
+        }
+        if (set.weight != null && (!set.weight!.isFinite || set.weight! < 0)) {
+          errors.add('Fitness workout weight is invalid.');
+        }
+      }
+    }
+    return errors;
+  }
 }
 
 String _normalizeFitIntensity(String value) =>
@@ -3307,6 +3557,7 @@ final class CanvasPayload {
     this.schemaVersion = 1,
     this.background = 'plain',
     this.elements = const <CanvasElement>[],
+    this.elementGroups = const <String, String>{},
     this.activeTool = 'select',
     this.penColor = 'violet',
     this.penWidth = 3,
@@ -3335,6 +3586,11 @@ final class CanvasPayload {
         fallback: 'plain',
       ),
       elements: migrated,
+      elementGroups: <String, String>{
+        for (final entry in _section(section, 'elementGroups').entries)
+          if (_text(entry.value).trim().isNotEmpty)
+            entry.key: _text(entry.value).trim(),
+      },
       activeTool: _text(section['activeTool'], fallback: 'select'),
       penColor: _text(section['penColor'], fallback: 'violet'),
       penWidth: _number(section['penWidth']) ?? 3,
@@ -3347,6 +3603,7 @@ final class CanvasPayload {
   final int schemaVersion;
   final String background;
   final List<CanvasElement> elements;
+  final Map<String, String> elementGroups;
   final String activeTool;
   final String penColor;
   final double penWidth;
@@ -3366,23 +3623,36 @@ final class CanvasPayload {
     int? schemaVersion,
     String? background,
     List<CanvasElement>? elements,
+    Map<String, String>? elementGroups,
     String? activeTool,
     String? penColor,
     double? penWidth,
     List<String>? strokes,
     CanvasBlockDocument? blocks,
     String? viewMode,
-  }) => CanvasPayload(
-    schemaVersion: schemaVersion ?? this.schemaVersion,
-    background: background ?? this.background,
-    elements: elements ?? this.elements,
-    activeTool: activeTool ?? this.activeTool,
-    penColor: penColor ?? this.penColor,
-    penWidth: penWidth ?? this.penWidth,
-    strokes: strokes ?? this.strokes,
-    blocks: blocks ?? this.blocks,
-    viewMode: viewMode ?? this.viewMode,
-  );
+  }) {
+    final nextElements = elements ?? this.elements;
+    final ids = nextElements.map((element) => element.id).toSet();
+    final groups = elementGroups ?? this.elementGroups;
+    return CanvasPayload(
+      schemaVersion: schemaVersion ?? this.schemaVersion,
+      background: background ?? this.background,
+      elements: nextElements,
+      elementGroups: <String, String>{
+        for (final entry in groups.entries)
+          if (ids.contains(entry.key) && entry.value.trim().isNotEmpty)
+            entry.key: entry.value.trim(),
+      },
+      activeTool: activeTool ?? this.activeTool,
+      penColor: penColor ?? this.penColor,
+      penWidth: penWidth ?? this.penWidth,
+      strokes: elements != null && nextElements.isEmpty
+          ? const <String>[]
+          : strokes ?? this.strokes,
+      blocks: blocks ?? this.blocks,
+      viewMode: viewMode ?? this.viewMode,
+    );
+  }
 
   Map<String, Object?> toData(Map<String, Object?> data) {
     final legacy = <String>[
@@ -3396,6 +3666,7 @@ final class CanvasPayload {
         'elements': <Map<String, Object?>>[
           for (final element in elements) element.toJson(),
         ],
+        'elementGroups': elementGroups,
         'activeTool': activeTool,
         'penColor': penColor,
         'penWidth': penWidth,
@@ -3522,6 +3793,10 @@ final class CanvasPayload {
         case CanvasUnknownElement():
           errors.add('Canvas element type is unsupported.');
       }
+    }
+    if (elementGroups.keys.any((id) => !ids.contains(id)) ||
+        elementGroups.values.any((group) => group.trim().isEmpty)) {
+      errors.add('Canvas element group is invalid.');
     }
     return List<String>.unmodifiable(errors);
   }

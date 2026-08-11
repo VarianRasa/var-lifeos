@@ -54,7 +54,7 @@ void main() {
         final saveButtonFinder = find.byKey(
           const Key('quick_capture_save_button'),
         );
-        final saveButton = tester.widget<ElevatedButton>(saveButtonFinder);
+        final saveButton = tester.widget<FilledButton>(saveButtonFinder);
         expect(saveButton.onPressed, isNull);
       },
     );
@@ -79,7 +79,7 @@ void main() {
       await tester.tap(find.text('Inbox Board (main-workspace)').last);
       await tester.pumpAndSettle();
 
-      final saveButton = tester.widget<ElevatedButton>(
+      final saveButton = tester.widget<FilledButton>(
         find.byKey(const Key('quick_capture_save_button')),
       );
       expect(saveButton.onPressed, isNotNull);
@@ -109,12 +109,59 @@ void main() {
         expect(find.text('Duplicate content detected'), findsOneWidget);
         expect(find.text('Open Existing'), findsOneWidget);
         expect(find.text('Create Copy'), findsOneWidget);
-        final saveButton = tester.widget<ElevatedButton>(
+        final saveButton = tester.widget<FilledButton>(
           find.byKey(const Key('quick_capture_save_button')),
         );
         expect(saveButton.onPressed, isNull);
       },
     );
+
+    testWidgets('capture fits compact width and exposes native save action', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(buildTestableWidget());
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('quick_capture_save_button')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('duplicate warning is live and copy uses filled action', (
+      tester,
+    ) async {
+      final existingNode = MindmapNode.create(
+        id: 'existing-node-live',
+        title: 'https://example.com/duplicate',
+        type: NodeType.link,
+        day: DateTime.now(),
+        data: {'url': 'https://example.com/duplicate'},
+      );
+      await mindmapRepository.saveNode(existingNode);
+      await tester.pumpWidget(buildTestableWidget());
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('quick_capture_url_field')),
+        'https://example.com/duplicate',
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .getSemantics(find.text('Duplicate content detected'))
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+      expect(find.widgetWithText(FilledButton, 'Create Copy'), findsOneWidget);
+    });
 
     testWidgets('creates new node via CaptureService on save', (tester) async {
       await tester.pumpWidget(buildTestableWidget());

@@ -37,9 +37,7 @@ class CanvasFileDropHandler {
       ).toData({});
     } else if (['.mp4', '.mov', '.webm'].contains(ext)) {
       type = NodeType.video;
-      data = VideoPayload(
-        fileName: fileName,
-      ).toData();
+      data = VideoPayload(fileName: fileName).toData();
     } else {
       type = NodeType.link;
       data = {

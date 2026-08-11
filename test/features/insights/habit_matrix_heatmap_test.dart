@@ -5,6 +5,45 @@ import 'package:var_app/features/insights/presentation/habit_matrix_heatmap.dart
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 
 void main() {
+  testWidgets('heatmap scrolls at narrow width with chart semantics', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(640, 1200);
+    tester.view.devicePixelRatio = 2;
+    final habitNode = MindmapNode.create(
+      id: 'habit-narrow',
+      type: NodeType.habit,
+      title: 'Olahraga',
+      day: DateTime(2026, 7, 23),
+      data: const {
+        'habit': {
+          'completions': ['2026-07-23', '2026-07-22'],
+        },
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: HabitMatrixHeatmap(habitNodes: [habitNode]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.bySemanticsLabel('Habit matrix heatmap'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.bySemanticsLabel('Habit matrix heatmap'),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('HabitMatrixHeatmap renders successfully with empty nodes', (
     tester,
   ) async {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_design_tokens.dart';
+
 class MultiSelectActionBar extends StatelessWidget {
   final int selectedCount;
   final VoidCallback? onGroupIntoFrame;
@@ -21,55 +23,103 @@ class MultiSelectActionBar extends StatelessWidget {
     if (selectedCount < 2) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-
-    return Material(
-      elevation: 8,
-      borderRadius: BorderRadius.circular(30),
-      color: theme.colorScheme.surfaceContainerHigh,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                '$selectedCount selected',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onPrimaryContainer,
+    final tokens = AppDesignTokens.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 480;
+        return DecoratedBox(
+          key: const ValueKey('multi-select-action-bar'),
+          decoration: ShapeDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            shadows: tokens.shadowMedium,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(tokens.radiusContainer),
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 8, 8),
+            child: Row(
+              mainAxisSize: compact ? MainAxisSize.max : MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Semantics(
+                    liveRegion: true,
+                    label: '$selectedCount items selected',
+                    excludeSemantics: true,
+                    child: Text(
+                      '$selectedCount selected',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                if (compact)
+                  MenuAnchor(
+                    menuChildren: [
+                      MenuItemButton(
+                        onPressed: onGroupIntoFrame,
+                        leadingIcon: const Icon(Icons.crop_free),
+                        child: const Text('Group into frame'),
+                      ),
+                      MenuItemButton(
+                        onPressed: onChangeColor,
+                        leadingIcon: const Icon(Icons.palette_outlined),
+                        child: const Text('Change color'),
+                      ),
+                      MenuItemButton(
+                        onPressed: onDeleteSelected,
+                        leadingIcon: const Icon(Icons.delete_outline),
+                        child: const Text('Delete selected'),
+                      ),
+                      MenuItemButton(
+                        onPressed: onClearSelection,
+                        leadingIcon: const Icon(Icons.close),
+                        child: const Text('Clear selection'),
+                      ),
+                    ],
+                    builder: (context, controller, child) => IconButton(
+                      constraints: BoxConstraints(
+                        minWidth: tokens.minimumTarget,
+                        minHeight: tokens.minimumTarget,
+                      ),
+                      tooltip: 'Selection actions',
+                      onPressed: () => controller.isOpen
+                          ? controller.close()
+                          : controller.open(),
+                      icon: const Icon(Icons.more_vert),
+                    ),
+                  )
+                else ...[
+                  IconButton(
+                    tooltip: 'Group into frame',
+                    onPressed: onGroupIntoFrame,
+                    icon: const Icon(Icons.crop_free, size: 20),
+                  ),
+                  IconButton(
+                    tooltip: 'Change color',
+                    onPressed: onChangeColor,
+                    icon: const Icon(Icons.palette_outlined, size: 20),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete selected',
+                    onPressed: onDeleteSelected,
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                  ),
+                  IconButton(
+                    tooltip: 'Clear selection',
+                    onPressed: onClearSelection,
+                    icon: const Icon(Icons.close, size: 18),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(width: 12),
-            IconButton(
-              icon: const Icon(Icons.crop_free, size: 20),
-              tooltip: 'Group into Frame',
-              onPressed: onGroupIntoFrame,
-            ),
-            IconButton(
-              icon: const Icon(Icons.palette_outlined, size: 20),
-              tooltip: 'Change Color',
-              onPressed: onChangeColor,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20),
-              tooltip: 'Delete Selected',
-              onPressed: onDeleteSelected,
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.close, size: 18),
-              tooltip: 'Clear Selection',
-              onPressed: onClearSelection,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

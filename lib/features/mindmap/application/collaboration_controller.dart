@@ -1088,7 +1088,13 @@ class CollaborationNotifier extends StateNotifier<CollaborationState>
         'Node not found.',
       );
     }
-    await repository.bindAndPublish(latest, session);
+    final usesLatest = node == latest;
+    final publishNode = usesLatest ? latest : node;
+    await repository.bindAndPublish(
+      publishNode,
+      session,
+      persistLocally: usesLatest,
+    );
     await _nodeSyncService?.drain();
     _invalidateNodeCollaboration(session.roomId, node.id);
   }

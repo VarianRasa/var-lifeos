@@ -21,10 +21,7 @@ class ConnectorLineData {
 class CanvasConnectorLineWidget extends StatelessWidget {
   final ConnectorLineData line;
 
-  const CanvasConnectorLineWidget({
-    super.key,
-    required this.line,
-  });
+  const CanvasConnectorLineWidget({super.key, required this.line});
 
   @override
   Widget build(BuildContext context) {
@@ -56,9 +53,7 @@ class CanvasConnectorLineWidget extends StatelessWidget {
               ),
               child: Text(
                 line.label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
-                ),
+                style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
               ),
             ),
           ),

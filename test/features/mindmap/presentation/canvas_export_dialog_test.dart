@@ -33,9 +33,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(
-          body: CanvasExportDialog(title: 'Sprint Board'),
-        ),
+        home: Scaffold(body: CanvasExportDialog(title: 'Sprint Board')),
       ),
     );
 

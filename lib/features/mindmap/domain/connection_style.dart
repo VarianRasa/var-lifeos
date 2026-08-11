@@ -22,13 +22,13 @@ class ConnectionStyle {
   });
 
   Map<String, dynamic> toJson() => {
-        'lineType': lineType.name,
-        'linePattern': linePattern.name,
-        'arrowhead': arrowhead.name,
-        'colorHex': colorHex,
-        'strokeWidth': strokeWidth,
-        'label': label,
-      };
+    'lineType': lineType.name,
+    'linePattern': linePattern.name,
+    'arrowhead': arrowhead.name,
+    'colorHex': colorHex,
+    'strokeWidth': strokeWidth,
+    'label': label,
+  };
 
   factory ConnectionStyle.fromJson(Map<String, dynamic> json) {
     return ConnectionStyle(

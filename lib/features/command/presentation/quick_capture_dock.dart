@@ -88,116 +88,131 @@ class _QuickCaptureDockState extends ConsumerState<QuickCaptureDock> {
     final semantic = AppSemanticColors.of(context);
     final tokens = AppDesignTokens.of(context);
 
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          ref.read(quickCaptureVisibleProvider.notifier).state = false;
-        },
-      },
-      child: Material(
-        type: MaterialType.transparency,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 560),
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: semantic.popover,
-                borderRadius: BorderRadius.circular(tokens.radiusContainer),
-                border: Border.all(color: semantic.border),
-                boxShadow: tokens.shadowHigh,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
+    return Semantics(
+      container: true,
+      scopesRoute: true,
+      namesRoute: true,
+      explicitChildNodes: true,
+      label: 'Quick Capture Dock',
+      child: FocusScope(
+        autofocus: true,
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () {
+              ref.read(quickCaptureVisibleProvider.notifier).state = false;
+            },
+          },
+          child: Material(
+            type: MaterialType.transparency,
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 560),
+                margin: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 24,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: semantic.popover,
+                    borderRadius: BorderRadius.circular(tokens.radiusContainer),
+                    border: Border.all(color: semantic.border),
+                    boxShadow: tokens.shadowHigh,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(
-                        Icons.bolt,
-                        size: 20,
-                        color: theme.colorScheme.primary,
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.bolt,
+                            size: 20,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Quick Capture Dock',
+                              style: theme.textTheme.titleSmall,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              ref
+                                      .read(
+                                        quickCaptureVisibleProvider.notifier,
+                                      )
+                                      .state =
+                                  false;
+                            },
+                            tooltip: 'Tutup (Esc)',
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Quick Capture Dock',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          _TypeChip(
+                            type: NodeType.task,
+                            label: 'Task',
+                            isSelected: _selectedType == NodeType.task,
+                            onSelected: () =>
+                                setState(() => _selectedType = NodeType.task),
+                          ),
+                          _TypeChip(
+                            type: NodeType.note,
+                            label: 'Note',
+                            isSelected: _selectedType == NodeType.note,
+                            onSelected: () =>
+                                setState(() => _selectedType = NodeType.note),
+                          ),
+                          _TypeChip(
+                            type: NodeType.habit,
+                            label: 'Habit',
+                            isSelected: _selectedType == NodeType.habit,
+                            onSelected: () =>
+                                setState(() => _selectedType = NodeType.habit),
+                          ),
+                          _TypeChip(
+                            type: NodeType.goal,
+                            label: 'Goal',
+                            isSelected: _selectedType == NodeType.goal,
+                            onSelected: () =>
+                                setState(() => _selectedType = NodeType.goal),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _textController,
+                        focusNode: _focusNode,
+                        onSubmitted: (_) => _submitNode(),
+                        decoration: InputDecoration(
+                          hintText:
+                              'Tulis node... (contoh: "Beli susu @today #task")',
+                          isDense: true,
+                          filled: true,
+                          fillColor: theme.colorScheme.surfaceContainerHighest
+                              .withValues(alpha: 0.5),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(
+                              tokens.radiusElement,
+                            ),
+                            borderSide: BorderSide.none,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.send_rounded, size: 18),
+                            onPressed: _submitNode,
+                          ),
                         ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () {
-                          ref.read(quickCaptureVisibleProvider.notifier).state =
-                              false;
-                        },
-                        tooltip: 'Tutup (Esc)',
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      _TypeChip(
-                        type: NodeType.task,
-                        label: 'Task',
-                        isSelected: _selectedType == NodeType.task,
-                        onSelected: () =>
-                            setState(() => _selectedType = NodeType.task),
-                      ),
-                      _TypeChip(
-                        type: NodeType.note,
-                        label: 'Note',
-                        isSelected: _selectedType == NodeType.note,
-                        onSelected: () =>
-                            setState(() => _selectedType = NodeType.note),
-                      ),
-                      _TypeChip(
-                        type: NodeType.habit,
-                        label: 'Habit',
-                        isSelected: _selectedType == NodeType.habit,
-                        onSelected: () =>
-                            setState(() => _selectedType = NodeType.habit),
-                      ),
-                      _TypeChip(
-                        type: NodeType.goal,
-                        label: 'Goal',
-                        isSelected: _selectedType == NodeType.goal,
-                        onSelected: () =>
-                            setState(() => _selectedType = NodeType.goal),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _textController,
-                    focusNode: _focusNode,
-                    onSubmitted: (_) => _submitNode(),
-                    decoration: InputDecoration(
-                      hintText:
-                          'Tulis node... (contoh: "Beli susu @today #task")',
-                      isDense: true,
-                      filled: true,
-                      fillColor: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.5),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(
-                          tokens.radiusElement,
-                        ),
-                        borderSide: BorderSide.none,
-                      ),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.send_rounded, size: 18),
-                        onPressed: _submitNode,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),

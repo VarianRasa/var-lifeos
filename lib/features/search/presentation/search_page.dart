@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/widgets/animated_empty_state.dart';
+import '../../../shared/widgets/error_message.dart';
 import '../application/search_providers.dart';
 import '../domain/search_query.dart';
 import '../domain/search_result.dart';
@@ -80,7 +82,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   onChanged: (value) => setState(() => _filters = value),
                 ),
                 const SizedBox(height: 12),
-                Expanded(child: _SearchResults(results: results)),
+                Expanded(
+                  child: _SearchResults(
+                    results: results,
+                    queryText: _controller.text,
+                  ),
+                ),
               ],
             ),
           ),
@@ -91,21 +98,35 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 }
 
 class _SearchResults extends StatelessWidget {
-  const _SearchResults({required this.results});
+  const _SearchResults({required this.results, required this.queryText});
 
   final AsyncValue<List<SearchResult>> results;
+  final String queryText;
 
   @override
   Widget build(BuildContext context) => results.when(
-    loading: () => const Center(child: CircularProgressIndicator()),
-    error: (error, stackTrace) => Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [const Text('Search unavailable'), Text('$error')],
+    loading: () => Center(
+      child: Semantics(
+        key: const ValueKey('search-loading'),
+        liveRegion: true,
+        label: 'Searching',
+        child: const CircularProgressIndicator(),
       ),
     ),
+    error: (error, stackTrace) => const ErrorMessage(
+      key: ValueKey('search-error'),
+      title: 'Search unavailable',
+      message: 'Search could not be completed. Try again.',
+    ),
     data: (items) => items.isEmpty
-        ? const Center(child: Text('No results'))
+        ? AnimatedEmptyState(
+            key: const ValueKey('search-empty'),
+            icon: Icons.search_off_outlined,
+            label: queryText.trim().isEmpty
+                ? 'Search your workspace'
+                : 'No results for “${queryText.trim()}”',
+            subtitle: 'Try fewer words or clear filters.',
+          )
         : ListView.builder(
             itemCount: items.length,
             itemBuilder: (context, index) => SearchResultTile(

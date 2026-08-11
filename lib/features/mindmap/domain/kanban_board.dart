@@ -62,6 +62,7 @@ final class KanbanColumnDefinition {
     required this.title,
     required this.order,
     this.isDoneColumn = false,
+    this.wipLimit,
   });
 
   factory KanbanColumnDefinition.fromJson(
@@ -75,6 +76,9 @@ final class KanbanColumnDefinition {
       title: title.isEmpty ? 'Column ${fallbackOrder + 1}' : title,
       order: json['order'] is int ? json['order'] as int : fallbackOrder,
       isDoneColumn: json['isDoneColumn'] as bool? ?? false,
+      wipLimit: json['wipLimit'] is int && (json['wipLimit'] as int) > 0
+          ? json['wipLimit'] as int
+          : null,
     );
   }
 
@@ -82,17 +86,21 @@ final class KanbanColumnDefinition {
   final String title;
   final int order;
   final bool isDoneColumn;
+  final int? wipLimit;
 
   KanbanColumnDefinition copyWith({
     String? id,
     String? title,
     int? order,
     bool? isDoneColumn,
+    int? wipLimit,
+    bool clearWipLimit = false,
   }) => KanbanColumnDefinition(
     id: id ?? this.id,
     title: title ?? this.title,
     order: order ?? this.order,
     isDoneColumn: isDoneColumn ?? this.isDoneColumn,
+    wipLimit: clearWipLimit ? null : wipLimit ?? this.wipLimit,
   );
 
   Map<String, Object?> toJson() => {
@@ -100,6 +108,7 @@ final class KanbanColumnDefinition {
     'title': title,
     'order': order,
     'isDoneColumn': isDoneColumn,
+    if (wipLimit != null) 'wipLimit': wipLimit,
   };
 
   @override
@@ -108,10 +117,11 @@ final class KanbanColumnDefinition {
       other.id == id &&
       other.title == title &&
       other.order == order &&
-      other.isDoneColumn == isDoneColumn;
+      other.isDoneColumn == isDoneColumn &&
+      other.wipLimit == wipLimit;
 
   @override
-  int get hashCode => Object.hash(id, title, order, isDoneColumn);
+  int get hashCode => Object.hash(id, title, order, isDoneColumn, wipLimit);
 }
 
 const List<KanbanColumnDefinition> defaultKanbanColumns = [
@@ -436,7 +446,17 @@ final class KanbanBoard {
   }) =>
       KanbanBoard(columns: columns ?? this.columns, cards: cards ?? this.cards);
 
+  bool canAddCardTo(String columnId, {String? movingCardId}) {
+    final column = columns.firstWhereOrNull((item) => item.id == columnId);
+    final limit = column?.wipLimit;
+    if (limit == null) return true;
+    final moving = movingCardId == null ? null : cardById(movingCardId);
+    if (moving?.columnId == columnId) return true;
+    return cardsFor(columnId).length < limit;
+  }
+
   KanbanBoard moveCard(String cardId, String columnId, int order) {
+    if (!canAddCardTo(columnId, movingCardId: cardId)) return this;
     final targetCards =
         cards
             .where((card) => card.columnId == columnId && card.id != cardId)

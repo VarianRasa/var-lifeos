@@ -80,6 +80,8 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
   Widget build(BuildContext context) {
     final contexts = ref.watch(workspaceContextsProvider);
     final today = ref.watch(currentDateProvider);
+    final showInlineSearch =
+        MediaQuery.sizeOf(context).width >= LayoutConstants.mobileBreakpoint;
 
     return CallbackShortcuts(
       bindings: {
@@ -116,14 +118,42 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
                 });
               },
             ),
-            SearchField(
-              controller: _searchController,
-              hintText: 'Filter workspaces...',
-              onChanged: (value) {
-                setState(() => _searchQuery = value.trim().toLowerCase());
-              },
-            ),
-            const SizedBox(width: 16),
+            if (showInlineSearch)
+              SearchField(
+                controller: _searchController,
+                hintText: 'Filter workspaces...',
+                onChanged: (value) {
+                  setState(() => _searchQuery = value.trim().toLowerCase());
+                },
+              )
+            else
+              IconButton(
+                key: const ValueKey('workspace-mobile-search'),
+                tooltip: 'Filter workspaces',
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Filter workspaces'),
+                    content: SearchField(
+                      controller: _searchController,
+                      hintText: 'Filter workspaces...',
+                      onChanged: (value) {
+                        setState(
+                          () => _searchQuery = value.trim().toLowerCase(),
+                        );
+                      },
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                ),
+                icon: const Icon(Icons.search),
+              ),
+            const SizedBox(width: 8),
           ],
         ),
         body: contexts.when(
@@ -252,58 +282,67 @@ class _WorkspacesBody extends ConsumerWidget {
         sortedAreas.isNotEmpty ||
         sortedDailies.isNotEmpty;
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(spacing),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (showStats) ...[
-            _WorkspaceMetricRail(summary: overview),
-            SizedBox(height: spacing),
-          ],
-          _WorkspaceFilterBar(
-            filter: filter,
-            onChanged: onFilterChanged,
-            onClearSearch: onClearSearch,
+    return LayoutBuilder(
+      builder: (context, constraints) => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          key: const ValueKey('workspace-index-content'),
+          constraints: const BoxConstraints(maxWidth: 1120),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(spacing),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (showStats) ...[
+                  _WorkspaceMetricRail(summary: overview),
+                  SizedBox(height: spacing),
+                ],
+                _WorkspaceFilterBar(
+                  filter: filter,
+                  onChanged: onFilterChanged,
+                  onClearSearch: onClearSearch,
+                ),
+                SizedBox(height: spacing),
+                if (showStats) ...[
+                  _WorkspaceFocusStrip(
+                    contexts: contexts,
+                    visibleCount:
+                        sortedProjects.length +
+                        sortedAreas.length +
+                        sortedDailies.length,
+                    hasSearch: searchQuery.isNotEmpty,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+                if (!hasMatches)
+                  const _WorkspaceNoMatches()
+                else ...[
+                  _WorkspaceSection(
+                    title: 'Projects',
+                    contexts: sortedProjects,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                  _WorkspaceSection(
+                    title: 'Areas',
+                    contexts: sortedAreas,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+                if (hasMatches && sortedDailies.isNotEmpty) ...[
+                  _WorkspaceSection(
+                    title: 'Dailies',
+                    contexts: sortedDailies,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+              ],
+            ),
           ),
-          SizedBox(height: spacing),
-          if (showStats) ...[
-            _WorkspaceFocusStrip(
-              contexts: contexts,
-              visibleCount:
-                  sortedProjects.length +
-                  sortedAreas.length +
-                  sortedDailies.length,
-              hasSearch: searchQuery.isNotEmpty,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-          if (!hasMatches)
-            const _WorkspaceNoMatches()
-          else ...[
-            _WorkspaceSection(
-              title: 'Projects',
-              contexts: sortedProjects,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-            _WorkspaceSection(
-              title: 'Areas',
-              contexts: sortedAreas,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-          if (hasMatches && sortedDailies.isNotEmpty) ...[
-            _WorkspaceSection(
-              title: 'Dailies',
-              contexts: sortedDailies,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -845,9 +884,26 @@ class _WorkspaceSection extends ConsumerWidget {
                   'workspace-card-${workspaceContext.type.name}-${workspaceContext.name}',
                 ),
                 padding: const EdgeInsets.only(bottom: 12.0),
-                child: _WorkspaceContextCard(
-                  contextSummary: workspaceContext,
-                  today: today,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox.square(
+                      dimension: 44,
+                      child: ReorderableDragStartListener(
+                        key: ValueKey(
+                          'workspace-reorder-${workspaceContext.type.name}-${workspaceContext.name}',
+                        ),
+                        index: index,
+                        child: const Icon(Icons.drag_handle),
+                      ),
+                    ),
+                    Expanded(
+                      child: _WorkspaceContextCard(
+                        contextSummary: workspaceContext,
+                        today: today,
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -1062,8 +1118,6 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
       ),
       duration: tokens.effectiveDuration(context, tokens.motionFast),
       curve: tokens.motionCurve,
-      transformAlignment: Alignment.center,
-      transform: Matrix4.translationValues(0.0, _isHovered ? -4.0 : 0.0, 0.0),
       decoration: ShapeDecoration(
         color: _isHovered
             ? theme.colorScheme.primary.withValues(alpha: 0.06)
@@ -1416,11 +1470,6 @@ class _WorkspaceMetricPillState extends State<_WorkspaceMetricPill> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutBack,
-        transform: Matrix4.diagonal3Values(
-          _isHovered ? 1.05 : 1.0,
-          _isHovered ? 1.05 : 1.0,
-          1.0,
-        ),
         decoration: BoxDecoration(
           color: _isHovered
               ? theme.colorScheme.primaryContainer

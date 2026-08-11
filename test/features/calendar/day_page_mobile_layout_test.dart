@@ -23,17 +23,55 @@ void main() {
     final repository = InMemoryMindmapRepository();
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [
-          mindmapRepositoryProvider.overrideWithValue(repository),
-        ],
-        child: MaterialApp(
-          home: DayPage(date: DateTime(2026, 8, 8)),
-        ),
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(home: DayPage(date: DateTime(2026, 8, 8))),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('mobile-compact-header')), findsOneWidget);
+  });
+
+  testWidgets('compact header exposes every day data view without overflow', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = InMemoryMindmapRepository();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(home: DayPage(date: DateTime(2026, 8, 8))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('mobile-compact-header')), findsOneWidget);
+    expect(find.byKey(const ValueKey('day-mobile-view-menu')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('day-mobile-view-menu')));
+    await tester.pumpAndSettle();
+    expect(find.text('Canvas'), findsOneWidget);
+    expect(find.text('Timeline'), findsOneWidget);
+    expect(find.text('Board'), findsOneWidget);
+    expect(find.text('Table'), findsOneWidget);
+
+    await tester.tap(find.text('Board'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-board-view')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('^Day board')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('day-mobile-view-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Table'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-table-view')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('^Day table')), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('opens mobile tools sheet when tapping Tools button', (
@@ -46,12 +84,8 @@ void main() {
     final repository = InMemoryMindmapRepository();
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [
-          mindmapRepositoryProvider.overrideWithValue(repository),
-        ],
-        child: MaterialApp(
-          home: DayPage(date: DateTime(2026, 8, 8)),
-        ),
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(home: DayPage(date: DateTime(2026, 8, 8))),
       ),
     );
     await tester.pumpAndSettle();
@@ -63,4 +97,3 @@ void main() {
     expect(find.text('Day Tools & Status'), findsOneWidget);
   });
 }
-

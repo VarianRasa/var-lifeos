@@ -135,7 +135,7 @@ final class _TimerNodeEditorState extends State<TimerNodeEditor> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final colors = Theme.of(context).colorScheme;
-    return ColoredBox(
+    return Material(
       key: const ValueKey<String>('timer-hybrid-editor'),
       color: colors.surface,
       child: SingleChildScrollView(

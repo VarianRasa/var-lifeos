@@ -16,19 +16,30 @@ class SearchResultTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final document = result.document;
-    return Card(
-      child: ListTile(
-        key: ValueKey('search-result-${document.id}'),
-        title: Text(document.title),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(document.snippet),
-            Text(_extractionLabel(document.extractionState)),
-          ],
+    return Semantics(
+      button: true,
+      label: '${document.title}. ${document.snippet}',
+      child: Tooltip(
+        message: document.title,
+        child: Card(
+          child: ListTile(
+            key: ValueKey('search-result-${document.id}'),
+            title: Text(
+              document.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(document.snippet),
+                Text(_extractionLabel(document.extractionState)),
+              ],
+            ),
+            trailing: Text(document.sourceKind.name),
+            onTap: onTap,
+          ),
         ),
-        trailing: Text(document.sourceKind.name),
-        onTap: onTap,
       ),
     );
   }

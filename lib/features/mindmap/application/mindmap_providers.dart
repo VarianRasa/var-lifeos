@@ -44,6 +44,7 @@ import '../domain/node_attachment.dart';
 import '../domain/node_graph.dart';
 import '../domain/node_knowledge_index.dart';
 import '../domain/node_relations.dart';
+import '../domain/para_okr_rollup.dart';
 import '../domain/smart_node_view.dart';
 import '../domain/workspace_context.dart';
 import 'board_template_service.dart';
@@ -243,8 +244,10 @@ final dailyCanvasBoardsProvider = FutureProvider.autoDispose
       final key = dayKey(normalizedDay);
       final repository = ref.watch(canvasBoardRepositoryProvider);
       final dayBoards = await repository.getBoardsForDay(key);
-      final primaryBoard = await ref.watch(dailyCanvasBoardProvider(normalizedDay).future);
-      
+      final primaryBoard = await ref.watch(
+        dailyCanvasBoardProvider(normalizedDay).future,
+      );
+
       if (dayBoards.isEmpty) {
         return [primaryBoard];
       }
@@ -348,6 +351,11 @@ final lifeOsSummaryProvider = FutureProvider<LifeOsSummary>((ref) async {
   final today = ref.watch(currentDateProvider);
   final nodes = await ref.watch(allMindmapNodesProvider.future);
   return LifeOsSummary.fromNodes(today: today, nodes: nodes);
+});
+
+final paraOkrRollupProvider = FutureProvider<ParaOkrRollupSummary>((ref) async {
+  final nodes = await ref.watch(allMindmapNodesProvider.future);
+  return ParaOkrRollupSummary.fromNodes(nodes);
 });
 
 final insightsSummaryProvider = FutureProvider<InsightsSummary>((ref) async {

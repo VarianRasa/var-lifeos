@@ -61,49 +61,83 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
 
     return SafeArea(
       child: nodes.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => const Center(child: Text('Recovery data unavailable')),
-        data: (localNodes) => ListView(
-          key: const ValueKey('recovery-center'),
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text('Recovery Center', style: theme.textTheme.headlineSmall),
-            const SizedBox(height: 4),
-            Text(
-              'Preview changes before data or cloud state is replaced.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 20),
-            _Section(
-              title: 'Health & account',
-              child: _healthAndAccount(state, localNodes.length),
-            ),
-            const SizedBox(height: 16),
-            _Section(
-              title: 'Recover data',
-              child: _recoverData(state, localNodes),
-            ),
-            const SizedBox(height: 16),
-            _Section(
-              title: 'Drawing drafts',
-              child: drafts.when(
-                loading: () => const LinearProgressIndicator(),
-                error: (_, _) => const Text('Drawing drafts unavailable'),
-                data: (checkpoints) => _drawingDrafts(checkpoints, localNodes),
+        loading: () => Semantics(
+          liveRegion: true,
+          label: 'Recovery data loading',
+          child: const Center(child: CircularProgressIndicator()),
+        ),
+        error: (_, _) => Semantics(
+          liveRegion: true,
+          child: const Center(child: Text('Recovery data unavailable')),
+        ),
+        data: (localNodes) => LayoutBuilder(
+          builder: (context, constraints) {
+            final left = <Widget>[
+              _Section(
+                title: 'Health & account',
+                child: _healthAndAccount(state, localNodes.length),
               ),
-            ),
-            const SizedBox(height: 16),
-            _Section(
-              title: 'Sync & attachments',
-              child: _syncAndAttachments(
-                state,
-                localNodes,
-                'Firebase sync backend',
+              _Section(
+                title: 'Recover data',
+                child: _recoverData(state, localNodes),
               ),
-            ),
-            const SizedBox(height: 16),
-            _Section(title: 'Activity', child: _activity(state)),
-          ],
+              _Section(
+                title: 'Drawing drafts',
+                child: drafts.when(
+                  loading: () => Semantics(
+                    liveRegion: true,
+                    label: 'Drawing drafts loading',
+                    child: const LinearProgressIndicator(),
+                  ),
+                  error: (_, _) => Semantics(
+                    liveRegion: true,
+                    child: const Text('Drawing drafts unavailable'),
+                  ),
+                  data: (checkpoints) =>
+                      _drawingDrafts(checkpoints, localNodes),
+                ),
+              ),
+            ];
+            final right = <Widget>[
+              _Section(
+                title: 'Sync & attachments',
+                child: _syncAndAttachments(
+                  state,
+                  localNodes,
+                  'Firebase sync backend',
+                ),
+              ),
+              _Section(title: 'Activity', child: _activity(state)),
+            ];
+            return ListView(
+              key: const ValueKey('recovery-center'),
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text('Recovery Center', style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 4),
+                Text(
+                  'Preview changes before data or cloud state is replaced.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 20),
+                if (constraints.maxWidth < 1024)
+                  _SectionColumn(
+                    key: const ValueKey('recovery-single-column'),
+                    children: [...left, ...right],
+                  )
+                else
+                  Row(
+                    key: const ValueKey('recovery-two-column'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _SectionColumn(children: left)),
+                      const SizedBox(width: 16),
+                      Expanded(child: _SectionColumn(children: right)),
+                    ],
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -138,31 +172,39 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
             child: Text(state.isSignedIn ? 'Sign out' : 'Sign in'),
           ),
         ),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                key: const ValueKey('sync-device-name-field'),
-                controller: _deviceNameController,
-                enabled: !state.isBusy,
-                decoration: const InputDecoration(
-                  labelText: 'Device name',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+        LayoutBuilder(
+          builder: (context, constraints) => Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: constraints.maxWidth > 288
+                    ? constraints.maxWidth - 56
+                    : constraints.maxWidth,
+                child: TextField(
+                  key: const ValueKey('sync-device-name-field'),
+                  controller: _deviceNameController,
+                  enabled: !state.isBusy,
+                  decoration: const InputDecoration(
+                    labelText: 'Device name',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
                 ),
               ),
-            ),
-            IconButton.filledTonal(
-              key: const ValueKey('sync-device-save-button'),
-              tooltip: 'Save device name',
-              onPressed: state.isBusy
-                  ? null
-                  : () => ref
-                        .read(syncControllerProvider.notifier)
-                        .renameDevice(_deviceNameController.text),
-              icon: const Icon(Icons.save_outlined),
-            ),
-          ],
+              IconButton.filledTonal(
+                key: const ValueKey('sync-device-save-button'),
+                tooltip: 'Save device name',
+                onPressed: state.isBusy
+                    ? null
+                    : () => ref
+                          .read(syncControllerProvider.notifier)
+                          .renameDevice(_deviceNameController.text),
+                icon: const Icon(Icons.save_outlined),
+              ),
+            ],
+          ),
         ),
         SwitchListTile(
           key: const ValueKey('auto-backup-toggle'),
@@ -175,6 +217,7 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
         ),
         DropdownButtonFormField<String>(
           key: const ValueKey('auto-backup-frequency'),
+          isExpanded: true,
           initialValue: state.autoBackupFrequency,
           decoration: const InputDecoration(
             labelText: 'Backup frequency',
@@ -512,7 +555,11 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
           ),
         if (state.lastMessage.isNotEmpty) ...[
           const SizedBox(height: 8),
-          Text(state.lastMessage, key: const ValueKey('sync-last-message')),
+          Semantics(
+            key: const ValueKey('sync-last-message'),
+            liveRegion: true,
+            child: Text(state.lastMessage),
+          ),
         ],
         if (state.pendingConflicts.isNotEmpty) ...[
           const Divider(height: 24),
@@ -764,6 +811,7 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
             ),
             FilledButton(
               key: const ValueKey('remote-conflict-confirm-button'),
+              style: _dangerButtonStyle(context),
               onPressed: !remoteDeletesLocal || destructiveConfirmed
                   ? () => Navigator.of(context).pop(true)
                   : null,
@@ -798,6 +846,7 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
           ),
           FilledButton(
             key: const ValueKey('overwrite-confirm-button'),
+            style: _dangerButtonStyle(context),
             onPressed: () => Navigator.of(context).pop(true),
             child: Text(actionLabel),
           ),
@@ -842,6 +891,7 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
           ),
           FilledButton(
             key: const ValueKey('delete-restore-point-confirm-button'),
+            style: _dangerButtonStyle(context),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Delete'),
           ),
@@ -871,6 +921,24 @@ class _RecoveryCenterState extends ConsumerState<RecoveryCenter> {
     if (label.isEmpty || label == _lastDeviceLabel) return;
     _lastDeviceLabel = label;
     _deviceNameController.text = label;
+  }
+}
+
+class _SectionColumn extends StatelessWidget {
+  const _SectionColumn({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var index = 0; index < children.length; index++) ...[
+          children[index],
+          if (index < children.length - 1) const SizedBox(height: 16),
+        ],
+      ],
+    );
   }
 }
 
@@ -944,7 +1012,13 @@ class _OperationPreviewDialogState extends State<_OperationPreviewDialog> {
             _ImpactList(title: 'Will add', titles: impact.addedTitles),
             _ImpactList(title: 'Will update', titles: impact.updatedTitles),
             _ImpactList(title: 'Will delete', titles: impact.deletedTitles),
-            if (impact.isDestructive)
+            if (impact.isDestructive) ...[
+              const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.warning_amber_outlined),
+                title: Text('Warning: this action may delete local nodes.'),
+              ),
               CheckboxListTile(
                 key: const ValueKey(
                   'restore-destructive-confirmation-checkbox',
@@ -956,6 +1030,7 @@ class _OperationPreviewDialogState extends State<_OperationPreviewDialog> {
                 onChanged: (value) =>
                     setState(() => _destructiveConfirmed = value ?? false),
               ),
+            ],
           ],
         ),
       ),
@@ -970,6 +1045,7 @@ class _OperationPreviewDialogState extends State<_OperationPreviewDialog> {
                 ? 'restore-point-confirm-button'
                 : 'operation-preview-confirm-button',
           ),
+          style: impact.isDestructive ? _dangerButtonStyle(context) : null,
           onPressed: !impact.isDestructive || _destructiveConfirmed
               ? () => Navigator.of(context).pop(true)
               : null,
@@ -1121,6 +1197,14 @@ class _SyncAuthDialogState extends State<_SyncAuthDialog> {
       Navigator.of(context).pop();
     }
   }
+}
+
+ButtonStyle _dangerButtonStyle(BuildContext context) {
+  final colorScheme = Theme.of(context).colorScheme;
+  return FilledButton.styleFrom(
+    backgroundColor: colorScheme.error,
+    foregroundColor: colorScheme.onError,
+  );
 }
 
 IconData _activityIcon(SyncActivityStatus status) => switch (status) {

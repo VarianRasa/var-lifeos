@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../application/fitness_health_providers.dart';
+import '../../application/weather_providers.dart';
 import '../../domain/mindmap_node.dart';
 import '../../domain/node_presentation.dart';
 import '../../domain/node_type_payloads.dart';
+import '../../domain/weather_snapshot.dart';
 import 'knowledge_node_editors.dart';
 import 'productivity_node_editors.dart';
 
@@ -429,10 +431,21 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
   final Map<String, String> _errors = {};
   final Map<String, TextEditingController> _eventControllers = {};
   bool _fitnessSyncing = false;
+  String _contactQuery = '';
+  final TextEditingController _weatherSearchController =
+      TextEditingController();
+  List<WeatherLocation> _weatherLocations = const [];
 
   @override
   void initState() {
     super.initState();
+    final normalizedBody = normalizeLegacyWeatherBody(widget.context.node.body);
+    if (widget.context.node.type == NodeType.weather &&
+        normalizedBody != widget.context.node.body) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.context.onBodyChanged(normalizedBody);
+      });
+    }
     _scheduleFitnessAutoSync();
   }
 
@@ -441,6 +454,7 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
     for (final controller in _eventControllers.values) {
       controller.dispose();
     }
+    _weatherSearchController.dispose();
     super.dispose();
   }
 
@@ -536,6 +550,24 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
   void _emit(Object draft) {
     setState(() => _draft = draft);
     widget.context.onDraftChanged(draft);
+  }
+
+  void _updateEvent(EventCalendarPayload candidate) {
+    final validation = candidate.rangeValidation;
+    setState(() {
+      _draft = candidate;
+      _errors
+        ..removeWhere((key, _) => key.startsWith('event-'))
+        ..addAll({
+          'event-start-date': ?validation.startDateError,
+          'event-end-date': ?validation.endDateError,
+          'event-start-time': ?validation.startTimeError,
+          'event-end-time': ?validation.endTimeError,
+        });
+    });
+    if (_errors.keys.every((key) => !key.startsWith('event-'))) {
+      _emit(candidate);
+    }
   }
 
   @override
@@ -692,6 +724,25 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SegmentedButton<ExpenseTransactionType>(
+              key: const ValueKey('life-data-expense-transaction-type'),
+              segments: const [
+                ButtonSegment(
+                  value: ExpenseTransactionType.expense,
+                  label: Text('Expense'),
+                  icon: Icon(Icons.arrow_upward),
+                ),
+                ButtonSegment(
+                  value: ExpenseTransactionType.income,
+                  label: Text('Income'),
+                  icon: Icon(Icons.arrow_downward),
+                ),
+              ],
+              selected: <ExpenseTransactionType>{payload.transactionType},
+              onSelectionChanged: (values) =>
+                  _emit(payload.copyWith(transactionType: values.single)),
+            ),
+            const SizedBox(height: 10),
             TextFormField(
               key: const ValueKey('life-data-expense-title-field'),
               initialValue: widget.context.node.title,
@@ -736,6 +787,18 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
                 _emit(payload.copyWith(amount: val));
               },
             ),
+            TextFormField(
+              key: const ValueKey('life-data-expense-currency-field'),
+              initialValue: payload.currency,
+              decoration: const InputDecoration(labelText: 'Currency'),
+              onChanged: (text) => _emit(payload.copyWith(currency: text)),
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-expense-category-field'),
+              initialValue: payload.category,
+              decoration: const InputDecoration(labelText: 'Category'),
+              onChanged: (text) => _emit(payload.copyWith(category: text)),
+            ),
           ],
         ),
       ),
@@ -744,12 +807,33 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
 
   Widget _buildContactEditor(BuildContext context) {
     final payload = _draft as ContactPayload;
+    final contacts = payload.additionalContacts
+        .where(
+          (contact) => '${contact.name} ${contact.company} ${contact.email}'
+              .toLowerCase()
+              .contains(_contactQuery.toLowerCase()),
+        )
+        .toList();
+    final count = payload.additionalContacts.length + 1;
 
     return Container(
       key: ValueKey('life-data-editor-${widget.context.node.id}'),
       padding: const EdgeInsets.all(14),
-      child: Column(
+      child: ListView(
         children: [
+          Text('Contact $count of $count'),
+          TextFormField(
+            key: const ValueKey('life-data-contact-role-field'),
+            initialValue: payload.role,
+            decoration: const InputDecoration(labelText: 'Role'),
+            onChanged: (text) => _emit(payload.copyWith(role: text)),
+          ),
+          TextFormField(
+            key: const ValueKey('life-data-contact-company-field'),
+            initialValue: payload.company,
+            decoration: const InputDecoration(labelText: 'Company'),
+            onChanged: (text) => _emit(payload.copyWith(company: text)),
+          ),
           TextFormField(
             key: const ValueKey('life-data-contact-email-field'),
             initialValue: payload.email,
@@ -758,7 +842,8 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
               errorText: _errors['email'],
             ),
             onChanged: (text) {
-              if (text.isNotEmpty && !text.contains('@')) {
+              if (text.isNotEmpty &&
+                  !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
                 setState(
                   () => _errors['email'] = 'Enter a valid email address.',
                 );
@@ -768,18 +853,51 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
               }
             },
           ),
+          TextFormField(
+            key: const ValueKey('life-data-contact-phone-field'),
+            initialValue: payload.phone,
+            decoration: const InputDecoration(labelText: 'Phone'),
+            onChanged: (text) => _emit(payload.copyWith(phone: text)),
+          ),
+          TextFormField(
+            key: const ValueKey('contact-search-field'),
+            decoration: const InputDecoration(labelText: 'Search contacts'),
+            onChanged: (text) => setState(() => _contactQuery = text),
+          ),
+          ListView(
+            key: const ValueKey('contact-sidebar-list'),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (final contact in contacts)
+                ListTile(
+                  title: Text(contact.name),
+                  subtitle: Text(contact.company),
+                  onTap: () {},
+                  trailing: IconButton(
+                    key: ValueKey('contact-collapsed-toggle-${contact.id}'),
+                    onPressed: () {
+                      final ids = [...payload.collapsedContactIds];
+                      ids.contains(contact.id)
+                          ? ids.remove(contact.id)
+                          : ids.add(contact.id);
+                      _emit(payload.copyWith(collapsedContactIds: ids));
+                    },
+                    icon: const Icon(Icons.expand_less),
+                  ),
+                ),
+            ],
+          ),
           ElevatedButton(
             key: const ValueKey('contact-add-record'),
-            onPressed: () {
-              _emit(
-                payload.copyWith(
-                  additionalContacts: [
-                    ...payload.additionalContacts,
-                    const ContactRecord(id: 'new', name: 'New Contact'),
-                  ],
-                ),
-              );
-            },
+            onPressed: () => _emit(
+              payload.copyWith(
+                additionalContacts: [
+                  ...payload.additionalContacts,
+                  ContactRecord(id: 'contact-$count', name: 'New Contact'),
+                ],
+              ),
+            ),
             child: const Text('Add Record'),
           ),
         ],
@@ -822,22 +940,77 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
     final payload = _draft as FitPayload;
 
     return Container(
-      key: ValueKey('life-data-editor-${widget.context.node.id}'),
+      key: const ValueKey('life-data-fit-editor'),
       padding: const EdgeInsets.all(14),
-      child: Column(
-        children: [
-          ElevatedButton(
-            key: const ValueKey('life-data-fit-sync-button'),
-            onPressed: () => _syncFitnessData(authorizedOnly: false),
-            child: const Text('Sync Fitness'),
-          ),
-          IconButton(
-            key: const ValueKey('life-data-fit-add-steps'),
-            onPressed: () =>
-                _emit(payload.copyWith(steps: (payload.steps ?? 0) + 1000)),
-            icon: const Icon(Icons.add),
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            ElevatedButton(
+              key: const ValueKey('life-data-fit-sync-button'),
+              onPressed: () => _syncFitnessData(authorizedOnly: false),
+              child: const Text('Sync Fitness'),
+            ),
+            for (final activity in const [('run', 'Run'), ('walk', 'Walk')])
+              TextButton(
+                key: ValueKey('life-data-fit-activity-${activity.$1}'),
+                onPressed: () => _emit(payload.copyWith(workout: activity.$2)),
+                child: Text(activity.$2),
+              ),
+            IconButton(
+              key: const ValueKey('life-data-fit-add-steps'),
+              onPressed: () =>
+                  _emit(payload.copyWith(steps: (payload.steps ?? 0) + 1000)),
+              icon: const Icon(Icons.add),
+            ),
+            IconButton(
+              key: const ValueKey('life-data-fit-add-water'),
+              onPressed: () =>
+                  _emit(payload.copyWith(water: (payload.water ?? 0) + 0.25)),
+              icon: const Icon(Icons.water_drop),
+            ),
+            IconButton(
+              key: const ValueKey('life-data-fit-add-duration'),
+              onPressed: () => _emit(
+                payload.copyWith(
+                  durationMinutes: (payload.durationMinutes ?? 0) + 10,
+                ),
+              ),
+              icon: const Icon(Icons.timer),
+            ),
+            IconButton(
+              key: const ValueKey('life-data-fit-add-calories'),
+              onPressed: () => _emit(
+                payload.copyWith(calories: (payload.calories ?? 0) + 50),
+              ),
+              icon: const Icon(Icons.local_fire_department),
+            ),
+            Wrap(
+              key: const ValueKey('life-data-fit-intensity'),
+              children: [
+                for (final intensity in const ['Low', 'Moderate', 'High'])
+                  ChoiceChip(
+                    label: Text(intensity),
+                    selected: payload.intensity == intensity.toLowerCase(),
+                    onSelected: (_) => _emit(
+                      payload.copyWith(intensity: intensity.toLowerCase()),
+                    ),
+                  ),
+              ],
+            ),
+            CheckboxListTile(
+              key: const ValueKey('life-data-fit-completed'),
+              value: payload.completed,
+              onChanged: (value) =>
+                  _emit(payload.copyWith(completed: value ?? false)),
+              title: const Text('Completed'),
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-fit-distance-unit-field'),
+              initialValue: payload.distanceUnit,
+              onChanged: (text) => _emit(payload.copyWith(distanceUnit: text)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -848,33 +1021,112 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
     return Container(
       key: ValueKey('life-data-editor-${widget.context.node.id}'),
       padding: const EdgeInsets.all(14),
-      child: Column(
-        children: [
-          Card(
-            key: const ValueKey('life-data-weather-summary-card'),
-            child: Text('${payload.location} ${payload.temp}${payload.unit}'),
-          ),
-          TextFormField(
-            key: const ValueKey('life-data-weather-location-field'),
-            initialValue: payload.location,
-            onChanged: (text) => _emit(payload.copyWith(location: text)),
-          ),
-          TextFormField(
-            key: const ValueKey('life-data-weather-date-field'),
-            initialValue: payload.weatherDate,
-            onChanged: (text) => _emit(payload.copyWith(weatherDate: text)),
-          ),
-          TextFormField(
-            key: const ValueKey('life-data-weather-notes-field'),
-            initialValue: widget.context.node.body,
-            onChanged: widget.context.onBodyChanged,
-          ),
-          TextFormField(
-            key: const ValueKey('life-data-weather-temp-field'),
-            initialValue: payload.temp,
-            onChanged: (text) => _emit(payload.copyWith(temp: text)),
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            Card(
+              key: const ValueKey('life-data-weather-summary-card'),
+              child: Column(
+                children: [
+                  Text(payload.location),
+                  Text('${payload.temp}${payload.unit}'),
+                ],
+              ),
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-weather-location-search-field'),
+              controller: _weatherSearchController,
+              decoration: const InputDecoration(labelText: 'Search city'),
+            ),
+            IconButton(
+              key: const ValueKey('life-data-weather-location-search'),
+              onPressed: () async {
+                final locations = await ref
+                    .read(weatherServiceProvider)
+                    .searchLocations(_weatherSearchController.text);
+                if (mounted) setState(() => _weatherLocations = locations);
+              },
+              icon: const Icon(Icons.search),
+            ),
+            for (var index = 0; index < _weatherLocations.length; index++)
+              TextButton(
+                key: ValueKey('life-data-weather-location-result-$index'),
+                onPressed: () async {
+                  final location = _weatherLocations[index];
+                  final snapshot = await ref
+                      .read(weatherServiceProvider)
+                      .currentWeather(
+                        location: location,
+                        temperatureUnit: payload.unit,
+                      );
+                  if (!mounted) return;
+                  _emit(
+                    payload.copyWith(
+                      location: location.displayName,
+                      temp: snapshot.temperature.toString(),
+                      apparentTemp: snapshot.apparentTemperature.toString(),
+                      humidity: snapshot.relativeHumidity,
+                      windSpeed: snapshot.windSpeed,
+                      weather: snapshot.conditionLabel,
+                      weatherCode: snapshot.conditionCode,
+                      weatherDate: snapshot.observedAt.substring(0, 10),
+                      latitude: location.latitude,
+                      longitude: location.longitude,
+                      timezone: snapshot.timezone,
+                      isDay: snapshot.isDay,
+                    ),
+                  );
+                },
+                child: Text(_weatherLocations[index].displayName),
+              ),
+            TextFormField(
+              key: const ValueKey('life-data-weather-location-field'),
+              initialValue: payload.location,
+              onChanged: (text) => _emit(payload.copyWith(location: text)),
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-weather-date-field'),
+              initialValue: payload.weatherDate,
+              onChanged: (text) => _emit(payload.copyWith(weatherDate: text)),
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-weather-notes-field'),
+              initialValue: normalizeLegacyWeatherBody(
+                widget.context.node.body,
+              ),
+              onChanged: widget.context.onBodyChanged,
+            ),
+            TextFormField(
+              key: const ValueKey('life-data-weather-temp-field'),
+              initialValue: payload.temp,
+              onChanged: (text) => _emit(payload.copyWith(temp: text)),
+            ),
+            TextButton(
+              key: const ValueKey('life-data-weather-condition-rain'),
+              onPressed: () =>
+                  _emit(payload.copyWith(weather: 'Rain', weatherCode: 'rain')),
+              child: const Text('Rain'),
+            ),
+            SegmentedButton<String>(
+              key: const ValueKey('life-data-weather-unit-toggle'),
+              segments: const [
+                ButtonSegment(value: '°C', label: Text('°C')),
+                ButtonSegment(value: '°F', label: Text('°F')),
+              ],
+              selected: {payload.unit},
+              onSelectionChanged: (units) {
+                final unit = units.single;
+                final value = double.tryParse(payload.temp);
+                final converted = value == null
+                    ? payload.temp
+                    : unit == '°F'
+                    ? (value * 9 / 5 + 32).toStringAsFixed(0)
+                    : ((value - 32) * 5 / 9).toStringAsFixed(0);
+                _emit(payload.copyWith(temp: converted, unit: unit));
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -887,7 +1139,13 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
       padding: const EdgeInsets.all(14),
       child: Column(
         children: [
+          SizedBox(
+            key: ValueKey(
+              'life-data-editor-preset-${widget.context.effectivePreset.name}',
+            ),
+          ),
           Row(
+            key: const ValueKey('life-data-event-editor-columns'),
             children: [
               Expanded(
                 child: TextFormField(
@@ -907,7 +1165,7 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
                               context: context,
                               initialDate:
                                   DateTime.tryParse(payload.startDate) ??
-                                  DateTime.now(),
+                                  widget.context.node.day,
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
@@ -932,22 +1190,8 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
                       ],
                     ),
                   ),
-                  onChanged: (text) {
-                    if (text.isNotEmpty && DateTime.tryParse(text) == null) {
-                      setState(
-                        () => _errors['event-start-date'] = 'Date is invalid.',
-                      );
-                    } else if (payload.endDate.isNotEmpty &&
-                        text.compareTo(payload.endDate) > 0) {
-                      setState(
-                        () => _errors['event-start-date'] =
-                            'End date must not precede start date.',
-                      );
-                    } else {
-                      setState(() => _errors.remove('event-start-date'));
-                      _emit(payload.copyWith(startDate: text));
-                    }
-                  },
+                  onChanged: (text) =>
+                      _updateEvent(payload.copyWith(startDate: text)),
                 ),
               ),
               const SizedBox(width: 10),
@@ -959,18 +1203,8 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
                     labelText: 'End date',
                     errorText: _errors['event-end-date'],
                   ),
-                  onChanged: (text) {
-                    if (payload.startDate.isNotEmpty &&
-                        text.compareTo(payload.startDate) < 0) {
-                      setState(
-                        () => _errors['event-end-date'] =
-                            'End date must not precede start date.',
-                      );
-                    } else {
-                      setState(() => _errors.remove('event-end-date'));
-                      _emit(payload.copyWith(endDate: text));
-                    }
-                  },
+                  onChanged: (text) =>
+                      _updateEvent(payload.copyWith(endDate: text)),
                 ),
               ),
             ],
@@ -1012,21 +1246,39 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
                       ],
                     ),
                   ),
-                  onChanged: (text) {
-                    if (payload.endTime.isNotEmpty &&
-                        text.compareTo(payload.endTime) > 0) {
-                      setState(
-                        () => _errors['event-start-time'] =
-                            'End time must not precede start time.',
-                      );
-                    } else {
-                      setState(() => _errors.remove('event-start-time'));
-                      _emit(payload.copyWith(startTime: text));
-                    }
-                  },
+                  onChanged: (text) =>
+                      _updateEvent(payload.copyWith(startTime: text)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextFormField(
+                  key: const ValueKey('life-data-event-end-time-field'),
+                  controller: _eventController('end-time', payload.endTime),
+                  decoration: InputDecoration(
+                    labelText: 'End time',
+                    errorText: _errors['event-end-time'],
+                  ),
+                  onChanged: (text) =>
+                      _updateEvent(payload.copyWith(endTime: text)),
                 ),
               ),
             ],
+          ),
+          TextFormField(
+            key: const ValueKey('life-data-event-title-field'),
+            initialValue: widget.context.node.title,
+            onChanged: widget.context.onTitleChanged,
+          ),
+          TextFormField(
+            key: const ValueKey('life-data-event-description-field'),
+            initialValue: widget.context.node.body,
+            onChanged: widget.context.onBodyChanged,
+          ),
+          TextFormField(
+            key: const ValueKey('life-data-event-location-field'),
+            initialValue: payload.location,
+            onChanged: (text) => _updateEvent(payload.copyWith(location: text)),
           ),
         ],
       ),
@@ -1035,6 +1287,13 @@ final class _LifeDataEditorState extends ConsumerState<_LifeDataEditor> {
 }
 
 String _summary(MindmapNode node) {
+  if (node.type == NodeType.weather) {
+    final payload = WeatherPayload.fromNode(node);
+    return [
+      payload.location,
+      payload.weatherDate,
+    ].where((value) => value.isNotEmpty).join(' · ');
+  }
   return node.body.isNotEmpty ? node.body : 'Life data node';
 }
 

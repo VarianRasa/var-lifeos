@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1479,6 +1480,218 @@ void main() {
             ),
           ),
           isTrue,
+        );
+      },
+    );
+
+    testWidgets('compact workspace detail exposes view menu without overflow', (
+      tester,
+    ) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('workspace-view-menu')), findsOneWidget);
+      expect(find.byType(SegmentedButton), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('workspace-view-menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('Kanban'), findsOneWidget);
+      expect(find.text('Gantt'), findsOneWidget);
+    });
+
+    testWidgets('workspace detail header keeps report action at medium width', (
+      tester,
+    ) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(768, 900);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kanban'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('workspace-detail-header')),
+        findsOneWidget,
+      );
+      expect(find.text('Copy report'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final width in <double>[320, 768, 1024, 1440]) {
+      testWidgets('workspace detail renders at ${width.round()} with 2x text', (
+        tester,
+      ) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        tester.view.physicalSize = Size(width, 900);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+            child: buildPage(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('workspace list constrains expanded content width', (
+      tester,
+    ) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .getSize(
+              find.byKey(const ValueKey('workspace-detail-list-content')),
+            )
+            .width,
+        1120,
+      );
+    });
+
+    testWidgets('Kanban cards expose move semantics and 44 target', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kanban'));
+      await tester.pumpAndSettle();
+
+      final move = find.bySemanticsLabel('Move Design homepage, To Do');
+      expect(move, findsOneWidget);
+      expect(tester.getSize(move).height, greaterThanOrEqualTo(44));
+      semantics.dispose();
+    });
+
+    testWidgets('Kanban drag preserves status and progress mutation contract', (
+      tester,
+    ) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Kanban'));
+      await tester.pumpAndSettle();
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('Design homepage')),
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 200));
+      final doingTarget = find.ancestor(
+        of: find.text('In Progress'),
+        matching: find.byType(DragTarget<String>),
+      );
+      await gesture.moveTo(tester.getCenter(doingTarget));
+      await tester.pump(const Duration(milliseconds: 500));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final moved = await repository.getNode('task-open');
+      expect(moved?.status, NodeStatus.doing);
+      expect(moved?.progress, 0.1);
+    });
+
+    testWidgets('Gantt remains scrollable and semantic at 320', (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(buildPage());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('workspace-view-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Gantt').last);
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.bySemanticsLabel('Gantt chart, 3 tasks'), findsOneWidget);
+      final horizontal = tester.widget<SingleChildScrollView>(
+        find.byKey(const ValueKey('workspace-gantt-horizontal-scroll')),
+      );
+      final vertical = tester.widget<SingleChildScrollView>(
+        find.byKey(const ValueKey('workspace-gantt-vertical-scroll')),
+      );
+      expect(horizontal.scrollDirection, Axis.horizontal);
+      expect(vertical.scrollDirection, Axis.vertical);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('workspace-gantt-chart'))),
+        const Size(1260, 152),
+      );
+    });
+
+    testWidgets(
+      'workspace canvas chrome preserves viewport and object geometry',
+      (tester) async {
+        final canvasRepository = InMemoryCanvasBoardRepository();
+        final initial = CanvasBoard(
+          id: projectCanvasBoardId('project:Alpha'),
+          kind: CanvasBoardKind.project,
+          title: 'Alpha',
+          workspaceName: 'project:Alpha',
+          viewport: const CanvasViewport(x: 40, y: 60, scale: 1.25),
+          objects: <CanvasObject>[
+            CanvasObject(
+              id: 'geometry-lock',
+              type: CanvasObjectType.stickyNote,
+              geometry: const CanvasGeometry(
+                x: 120,
+                y: 240,
+                width: 220,
+                height: 140,
+              ),
+              createdAt: today,
+              updatedAt: today,
+            ),
+          ],
+          createdAt: today,
+          updatedAt: today,
+        );
+        await canvasRepository.saveBoard(initial);
+        await tester.pumpWidget(
+          buildPage(canvasRepository: canvasRepository, initialCanvas: true),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Show canvas controls'));
+        await tester.pumpAndSettle();
+
+        final canvas = tester.widget<MindmapCanvas>(find.byType(MindmapCanvas));
+        final persisted = await canvasRepository.getBoard(initial.id);
+        expect(canvas.board?.viewport.x, closeTo(initial.viewport.x, 0.001));
+        expect(canvas.board?.viewport.y, closeTo(initial.viewport.y, 0.001));
+        expect(
+          canvas.board?.viewport.scale,
+          closeTo(initial.viewport.scale, 0.001),
+        );
+        expect(
+          canvas.board?.objects
+              .singleWhere((object) => object.id == 'geometry-lock')
+              .geometry
+              .toJson(),
+          initial.objects.single.geometry.toJson(),
+        );
+        expect(persisted?.viewport.x, closeTo(initial.viewport.x, 0.001));
+        expect(persisted?.viewport.y, closeTo(initial.viewport.y, 0.001));
+        expect(
+          persisted?.viewport.scale,
+          closeTo(initial.viewport.scale, 0.001),
+        );
+        expect(
+          persisted?.objects
+              .singleWhere((object) => object.id == 'geometry-lock')
+              .geometry
+              .toJson(),
+          initial.objects.single.geometry.toJson(),
         );
       },
     );

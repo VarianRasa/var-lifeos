@@ -42,6 +42,78 @@ void main() {
     view.resetDevicePixelRatio();
   });
 
+  testWidgets(
+    'SettingsPage is constrained and usable at representative widths',
+    (tester) async {
+      for (final pixelRatio in <double>[1, 2]) {
+        for (final width in <double>[320, 768, 1024, 1440]) {
+          tester.view.physicalSize = Size(
+            width * pixelRatio,
+            1100 * pixelRatio,
+          );
+          tester.view.devicePixelRatio = pixelRatio;
+          await tester.pumpWidget(_settingsTestApp());
+          await tester.pumpAndSettle();
+
+          final page = find.byKey(const ValueKey('settings-page'));
+          expect(page, findsOneWidget);
+          expect(tester.getSize(page).width, lessThanOrEqualTo(960));
+
+          if (width == 320 && pixelRatio == 2) {
+            await _scrollToKey(tester, 'settings-automation-rules-card');
+            expect(tester.takeException(), isNull);
+            await tester.tap(find.text('Add Rule'));
+            await tester.pumpAndSettle();
+            expect(find.text('Buat Aturan Otomatisasi'), findsOneWidget);
+            await tester.tap(find.widgetWithText(TextButton, 'Batal'));
+            await tester.pumpAndSettle();
+
+            await _scrollToKey(tester, 'settings-byok-api-key');
+            expect(_keyFinder('settings-byok-api-key'), findsOneWidget);
+            expect(_keyFinder('settings-byok-save'), findsOneWidget);
+            expect(tester.takeException(), isNull);
+
+            await _tapKey(tester, 'data-management-toggle');
+            expect(find.text('Export Data'), findsOneWidget);
+            await tester.ensureVisible(find.text('Clear All Data'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Clear All Data'));
+            await tester.pumpAndSettle();
+            expect(find.text('Clear All Data?'), findsOneWidget);
+            await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+            await tester.pumpAndSettle();
+          }
+
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
+  );
+
+  testWidgets('clear data confirmation uses destructive action color', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_settingsTestApp());
+    await tester.pumpAndSettle();
+    await _tapKey(tester, 'data-management-toggle');
+    await tester.tap(find.text('Clear All Data'));
+    await tester.pumpAndSettle();
+
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Delete Everything'),
+    );
+    final dialogContext = tester.element(find.byType(AlertDialog));
+    final colors = Theme.of(dialogContext).colorScheme;
+    expect(
+      button.style?.backgroundColor?.resolve(<WidgetState>{}),
+      colors.error,
+    );
+    expect(
+      button.style?.foregroundColor?.resolve(<WidgetState>{}),
+      colors.onError,
+    );
+  });
+
   testWidgets('cloud extraction is disabled by default and persists opt-in', (
     tester,
   ) async {

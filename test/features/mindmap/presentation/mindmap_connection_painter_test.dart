@@ -62,8 +62,7 @@ void main() {
     expect(
       find.byWidgetPredicate(
         (widget) =>
-            widget is CustomPaint &&
-            widget.painter is MindmapConnectionPainter,
+            widget is CustomPaint && widget.painter is MindmapConnectionPainter,
       ),
       findsOneWidget,
     );

@@ -142,7 +142,6 @@ class AppTheme {
         color: semantic.card,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shadowColor: Colors.black.withValues(alpha: isDark ? 0.20 : 0.10),
         shape: containerShape,
         margin: EdgeInsets.zero,
       ),
@@ -169,9 +168,12 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: semantic.surfaceRaised,
-        border: _inputBorder(semantic.border, tokens.radiusElement),
-        enabledBorder: _inputBorder(semantic.border, tokens.radiusElement),
+        fillColor: semantic.surface,
+        border: _inputBorder(semantic.borderStrong, tokens.radiusElement),
+        enabledBorder: _inputBorder(
+          semantic.borderStrong,
+          tokens.radiusElement,
+        ),
         focusedBorder: _inputBorder(
           semantic.focusRing,
           tokens.radiusElement,
@@ -191,7 +193,11 @@ class AppTheme {
           semantic.border.withValues(alpha: 0.56),
           tokens.radiusElement,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        constraints: BoxConstraints(minHeight: tokens.minimumTarget),
         isDense: true,
         hintStyle: TextStyle(color: semantic.textSecondary),
         labelStyle: TextStyle(color: semantic.textSecondary),
@@ -208,6 +214,11 @@ class AppTheme {
           textStyle: WidgetStatePropertyAll(
             TextStyle(fontSize: 14 * scale, fontWeight: FontWeight.w600),
           ),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            return states.contains(WidgetState.disabled)
+                ? semantic.textDisabled
+                : semantic.onAccent;
+          }),
           overlayColor: stateOverlay,
           elevation: const WidgetStatePropertyAll(0),
         ),
@@ -350,7 +361,7 @@ class AppTheme {
         backgroundColor: semantic.popover,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
-        shadowColor: Colors.black.withValues(alpha: isDark ? 0.30 : 0.18),
+        shadowColor: scheme.shadow.withValues(alpha: isDark ? 0.36 : 0.16),
         shape: containerShape,
         titleTextStyle: _headingStyle(
           variant,

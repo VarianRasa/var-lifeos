@@ -19,8 +19,7 @@ class BoardVotingReactionWidget extends StatefulWidget {
       _BoardVotingReactionWidgetState();
 }
 
-class _BoardVotingReactionWidgetState
-    extends State<BoardVotingReactionWidget> {
+class _BoardVotingReactionWidgetState extends State<BoardVotingReactionWidget> {
   late int _votes;
   late Map<String, int> _reactions;
 

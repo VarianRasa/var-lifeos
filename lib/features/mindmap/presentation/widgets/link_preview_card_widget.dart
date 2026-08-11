@@ -95,7 +95,9 @@ class LinkPreviewCardWidget extends StatelessWidget {
                                 ? FontStyle.italic
                                 : FontStyle.normal,
                           ),
-                          maxLines: metadata.style == LinkPreviewStyle.quote ? 4 : 2,
+                          maxLines: metadata.style == LinkPreviewStyle.quote
+                              ? 4
+                              : 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],

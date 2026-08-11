@@ -76,6 +76,7 @@ void main() {
       find.byKey(const ValueKey('operation-preview-confirm-button')),
     );
     expect(importButton.onPressed, isNull);
+    expect(find.byIcon(Icons.warning_amber_outlined), findsWidgets);
 
     await tester.tap(
       find.byKey(const ValueKey('restore-destructive-confirmation-checkbox')),
@@ -85,11 +86,88 @@ void main() {
       find.byKey(const ValueKey('operation-preview-confirm-button')),
     );
     expect(importButton.onPressed, isNotNull);
+    final colorScheme = Theme.of(
+      tester.element(find.byType(AlertDialog)),
+    ).colorScheme;
+    expect(
+      importButton.style?.backgroundColor?.resolve(<WidgetState>{}),
+      colorScheme.error,
+    );
+    expect(
+      importButton.style?.foregroundColor?.resolve(<WidgetState>{}),
+      colorScheme.onError,
+    );
     expect((await repository.listNodes()).single.id, 'local');
+  });
+
+  testWidgets('recovery center fits representative widths', (tester) async {
+    final repository = InMemoryMindmapRepository(
+      seedNodes: [_node('local', 'Local node')],
+    );
+    for (final width in <double>[320, 768, 1024, 1440]) {
+      tester.view.physicalSize = Size(width, 1000);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(_app(repository));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('recovery-center')), findsOneWidget);
+      expect(
+        find.byKey(
+          ValueKey(
+            width < 1024 ? 'recovery-single-column' : 'recovery-two-column',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('recovery center fits 320 width at 2x text scale in RTL', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 1000);
+    tester.view.devicePixelRatio = 1;
+    await tester.pumpWidget(
+      _app(
+        InMemoryMindmapRepository(),
+        textScaler: const TextScaler.linear(2),
+        textDirection: TextDirection.rtl,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.byKey(const ValueKey('recovery-single-column')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sync message is announced as live status', (tester) async {
+    await tester.pumpWidget(_app(InMemoryMindmapRepository()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey('sync-device-name-field')),
+      'Renamed device',
+    );
+    await tester.tap(find.byKey(const ValueKey('sync-device-save-button')));
+    await tester.pump();
+
+    final status = find.byKey(const ValueKey('sync-last-message'));
+    expect(status, findsOneWidget);
+    expect(find.text('Device renamed'), findsOneWidget);
+    expect(tester.getSemantics(status).flagsCollection.isLiveRegion, isTrue);
   });
 }
 
-Widget _app(InMemoryMindmapRepository repository) {
+Widget _app(
+  InMemoryMindmapRepository repository, {
+  TextScaler textScaler = TextScaler.noScaling,
+  TextDirection textDirection = TextDirection.ltr,
+}) {
   return ProviderScope(
     overrides: [
       mindmapRepositoryProvider.overrideWithValue(repository),
@@ -117,7 +195,15 @@ Widget _app(InMemoryMindmapRepository repository) {
         ),
       ),
     ],
-    child: const MaterialApp(home: RecoveryCenterPage()),
+    child: MaterialApp(
+      home: MediaQuery(
+        data: MediaQueryData(textScaler: textScaler),
+        child: Directionality(
+          textDirection: textDirection,
+          child: const RecoveryCenterPage(),
+        ),
+      ),
+    ),
   );
 }
 

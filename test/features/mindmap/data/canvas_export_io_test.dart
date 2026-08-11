@@ -31,4 +31,29 @@ void main() {
     expect(result, p.join(tempDirectory.path, 'Var', 'exports', 'canvas.png'));
     expect(await File(result).readAsBytes(), bytes);
   });
+
+  test('saveCanvasSvg writes exact text under Var exports', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'var-canvas-export-',
+    );
+    addTearDown(() async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            null,
+          );
+      await tempDirectory.delete(recursive: true);
+    });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (call) async => tempDirectory.path,
+        );
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+
+    final result = await saveCanvasSvg(svg, 'canvas.svg');
+
+    expect(result, p.join(tempDirectory.path, 'Var', 'exports', 'canvas.svg'));
+    expect(await File(result).readAsString(), svg);
+  });
 }
