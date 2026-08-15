@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../domain/canvas_drawing_layer.dart';
 import 'brush_palette_bar.dart';
 import 'drawing_layer_panel.dart';
@@ -189,139 +190,152 @@ class _DrawingStudioOverlayState extends State<DrawingStudioOverlay> {
           )
         : null;
 
-    return Material(
-      color: Colors.transparent,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Gesture detector canvas
-          GestureDetector(
-            key: const Key('drawing-canvas-gesture-area'),
-            behavior: HitTestBehavior.opaque,
-            onPanStart: _onPanStart,
-            onPanUpdate: _onPanUpdate,
-            onPanEnd: _onPanEnd,
-            child: CustomPaint(
-              painter: _StudioDrawingPainter(
-                manager: _manager,
-                activeStroke: currentStroke,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Material(
+          color: Colors.transparent,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Gesture detector canvas
+              GestureDetector(
+                key: const Key('drawing-canvas-gesture-area'),
+                behavior: HitTestBehavior.opaque,
+                onPanStart: _onPanStart,
+                onPanUpdate: _onPanUpdate,
+                onPanEnd: _onPanEnd,
+                child: CustomPaint(
+                  painter: _StudioDrawingPainter(
+                    manager: _manager,
+                    activeStroke: currentStroke,
+                  ),
+                  size: Size.infinite,
+                ),
               ),
-              size: Size.infinite,
-            ),
-          ),
 
-          // Top Header Action Bar
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Undo / Redo / Clear actions
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh.withValues(
-                      alpha: 0.9,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: colorScheme.outlineVariant),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        key: const Key('undo-button'),
-                        icon: const Icon(Icons.undo, size: 20),
-                        tooltip: 'Undo',
-                        onPressed: _manager.canUndo ? _undo : null,
+              // Top Header Action Bar
+              Positioned(
+                top: 16,
+                left: 16,
+                right: 16,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Undo / Redo / Clear actions
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
                       ),
-                      IconButton(
-                        key: const Key('redo-button'),
-                        icon: const Icon(Icons.redo, size: 20),
-                        tooltip: 'Redo',
-                        onPressed: _manager.canRedo ? _redo : null,
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        key: const Key('clear-layer-button'),
-                        icon: const Icon(Icons.delete_sweep_outlined, size: 20),
-                        tooltip: 'Clear Active Layer',
-                        onPressed:
-                            (activeLayer?.strokes.isNotEmpty ?? false) &&
-                                !(activeLayer?.isLocked ?? false)
-                            ? _clearActiveLayer
-                            : null,
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        key: const Key('toggle-layer-panel-button'),
-                        icon: Icon(
-                          _showLayerPanel
-                              ? Icons.layers
-                              : Icons.layers_outlined,
-                          size: 20,
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHigh.withValues(
+                          alpha: 0.9,
                         ),
-                        tooltip: 'Layers',
-                        color: _showLayerPanel ? colorScheme.primary : null,
-                        onPressed: () =>
-                            setState(() => _showLayerPanel = !_showLayerPanel),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: colorScheme.outlineVariant),
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            key: const Key('undo-button'),
+                            icon: const Icon(Icons.undo, size: 20),
+                            tooltip: 'Undo',
+                            onPressed: _manager.canUndo ? _undo : null,
+                          ),
+                          IconButton(
+                            key: const Key('redo-button'),
+                            icon: const Icon(Icons.redo, size: 20),
+                            tooltip: 'Redo',
+                            onPressed: _manager.canRedo ? _redo : null,
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            key: const Key('clear-layer-button'),
+                            icon: const Icon(
+                              Icons.delete_sweep_outlined,
+                              size: 20,
+                            ),
+                            tooltip: 'Clear Active Layer',
+                            onPressed:
+                                (activeLayer?.strokes.isNotEmpty ?? false) &&
+                                    !(activeLayer?.isLocked ?? false)
+                                ? _clearActiveLayer
+                                : null,
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            key: const Key('toggle-layer-panel-button'),
+                            icon: Icon(
+                              _showLayerPanel
+                                  ? Icons.layers
+                                  : Icons.layers_outlined,
+                              size: 20,
+                            ),
+                            tooltip: 'Layers',
+                            color: _showLayerPanel ? colorScheme.primary : null,
+                            onPressed: () => setState(
+                              () => _showLayerPanel = !_showLayerPanel,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Exit studio button
+                    IconButton.filledTonal(
+                      key: const Key('exit-studio-button'),
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Exit Studio',
+                      onPressed: widget.onClose,
+                    ),
+                  ],
+                ),
+              ),
+
+              // Layer Panel (Floating on right side)
+              if (_showLayerPanel)
+                Positioned(
+                  top: 72,
+                  right: 16,
+                  child: DrawingLayerPanel(
+                    manager: _manager,
+                    onAddLayer: _addLayer,
+                    onRemoveLayer: _removeLayer,
+                    onSelectLayer: _selectLayer,
+                    onToggleVisibility: _toggleVisibility,
+                    onToggleLock: _toggleLock,
+                    onOpacityChanged: _setLayerOpacity,
+                    onBlendModeChanged: _setLayerBlendMode,
                   ),
                 ),
 
-                // Exit studio button
-                IconButton.filledTonal(
-                  key: const Key('exit-studio-button'),
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Exit Studio',
-                  onPressed: widget.onClose,
+              // Bottom Brush Palette Bar
+              Positioned(
+                bottom: 24,
+                left: 16,
+                right: 16,
+                child: Center(
+                  child: BrushPaletteBar(
+                    selectedBrush: _selectedBrush,
+                    brushSize: _brushSize,
+                    brushOpacity: _brushOpacity,
+                    selectedColor: _selectedColor,
+                    onBrushChanged: (b) => setState(() => _selectedBrush = b),
+                    onSizeChanged: (s) => setState(() => _brushSize = s),
+                    onOpacityChanged: (o) => setState(() => _brushOpacity = o),
+                    onColorChanged: (c) => setState(() => _selectedColor = c),
+                    onClose: widget.onClose,
+                  ),
                 ),
-              ],
-            ),
-          ),
-
-          // Layer Panel (Floating on right side)
-          if (_showLayerPanel)
-            Positioned(
-              top: 72,
-              right: 16,
-              child: DrawingLayerPanel(
-                manager: _manager,
-                onAddLayer: _addLayer,
-                onRemoveLayer: _removeLayer,
-                onSelectLayer: _selectLayer,
-                onToggleVisibility: _toggleVisibility,
-                onToggleLock: _toggleLock,
-                onOpacityChanged: _setLayerOpacity,
-                onBlendModeChanged: _setLayerBlendMode,
               ),
-            ),
-
-          // Bottom Brush Palette Bar
-          Positioned(
-            bottom: 24,
-            left: 16,
-            right: 16,
-            child: Center(
-              child: BrushPaletteBar(
-                selectedBrush: _selectedBrush,
-                brushSize: _brushSize,
-                brushOpacity: _brushOpacity,
-                selectedColor: _selectedColor,
-                onBrushChanged: (b) => setState(() => _selectedBrush = b),
-                onSizeChanged: (s) => setState(() => _brushSize = s),
-                onOpacityChanged: (o) => setState(() => _brushOpacity = o),
-                onColorChanged: (c) => setState(() => _selectedColor = c),
-              ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

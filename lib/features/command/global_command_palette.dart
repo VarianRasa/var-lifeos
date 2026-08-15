@@ -23,7 +23,6 @@ import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
 import '../../shared/widgets/astryx_kbd.dart';
 import '../calendar/presentation/inbox_triage_dialog.dart';
-import '../calendar/presentation/periodic_review_wizard_dialog.dart';
 import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -695,12 +694,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                       onCreateWeeklyReview: _createWeeklyReview,
                       onApplyRoutines: _applyReadyRoutinesForToday,
                       onTriageInbox: () => showInboxTriageDialog(context),
-                      onPeriodicReview: () => showPeriodicReviewWizardDialog(
-                        context,
-                        today: today,
-                        start: today.subtract(const Duration(days: 6)),
-                        end: today,
-                      ),
+                      onPeriodicReview: () async => null,
                       onManageAutomations: () =>
                           showAutomationRuleEditorDialog(context),
                     ),

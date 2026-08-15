@@ -9,13 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/calendar/calendar_page.dart';
-import '../../features/calendar/day_page.dart';
 import '../../features/focus/focus_page.dart';
 import '../../features/graph/graph_page.dart';
 import '../../features/insights/insights_page.dart';
 import '../../features/mindmap/presentation/collab_page.dart';
 import '../../features/mindmap/presentation/node_detail_page.dart';
+import '../../features/mindmap/presentation/studio_canvas_page.dart';
 import '../../features/search/presentation/search_page.dart';
 import '../../features/settings/settings_page.dart';
 import '../../features/sync/presentation/recovery_center.dart';
@@ -32,7 +31,7 @@ GoRouter createAppRouter({String? initialLocation}) {
   final todayStr = dayKey(DateTime.now());
   final nodeDetailExitController = NodeDetailExitController();
   return GoRouter(
-    initialLocation: initialLocation ?? '/calendar/$todayStr',
+    initialLocation: initialLocation ?? '/studio',
     debugLogDiagnostics: false,
     routes: [
       // A shell wraps every top-level route in the adaptive nav (rail/bar).
@@ -42,41 +41,26 @@ GoRouter createAppRouter({String? initialLocation}) {
           child: AdaptiveScaffold(body: child),
         ),
         routes: [
-          // Calendar (home is now Canvas DayPage).
+          // Studio Canvas Home (Figma-Style Canvas Workspace).
+          GoRoute(
+            path: '/studio',
+            name: 'studio',
+            pageBuilder: (context, state) {
+              final fileId = state.uri.queryParameters['file'];
+              final pageId = state.uri.queryParameters['page'];
+              return NoTransitionPage<void>(
+                key: state.pageKey,
+                child: StudioCanvasPage(
+                  initialFileId: fileId,
+                  initialPageId: pageId,
+                ),
+              );
+            },
+          ),
           GoRoute(
             path: '/calendar',
             name: AppRoute.calendar.name,
-            redirect: (context, state) {
-              if (state.uri.path == '/calendar') {
-                return '/calendar/${dayKey(DateTime.now())}';
-              }
-              return null;
-            },
-            routes: [
-              // A specific day canvas page.
-              // :date is an ISO date string (yyyy-MM-dd).
-              GoRoute(
-                path: ':date',
-                name: 'day',
-                pageBuilder: (context, state) {
-                  final date = _parseDateParam(state.pathParameters['date']);
-                  final highlight = state.uri.queryParameters['highlight'];
-                  final boardId = state.uri.queryParameters['board'];
-                  final panel = AppRoute.fromPanel(
-                    state.uri.queryParameters['panel'],
-                  );
-                  return NoTransitionPage<void>(
-                    key: state.pageKey,
-                    child: _DayWithPanel(
-                      date: date,
-                      highlightNodeId: highlight,
-                      initialBoardId: boardId,
-                      panel: panel,
-                    ),
-                  );
-                },
-              ),
-            ],
+            redirect: (context, state) => '/studio',
           ),
           GoRoute(
             path: '/calendar/:date/node/:nodeId',
@@ -198,52 +182,8 @@ String _legacyPanelLocation(GoRouterState state, AppRoute panel, String today) {
   ).toString();
 }
 
-class _DayWithPanel extends StatelessWidget {
-  const _DayWithPanel({
-    required this.date,
-    this.highlightNodeId,
-    this.initialBoardId,
-    this.panel,
-  });
-
-  final DateTime date;
-  final String? highlightNodeId;
-  final String? initialBoardId;
-  final AppRoute? panel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: DayPage(
-            date: date,
-            highlightNodeId: highlightNodeId,
-            initialBoardId: initialBoardId,
-          ),
-        ),
-        if (panel case final panel?)
-          Positioned.fill(
-            child: ValueListenableBuilder<int>(
-              valueListenable: routePanelResetController,
-              builder: (context, reset, child) => _ResizableRoutePanel(
-                key: ValueKey('route-panel-${panel.name}-$reset'),
-                panel: panel,
-                onClose: () => goToDay(context, date),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
 class _ResizableRoutePanel extends StatefulWidget {
-  const _ResizableRoutePanel({
-    required this.panel,
-    required this.onClose,
-    super.key,
-  });
+  const _ResizableRoutePanel({required this.panel, required this.onClose});
 
   final AppRoute panel;
   final VoidCallback onClose;
@@ -390,7 +330,7 @@ class _ResizableRoutePanelState extends State<_ResizableRoutePanel>
   }
 
   Widget _panelPage(AppRoute panel) => switch (panel) {
-    AppRoute.calendar => const CalendarPage(),
+    AppRoute.calendar => const StudioCanvasPage(),
     AppRoute.search => const SearchPage(),
     AppRoute.focus => const FocusPage(),
     AppRoute.workspaces => const WorkspacesPage(),
@@ -497,10 +437,10 @@ enum AppRoute {
   }
 
   IconData get icon => switch (this) {
-    AppRoute.calendar => Icons.calendar_month_outlined,
+    AppRoute.calendar => Icons.dashboard_customize_outlined,
     AppRoute.search => Icons.search_outlined,
     AppRoute.focus => Icons.timer_outlined,
-    AppRoute.workspaces => Icons.workspaces_outline,
+    AppRoute.workspaces => Icons.folder_open_outlined,
     AppRoute.insights => Icons.insights_outlined,
     AppRoute.graph => Icons.account_tree_outlined,
     AppRoute.collab => Icons.people_outline,
@@ -508,10 +448,10 @@ enum AppRoute {
   };
 
   IconData get selectedIcon => switch (this) {
-    AppRoute.calendar => Icons.calendar_month_rounded,
+    AppRoute.calendar => Icons.dashboard_customize_rounded,
     AppRoute.search => Icons.search_rounded,
     AppRoute.focus => Icons.timer_rounded,
-    AppRoute.workspaces => Icons.workspaces,
+    AppRoute.workspaces => Icons.folder_rounded,
     AppRoute.insights => Icons.insights_rounded,
     AppRoute.graph => Icons.account_tree,
     AppRoute.collab => Icons.people,
@@ -519,10 +459,10 @@ enum AppRoute {
   };
 
   String get label => switch (this) {
-    AppRoute.calendar => 'Calendar',
+    AppRoute.calendar => 'Studio',
     AppRoute.search => 'Search',
     AppRoute.focus => 'Focus',
-    AppRoute.workspaces => 'Workspaces',
+    AppRoute.workspaces => 'Files',
     AppRoute.insights => 'Insights',
     AppRoute.graph => 'Graph',
     AppRoute.collab => 'Collab',
@@ -532,10 +472,9 @@ enum AppRoute {
 
 String appRouteLocation(BuildContext context, AppRoute route) {
   if (route == AppRoute.search) return route.path;
-  final state = GoRouterState.of(context);
-  final date = state.pathParameters['date'] ?? dayKey(DateTime.now());
+  if (route == AppRoute.calendar) return '/studio';
   return Uri(
-    path: '/calendar/$date',
+    path: '/studio',
     queryParameters: <String, String>{'panel': route.name},
   ).toString();
 }

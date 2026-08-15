@@ -17,7 +17,6 @@ import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
-import '../calendar/presentation/periodic_review_trigger_banner.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/application/recurring_routine_application.dart';
 import '../mindmap/domain/automation_event.dart';
@@ -1265,10 +1264,6 @@ class _InsightsBody extends StatelessWidget {
                     key: const ValueKey('insights-supplemental-region'),
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      adaptiveLegacyPanel(
-                        PeriodicReviewTriggerBanner(today: today, nodes: nodes),
-                      ),
-                      SizedBox(height: spacing),
                       adaptiveLegacyPanel(
                         WorkspaceRhythmTracker(
                           workspaceContexts: workspaceContexts,

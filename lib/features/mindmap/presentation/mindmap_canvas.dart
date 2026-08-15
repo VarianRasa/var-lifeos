@@ -8840,7 +8840,9 @@ class MindmapCanvasState extends State<MindmapCanvas>
               ),
               tool(
                 key: const ValueKey('mindmap-canvas-create-freehand'),
-                label: 'Drawing Studio / Brush',
+                label: _isDrawingStudioOpen
+                    ? 'Exit Drawing Studio'
+                    : 'Drawing Studio / Brush',
                 icon: Icons.brush_outlined,
                 selected:
                     _isDrawingStudioOpen ||
@@ -8848,7 +8850,7 @@ class MindmapCanvasState extends State<MindmapCanvas>
                 type: CanvasObjectType.freehand,
                 onPressed: () {
                   setState(() {
-                    _isDrawingStudioOpen = true;
+                    _isDrawingStudioOpen = !_isDrawingStudioOpen;
                   });
                 },
               ),

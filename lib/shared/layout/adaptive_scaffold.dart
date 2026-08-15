@@ -55,7 +55,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         final visible = ref.read(quickCaptureVisibleProvider);
         ref.read(quickCaptureVisibleProvider.notifier).state = !visible;
       case DesktopMenuAction.today:
-        context.go('/calendar/${dayKey(DateTime.now())}');
+        context.go('/studio');
       case DesktopMenuAction.commandPalette:
         showGlobalCommandPalette(context);
       case DesktopMenuAction.toggleTopHeader:
@@ -64,8 +64,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
       case DesktopMenuAction.toggleAllCanvasControls:
         break;
       case DesktopMenuAction.closePanel:
-        final date = GoRouterState.of(context).pathParameters['date'];
-        context.go('/calendar/${date ?? dayKey(DateTime.now())}');
+        context.go('/studio');
       case DesktopMenuAction.resetPanelWidth:
         routePanelResetController.value++;
       case DesktopMenuAction.recoveryCenter:
@@ -188,9 +187,9 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
 
 const _primaryRoutes = <AppRoute>[
   AppRoute.calendar,
+  AppRoute.workspaces,
   AppRoute.search,
   AppRoute.focus,
-  AppRoute.workspaces,
 ];
 
 const _analysisRoutes = <AppRoute>[AppRoute.insights, AppRoute.graph];

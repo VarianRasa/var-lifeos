@@ -13,6 +13,7 @@ class BrushPaletteBar extends StatelessWidget {
     required this.onSizeChanged,
     required this.onOpacityChanged,
     required this.onColorChanged,
+    this.onClose,
     this.colorSwatches = defaultSwatches,
   });
 
@@ -24,6 +25,7 @@ class BrushPaletteBar extends StatelessWidget {
   final ValueChanged<double> onSizeChanged;
   final ValueChanged<double> onOpacityChanged;
   final ValueChanged<Color> onColorChanged;
+  final VoidCallback? onClose;
   final List<Color> colorSwatches;
 
   static const List<Color> defaultSwatches = <Color>[
@@ -87,44 +89,60 @@ class BrushPaletteBar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Brush type selectors
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: CanvasBrushType.values
-                  .map((brush) {
-                    final isSelected = brush == selectedBrush;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Tooltip(
-                        message: _getBrushLabel(brush),
-                        child: ChoiceChip(
-                          showCheckmark: false,
-                          avatar: Icon(
-                            _getBrushIcon(brush),
-                            size: 16,
-                            color: isSelected
-                                ? colorScheme.onPrimary
-                                : colorScheme.onSurfaceVariant,
-                          ),
-                          label: Text(
-                            _getBrushLabel(brush),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isSelected
-                                  ? colorScheme.onPrimary
-                                  : colorScheme.onSurfaceVariant,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: CanvasBrushType.values
+                        .map((brush) {
+                          final isSelected = brush == selectedBrush;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Tooltip(
+                              message: _getBrushLabel(brush),
+                              child: ChoiceChip(
+                                showCheckmark: false,
+                                avatar: Icon(
+                                  _getBrushIcon(brush),
+                                  size: 16,
+                                  color: isSelected
+                                      ? colorScheme.onPrimary
+                                      : colorScheme.onSurfaceVariant,
+                                ),
+                                label: Text(
+                                  _getBrushLabel(brush),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isSelected
+                                        ? colorScheme.onPrimary
+                                        : colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                selected: isSelected,
+                                selectedColor: colorScheme.primary,
+                                onSelected: (_) => onBrushChanged(brush),
+                              ),
                             ),
-                          ),
-                          selected: isSelected,
-                          selectedColor: colorScheme.primary,
-                          onSelected: (_) => onBrushChanged(brush),
-                        ),
-                      ),
-                    );
-                  })
-                  .toList(growable: false),
-            ),
+                          );
+                        })
+                        .toList(growable: false),
+                  ),
+                ),
+              ),
+              if (onClose != null) ...[
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  key: const Key('brush-palette-done-button'),
+                  icon: const Icon(Icons.check, size: 18),
+                  tooltip: 'Done Drawing / Exit',
+                  onPressed: onClose,
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 6),
 
