@@ -7,7 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import 'doodle_border.dart';
+import '../../core/constants/app_constants.dart';
 
 class SearchField extends StatelessWidget {
   const SearchField({
@@ -31,52 +31,52 @@ class SearchField extends StatelessWidget {
   Widget build(BuildContext context) {
     final query = controller.text;
     final theme = Theme.of(context);
-    return SizedBox(
-      width: MediaQuery.sizeOf(context).width >= 840
-          ? desktopWidth
-          : mobileWidth,
-      child: TextField(
-        focusNode: focusNode,
-        controller: controller,
-        style: const TextStyle(fontSize: 14),
-        decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: TextStyle(
-            fontSize: 14,
-            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.55),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final preferredWidth = availableWidth > LayoutConstants.mobileBreakpoint
+            ? desktopWidth
+            : mobileWidth;
+        final width = preferredWidth.clamp(0.0, availableWidth).toDouble();
+        return SizedBox(
+          width: width,
+          height: 44,
+          child: TextField(
+            focusNode: focusNode,
+            controller: controller,
+            style: theme.textTheme.bodyMedium,
+            textAlignVertical: TextAlignVertical.center,
+            decoration: InputDecoration(
+              hintText: hintText,
+              prefixIcon: Icon(
+                Icons.search,
+                size: 20,
+                color: query.isNotEmpty
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 44,
+                minHeight: 44,
+              ),
+              suffixIcon: query.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        controller.clear();
+                        onChanged('');
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            onChanged: onChanged,
           ),
-          prefixIcon: Icon(
-            Icons.search,
-            size: 20,
-            color: query.isNotEmpty ? theme.colorScheme.primary : null,
-          ),
-          suffixIcon: query.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  tooltip: 'Clear',
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                )
-              : null,
-          border: DoodleInputBorder(
-            borderSide: BorderSide(color: theme.colorScheme.outlineVariant),
-            radius: 10,
-            wobble: 1.4,
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 8,
-            vertical: 6,
-          ),
-          isDense: true,
-          filled: true,
-          fillColor: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.4,
-          ),
-        ),
-        onChanged: onChanged,
-      ),
+        );
+      },
     );
   }
 }

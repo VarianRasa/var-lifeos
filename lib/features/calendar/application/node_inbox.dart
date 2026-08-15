@@ -7,7 +7,9 @@ const inboxNodeDataKey = 'inbox';
 const inboxAssignedFromDataKey = 'inboxAssignedFrom';
 
 bool isInboxNode(MindmapNode node) {
-  return node.data[inboxNodeDataKey] == true && !node.isArchived;
+  return (node.status == NodeStatus.inbox ||
+          node.data[inboxNodeDataKey] == true) &&
+      !node.isArchived;
 }
 
 List<MindmapNode> inboxNodesForDay(Iterable<MindmapNode> nodes, DateTime day) {
@@ -20,6 +22,7 @@ List<MindmapNode> inboxNodesForDay(Iterable<MindmapNode> nodes, DateTime day) {
 
 MindmapNode markInboxNode(MindmapNode node, {required bool isInbox}) {
   return node.copyWith(
+    status: isInbox ? NodeStatus.inbox : NodeStatus.next,
     data: {...node.data, inboxNodeDataKey: isInbox},
     updatedAt: DateTime.now(),
   );
@@ -29,11 +32,20 @@ MindmapNode assignInboxNodeToDay(MindmapNode node, DateTime day) {
   final normalizedDay = DateTime(day.year, day.month, day.day);
   return node.copyWith(
     day: normalizedDay,
+    status: NodeStatus.next,
     data: {
       ...node.data,
       inboxNodeDataKey: false,
       inboxAssignedFromDataKey: node.day.toIso8601String(),
     },
+    updatedAt: DateTime.now(),
+  );
+}
+
+MindmapNode deferInboxNode(MindmapNode node) {
+  return node.copyWith(
+    status: NodeStatus.someday,
+    data: {...node.data, inboxNodeDataKey: false},
     updatedAt: DateTime.now(),
   );
 }

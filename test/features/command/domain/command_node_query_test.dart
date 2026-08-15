@@ -69,4 +69,16 @@ void main() {
     expect(query.relatedNodeIds, ['launch-task', 'launch-goal', 'daily-note']);
     expect(query.hasFilters, isTrue);
   });
+
+  test('parses inbox, next, and someday status query modifiers', () {
+    final today = DateTime(2026, 6, 18);
+
+    final q1 = commandNodeQueryFromText('status:inbox', today: today);
+    final q2 = commandNodeQueryFromText('s:next', today: today);
+    final q3 = commandNodeQueryFromText('status:someday', today: today);
+
+    expect(q1.status, NodeStatus.inbox);
+    expect(q2.status, NodeStatus.next);
+    expect(q3.status, NodeStatus.someday);
+  });
 }

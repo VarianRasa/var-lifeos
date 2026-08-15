@@ -3,6 +3,7 @@ import 'package:sembast/sembast_memory.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/data/sembast_mindmap_node_database.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
+import 'package:var_app/features/mindmap/domain/mindmap_node_revision.dart';
 
 void main() {
   late Database database;
@@ -46,6 +47,115 @@ void main() {
 
     expect(await nodeDatabase.getNode('note-1'), isNull);
     expect(await nodeDatabase.listNodes(), isEmpty);
+  });
+
+  test(
+    'records create update noop delete restore and monotonic sequence',
+    () async {
+      final node = _node(
+        id: 'history-1',
+        type: NodeType.note,
+        title: 'Original',
+        day: DateTime(2026, 6, 18),
+        now: DateTime(2026, 6, 18, 8),
+      );
+      await nodeDatabase.upsertNode(node);
+      final updated = node.copyWith(
+        title: 'Updated',
+        updatedAt: DateTime(2026, 6, 18, 9),
+      );
+      await nodeDatabase.upsertNode(updated);
+      await nodeDatabase.upsertNode(updated);
+      await nodeDatabase.deleteNode(node.id);
+
+      var revisions = await nodeDatabase.listRevisions(node.id);
+      expect(revisions.map((revision) => revision.kind), [
+        MindmapNodeRevisionKind.deleted,
+        MindmapNodeRevisionKind.updated,
+        MindmapNodeRevisionKind.created,
+      ]);
+      final restored = await nodeDatabase.restoreRevision(
+        revisions.last.id,
+        now: DateTime(2026, 6, 18, 10),
+      );
+      revisions = await nodeDatabase.listRevisions(node.id);
+      expect(restored.title, 'Original');
+      expect(revisions.first.kind, MindmapNodeRevisionKind.restored);
+      expect(revisions.map((revision) => revision.sequence), [4, 3, 2, 1]);
+    },
+  );
+
+  test('deletes revision history and resets its sequence head', () async {
+    final node = _node(
+      id: 'purged-history',
+      type: NodeType.expense,
+      title: 'Private receipt',
+      day: DateTime(2026, 6, 18),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    await nodeDatabase.upsertNode(node);
+    await nodeDatabase.upsertNode(
+      node.copyWith(title: 'Updated', updatedAt: DateTime(2026, 6, 18, 9)),
+    );
+
+    await nodeDatabase.deleteNode(node.id);
+    await nodeDatabase.deleteRevisions(node.id);
+
+    expect(await nodeDatabase.listRevisions(node.id), isEmpty);
+    await nodeDatabase.upsertNode(
+      node.copyWith(title: 'Recreated', updatedAt: DateTime(2026, 6, 18, 10)),
+    );
+    expect((await nodeDatabase.listRevisions(node.id)).single.sequence, 1);
+  });
+
+  test('adds baseline when existing node has no revision head', () async {
+    final node = _node(
+      id: 'legacy-1',
+      type: NodeType.note,
+      title: 'Legacy',
+      day: DateTime(2026, 6, 18),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    final store = stringMapStoreFactory.store('mindmap_nodes');
+    await store.record(node.id).put(database, {
+      'node': node.toJson(),
+      'day': '2026-06-18',
+    });
+
+    await nodeDatabase.upsertNode(
+      node.copyWith(title: 'Changed', updatedAt: DateTime(2026, 6, 18, 9)),
+    );
+
+    final revisions = await nodeDatabase.listRevisions(node.id);
+    expect(revisions.last.kind, MindmapNodeRevisionKind.baseline);
+    expect(revisions.last.snapshot.title, 'Legacy');
+    expect(revisions.first.kind, MindmapNodeRevisionKind.updated);
+  });
+
+  test('retains latest 50 revisions and head survives reopen', () async {
+    var node = _node(
+      id: 'retention-1',
+      type: NodeType.note,
+      title: '0',
+      day: DateTime(2026, 6, 18),
+      now: DateTime(2026, 6, 18, 8),
+    );
+    await nodeDatabase.upsertNode(node);
+    for (var index = 1; index <= 55; index++) {
+      node = node.copyWith(
+        title: '$index',
+        updatedAt: DateTime(2026, 6, 18, 8, index),
+      );
+      await nodeDatabase.upsertNode(node);
+    }
+    final reopened = SembastMindmapNodeDatabase(database: database);
+    final revisions = await reopened.listRevisions(node.id);
+
+    expect(revisions, hasLength(50));
+    expect(revisions.first.sequence, 56);
+    expect(revisions.last.sequence, 7);
+    await reopened.deleteNode(node.id);
+    expect((await reopened.listRevisions(node.id)).first.sequence, 57);
   });
 
   test('filters nodes by denormalized day key', () async {

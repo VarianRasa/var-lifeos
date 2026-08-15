@@ -45,15 +45,22 @@ final class NodeKnowledgeIndex {
     }
 
     final unlinkedMentions = <MindmapNode>[];
+    final incomingMentions = <MindmapNode>[];
     for (final candidate in nodes) {
       if (candidate.id == nodeId) continue;
       if (!includeArchived && candidate.isArchived) continue;
-      if (node.relatedNodeIds.contains(candidate.id)) continue;
-      final title = candidate.title.trim();
-      if (title.length < 4) continue;
-      if (hasBracketedTitle(node.body, title)) continue;
-      if (hasPlainTitleMention(node.body, title)) {
-        unlinkedMentions.add(candidate);
+      if (!node.relatedNodeIds.contains(candidate.id)) {
+        final title = candidate.title.trim();
+        if (title.length >= 4 &&
+            !hasBracketedTitle(node.body, title) &&
+            hasPlainTitleMention(node.body, title)) {
+          unlinkedMentions.add(candidate);
+        }
+      }
+      if (!candidate.relatedNodeIds.contains(nodeId) &&
+          !hasBracketedTitle(candidate.body, node.title) &&
+          hasPlainTitleMention(candidate.body, node.title)) {
+        incomingMentions.add(candidate);
       }
     }
 
@@ -63,6 +70,7 @@ final class NodeKnowledgeIndex {
       brokenOutgoingIds: List.unmodifiable(brokenOutgoingIds),
       backlinks: List.unmodifiable(backlinks),
       unlinkedMentions: List.unmodifiable(unlinkedMentions),
+      incomingMentions: List.unmodifiable(incomingMentions),
     );
   }
 }
@@ -74,6 +82,7 @@ final class NodeKnowledgeLinks {
     this.brokenOutgoingIds = const [],
     this.backlinks = const [],
     this.unlinkedMentions = const [],
+    this.incomingMentions = const [],
   });
 
   final String nodeId;
@@ -81,6 +90,7 @@ final class NodeKnowledgeLinks {
   final List<String> brokenOutgoingIds;
   final List<NodeBacklink> backlinks;
   final List<MindmapNode> unlinkedMentions;
+  final List<MindmapNode> incomingMentions;
 
   bool get hasBrokenOutgoing => brokenOutgoingIds.isNotEmpty;
 }

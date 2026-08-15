@@ -5,10 +5,39 @@ import 'package:var_app/features/calendar/domain/time_block.dart';
 import 'package:var_app/features/mindmap/application/mindmap_mutation_controller.dart';
 import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
+import 'package:var_app/features/mindmap/domain/inline_node_workspace_policy.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node_data.dart';
 
 void main() {
+  test('savePatch merges draft into latest repository node', () async {
+    final original = MindmapNode.create(
+      id: 'patch-node',
+      type: NodeType.note,
+      title: 'Original',
+      body: 'Old body',
+      day: DateTime(2026, 7, 15),
+      now: DateTime(2026, 7, 15),
+    );
+    final repository = InMemoryMindmapRepository(seedNodes: [original]);
+    final container = ProviderContainer(
+      overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    await repository.saveNode(original.copyWith(body: 'Concurrent body'));
+
+    final saved = await container
+        .read(mindmapMutationControllerProvider)
+        .savePatch(
+          original.id,
+          InlineNodeDraftPatch(title: 'Draft title'),
+          now: DateTime(2026, 7, 15, 1),
+        );
+
+    expect(saved!.title, 'Draft title');
+    expect(saved.body, 'Concurrent body');
+  });
+
   test('saveNode persists through repository', () async {
     final repository = InMemoryMindmapRepository();
     final container = ProviderContainer(

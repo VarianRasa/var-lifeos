@@ -26,6 +26,10 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Var uses the microphone only when you record audio for an Audio node.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Var uses your location only when you attach your current position to an Event.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

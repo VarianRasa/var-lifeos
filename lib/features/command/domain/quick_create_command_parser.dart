@@ -82,7 +82,7 @@ QuickCreateCommand? quickCreateCommandFromQuery(
   final tags = <String>[];
   var day = defaultDay.dateOnly;
   DateTime? dueDate;
-  var status = NodeStatus.open;
+  var status = NodeStatus.inbox;
   var priority = NodePriority.none;
   var project = '';
   var area = '';

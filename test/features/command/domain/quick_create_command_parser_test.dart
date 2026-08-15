@@ -27,7 +27,7 @@ void main() {
     expect(command.label, 'Create Task: Ship release');
   });
 
-  test('supports type aliases and defaults the node day', () {
+  test('supports type aliases and defaults the node day and inbox status', () {
     final today = DateTime(2026, 6, 18);
     final defaultDay = DateTime(2026, 7, 4);
 
@@ -40,6 +40,7 @@ void main() {
     expect(command, isNotNull);
     expect(command!.type, NodeType.task);
     expect(command.title, 'Buy milk');
+    expect(command.status, NodeStatus.inbox);
     expect(command.priority, NodePriority.urgent);
     expect(command.dueDate, today.dateOnly);
     expect(command.day, defaultDay.dateOnly);

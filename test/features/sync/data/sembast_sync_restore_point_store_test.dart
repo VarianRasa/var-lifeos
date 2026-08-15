@@ -67,17 +67,57 @@ void main() {
     expect(await store.read('oldest'), isNull);
     expect((await store.recent()).map((point) => point.id), ['newest']);
   });
+
+  test('account-scoped prune preserves another account', () async {
+    final database = await databaseFactoryMemory.openDatabase(
+      'sync-restore-points-account-prune.db',
+    );
+    addTearDown(database.close);
+    final store = SembastSyncRestorePointStore(database: database);
+    await store.add(
+      _point(
+        id: 'current-old',
+        title: 'Current old',
+        createdAt: DateTime(2026, 6, 20, 9),
+        accountEmail: 'current@example.com',
+      ),
+    );
+    await store.add(
+      _point(
+        id: 'current-new',
+        title: 'Current new',
+        createdAt: DateTime(2026, 6, 20, 11),
+        accountEmail: 'current@example.com',
+      ),
+    );
+    await store.add(
+      _point(
+        id: 'other',
+        title: 'Other account',
+        createdAt: DateTime(2026, 6, 20, 8),
+        accountEmail: 'other@example.com',
+      ),
+    );
+
+    await store.prune(keepLatest: 1, accountEmail: 'CURRENT@example.com');
+
+    expect(await store.read('current-old'), isNull);
+    expect(await store.read('current-new'), isNotNull);
+    expect(await store.read('other'), isNotNull);
+  });
 }
 
 SyncRestorePoint _point({
   required String id,
   required String title,
   required DateTime createdAt,
+  String accountEmail = '',
 }) {
   return SyncRestorePoint(
     id: id,
     label: title,
     createdAt: createdAt,
+    accountEmail: accountEmail,
     document: MindmapBackupDocument.create(
       sourceDevice: const SyncDeviceIdentity(id: 'device-a', label: 'Laptop'),
       exportedAt: createdAt,

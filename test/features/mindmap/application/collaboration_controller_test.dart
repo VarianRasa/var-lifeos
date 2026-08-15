@@ -6,15 +6,29 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Collaboration Room ID Cleaning', () {
-    test('cleans room ID correctly from various formats', () {
-      final link1 = CollaborationNotifier.cleanRoomId('var-collab://var.app/room/room123?key=abc');
-      expect(link1, 'room123');
+    test('accepts UUID room IDs and valid collaboration URIs', () {
+      const roomId = '123e4567-e89b-42d3-a456-426614174000';
+      expect(CollaborationNotifier.cleanRoomId(roomId), roomId);
+      expect(
+        CollaborationNotifier.cleanRoomId('var-collab://var.app/room/$roomId'),
+        roomId,
+      );
+    });
 
-      final link2 = CollaborationNotifier.cleanRoomId('room-xyz');
-      expect(link2, 'room-xyz');
-
-      final link3 = CollaborationNotifier.cleanRoomId('var-collab://var.app/room/12345');
-      expect(link3, '12345');
+    test('rejects short IDs and invalid collaboration URIs', () {
+      expect(CollaborationNotifier.cleanRoomId('room-xyz'), isEmpty);
+      expect(
+        CollaborationNotifier.cleanRoomId(
+          'var-collab://var.app/room/123e4567-e89b-42d3-a456-426614174000?key=abc',
+        ),
+        isEmpty,
+      );
+      expect(
+        CollaborationNotifier.cleanRoomId(
+          'var-collab://other.app/room/123e4567-e89b-42d3-a456-426614174000',
+        ),
+        isEmpty,
+      );
     });
   });
 

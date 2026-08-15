@@ -8,6 +8,26 @@ import 'recurring_routine.dart';
 
 const automationRuleDataKey = 'automationRule';
 
+enum AutomationTriggerType {
+  scheduled('Sesuai Jadwal'),
+  taskCompleted('Task Selesai'),
+  habitChecked('Habit Dicentang'),
+  nodeCreatedWithTag('Node Baru dengan Tag');
+
+  const AutomationTriggerType(this.label);
+  final String label;
+}
+
+enum AutomationActionType {
+  createFromTemplate('Buat Node dari Template'),
+  autoTag('Otomatis Tambah Tag'),
+  createFollowupTask('Buat Task Lanjutan'),
+  logHabitCompletion('Log Progres Habit');
+
+  const AutomationActionType(this.label);
+  final String label;
+}
+
 final class AutomationRuleRecord {
   const AutomationRuleRecord({
     required this.nodeId,
@@ -16,6 +36,12 @@ final class AutomationRuleRecord {
     required this.templateId,
     required this.rule,
     required this.enabled,
+    this.triggerType = AutomationTriggerType.scheduled,
+    this.triggerTag,
+    this.actionType = AutomationActionType.createFromTemplate,
+    this.actionTag,
+    this.followupTitle,
+    this.targetHabitId,
   });
 
   final String nodeId;
@@ -24,6 +50,12 @@ final class AutomationRuleRecord {
   final String templateId;
   final RecurringRule rule;
   final bool enabled;
+  final AutomationTriggerType triggerType;
+  final String? triggerTag;
+  final AutomationActionType actionType;
+  final String? actionTag;
+  final String? followupTitle;
+  final String? targetHabitId;
 }
 
 final class AutomationRulePreset {
@@ -186,6 +218,17 @@ AutomationRuleRecord? automationRuleFromNode(MindmapNode node) {
   final rule = _recurringRuleFromData(ruleData);
   if (template == null || rule == null) return null;
 
+  final triggerTypeStr = _stringValue(ruleData['triggerType']);
+  final triggerType = AutomationTriggerType.values.firstWhere(
+    (e) => e.name == triggerTypeStr,
+    orElse: () => AutomationTriggerType.scheduled,
+  );
+  final actionTypeStr = _stringValue(ruleData['actionType']);
+  final actionType = AutomationActionType.values.firstWhere(
+    (e) => e.name == actionTypeStr,
+    orElse: () => AutomationActionType.createFromTemplate,
+  );
+
   return AutomationRuleRecord(
     nodeId: node.id,
     id: id,
@@ -193,6 +236,12 @@ AutomationRuleRecord? automationRuleFromNode(MindmapNode node) {
     templateId: template.id,
     rule: rule,
     enabled: ruleData['enabled'] != false,
+    triggerType: triggerType,
+    triggerTag: _stringValue(ruleData['triggerTag']),
+    actionType: actionType,
+    actionTag: _stringValue(ruleData['actionTag']),
+    followupTitle: _stringValue(ruleData['followupTitle']),
+    targetHabitId: _stringValue(ruleData['targetHabitId']),
   );
 }
 

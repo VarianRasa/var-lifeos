@@ -76,6 +76,21 @@ void main() {
       expect(find.text('Scheduled Task 1'), findsOneWidget);
       expect(find.text('09:00 - 10:00 • Task'), findsOneWidget);
       expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.label ==
+                  'Scheduled Task 1, 09:00 - 10:00, Scheduled',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('timeline-entry-node-1')))
+            .height,
+        greaterThanOrEqualTo(44),
+      );
+      expect(
         find.byKey(const ValueKey('timeline-state-node-1-Scheduled')),
         findsOneWidget,
       );

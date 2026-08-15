@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sembast/sembast_memory.dart';
 import 'package:var_app/features/sync/data/http_sync_auth_gateway.dart';
+import 'package:var_app/features/sync/data/http_sync_remote_backup_store.dart';
 import 'package:var_app/features/sync/domain/sync_account.dart';
 
 void main() {
@@ -60,6 +61,28 @@ void main() {
     },
   );
 
+  test('rejects auth responses for another account', () async {
+    final database = await databaseFactoryMemory.openDatabase('auth-mismatch');
+    addTearDown(database.close);
+    final gateway = HttpSyncAuthGateway(
+      endpoint: Uri.parse('https://api.var.app/sync'),
+      database: database,
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({
+            'user': {'id': 'other-user', 'email': 'other@example.com'},
+            'accessToken': 'token',
+          }),
+          200,
+        ),
+      ),
+    );
+
+    expect(
+      () => gateway.signIn(email: 'user@example.com'),
+      throwsA(isA<SyncRemoteStoreException>()),
+    );
+  });
   test('clears the persisted session after sign out', () async {
     final database = await databaseFactoryMemory.openDatabase(
       'http-sync-auth-sign-out.db',

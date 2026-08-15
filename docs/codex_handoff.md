@@ -53,7 +53,7 @@ Feature-first: `lib/features/{calendar,mindmap,command,graph,insights,workspaces
 ### Persistence
 
 - Sembast local DB (`mindmapDatabaseProvider` → `MindmapRepository`).
-- Sync/backup opsional via HTTP endpoint (`VAR_SYNC_ENDPOINT` dart-define).
+- Sync memakai Firebase Auth, Firestore, dan Storage secara default; saat signed-out data tetap local-first.
 
 ### Routing
 

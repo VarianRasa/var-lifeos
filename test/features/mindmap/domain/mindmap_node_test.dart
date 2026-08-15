@@ -131,4 +131,139 @@ void main() {
     expect(node.project, 'Launch App');
     expect(node.area, 'Work Ops');
   });
+
+  test('defensively freezes payload data and node collections', () {
+    final nestedList = <Object?>[
+      <String, Object?>{'title': 'First'},
+    ];
+    final source = <String, Object?>{
+      'section': <String, Object?>{'items': nestedList},
+    };
+    final tags = <String>['work'];
+    final checklist = <TaskChecklistItem>[
+      const TaskChecklistItem(id: 'one', title: 'First'),
+    ];
+    final node = MindmapNode.create(
+      id: 'immutable',
+      type: NodeType.task,
+      title: 'Immutable',
+      day: DateTime(2026, 6, 18),
+      tags: tags,
+      checklist: checklist,
+      data: source,
+      now: DateTime(2026, 6, 18, 9),
+    );
+
+    source['late'] = true;
+    nestedList.add('late');
+    tags.add('late');
+    checklist.add(const TaskChecklistItem(id: 'two', title: 'Second'));
+    expect(node.data.containsKey('late'), isFalse);
+    expect(
+      ((node.data['section']! as Map<Object?, Object?>)['items']! as List),
+      hasLength(1),
+    );
+    expect(node.tags, ['work']);
+    expect(node.checklist, hasLength(1));
+
+    expect(() => node.data['late'] = true, throwsUnsupportedError);
+    expect(
+      () => (node.data['section']! as Map<Object?, Object?>)['late'] = true,
+      throwsUnsupportedError,
+    );
+    expect(
+      () => ((node.data['section']! as Map<Object?, Object?>)['items']! as List)
+          .add(<String, Object?>{'title': 'late'}),
+      throwsUnsupportedError,
+    );
+    expect(() => node.tags.add('late'), throwsUnsupportedError);
+    expect(
+      () => node.checklist.add(
+        const TaskChecklistItem(id: 'two', title: 'Second'),
+      ),
+      throwsUnsupportedError,
+    );
+  });
+
+  test(
+    'presentation revision is stable and changes only with payload data',
+    () {
+      final node = MindmapNode.create(
+        id: 'revision',
+        type: NodeType.image,
+        title: 'Image',
+        day: DateTime(2026, 6, 18),
+        data: const {
+          'image': {'url': 'https://example.test/a.png'},
+        },
+        now: DateTime(2026, 6, 18, 9),
+      );
+      final reconstructed = MindmapNode.fromJson(node.toJson());
+
+      expect(
+        reconstructed.presentationDataRevision,
+        node.presentationDataRevision,
+      );
+      expect(reconstructed.presentationDataKey, node.presentationDataKey);
+      expect(
+        node.copyWith(title: 'Renamed').presentationDataRevision,
+        node.presentationDataRevision,
+      );
+      expect(
+        node.copyWith(title: 'Renamed').presentationDataKey,
+        node.presentationDataKey,
+      );
+      expect(
+        node
+            .copyWith(position: const CanvasPosition(20, 30))
+            .presentationDataRevision,
+        node.presentationDataRevision,
+      );
+      expect(
+        node
+            .copyWith(
+              data: const {
+                'image': {'url': 'https://example.test/b.png'},
+              },
+            )
+            .presentationDataRevision,
+        isNot(node.presentationDataRevision),
+      );
+      expect(
+        node
+            .copyWith(
+              data: const {
+                'image': {'url': 'https://example.test/b.png'},
+              },
+            )
+            .presentationDataKey,
+        isNot(node.presentationDataKey),
+      );
+    },
+  );
+
+  test('canonical presentation key supports dates enums and map ordering', () {
+    final now = DateTime(2026, 6, 18, 9);
+    final first = MindmapNode.create(
+      id: 'canonical',
+      type: NodeType.note,
+      title: 'Canonical',
+      day: now,
+      data: {
+        'date': DateTime(2026, 7, 14, 10, 30),
+        'status': NodeStatus.doing,
+        'nested': {'b': 2, 'a': 1},
+      },
+      now: now,
+    );
+    final reordered = first.copyWith(
+      data: {
+        'nested': {'a': 1, 'b': 2},
+        'status': NodeStatus.doing,
+        'date': DateTime(2026, 7, 14, 10, 30),
+      },
+    );
+
+    expect(reordered.presentationDataKey, first.presentationDataKey);
+  });
 }

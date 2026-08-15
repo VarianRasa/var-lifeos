@@ -23,9 +23,6 @@ flutter run -d chrome
 flutter run -d chrome --dart-define=VAR_DEMO_SEED=false
 flutter run -d chrome --dart-define=VAR_DEMO_SEED=true
 
-# Optional HTTP sync endpoint
-flutter run --dart-define=VAR_SYNC_ENDPOINT=https://sync.example.test
-
 # Format + analyze/lint
 dart format --set-exit-if-changed .
 flutter analyze
@@ -52,7 +49,6 @@ flutter pub upgrade --major-versions
 
 Runtime flags are parsed in `lib/core/config/runtime_config.dart`:
 
-- `VAR_SYNC_ENDPOINT`: enables HTTP sync adapters; without it, sync uses local/in-memory fallbacks.
 - `VAR_DEMO_SEED`: accepts `1`, `true`, `yes`, or `on`; without it, fresh local DBs start without demo seed nodes.
 
 Before sharing a beta build, follow `docs/release/beta_release_checklist.md`. Its automated preflight is `flutter pub get`, `dart format --set-exit-if-changed .`, `flutter analyze`, `flutter test`, and `flutter build web --release --dart-define=VAR_DEMO_SEED=false`.
@@ -113,7 +109,7 @@ Feature modules follow layered boundaries where practical:
 - Sync domain models/planning live in `features/sync/domain/`.
 - `MindmapSyncPlanner` performs merge/planning logic.
 - `CloudSyncService`, `MindmapBackupService`, `PortableMindmapBackupCodec`, and `SyncController` orchestrate sync, backup export/import, restore points, activity, auth, and device identity.
-- `sync_providers.dart` chooses HTTP adapters when `VAR_SYNC_ENDPOINT` exists; otherwise it uses local/in-memory adapters.
+- `sync_providers.dart` uses Firebase Auth, Firestore, and eligible Firebase Storage by default; signed-out use remains local-first.
 - Portable backups are encrypted via `cryptography`.
 
 ### Command palette and automation

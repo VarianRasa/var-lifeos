@@ -57,7 +57,7 @@ void main() {
       expect(candidates.first.reason, CarryOverReason.unfinishedTask);
     });
 
-    test('ignores complete, archived, and same-day nodes', () {
+    test('ignores complete, archived, same-day, next, and someday nodes', () {
       final selectedDay = DateTime(2026, 7, 2);
       final yesterday = DateTime(2026, 7, 1);
       final nodes = [
@@ -68,6 +68,20 @@ void main() {
           day: yesterday,
           status: NodeStatus.done,
           isDone: true,
+        ),
+        MindmapNode.create(
+          id: 'next-task',
+          type: NodeType.task,
+          title: 'Next task',
+          day: yesterday,
+          status: NodeStatus.next,
+        ),
+        MindmapNode.create(
+          id: 'someday-task',
+          type: NodeType.task,
+          title: 'Someday task',
+          day: yesterday,
+          status: NodeStatus.someday,
         ),
         MindmapNode.create(
           id: 'archived-task',

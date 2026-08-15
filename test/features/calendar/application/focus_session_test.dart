@@ -58,6 +58,20 @@ void main() {
     expect(totalFocusMinutes(focused), 25);
   });
 
+  test('totalFocusMinutes falls back to shared task timer total', () {
+    final node = MindmapNode.create(
+      id: 'task',
+      type: NodeType.task,
+      title: 'Focus task',
+      day: DateTime(2026, 7, 2),
+      data: const {
+        'task': {'actualMinutes': 35},
+      },
+    );
+
+    expect(totalFocusMinutes(node), 35);
+  });
+
   test('nextFocusAction returns first open checklist item', () {
     final node = MindmapNode.create(
       id: 'task',

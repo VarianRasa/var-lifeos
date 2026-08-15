@@ -5,29 +5,72 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
-import '../../core/router/app_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/theme/theme_controller.dart';
 import '../../core/utils/date_utils.dart';
-import '../../shared/layout/adaptive_scaffold.dart';
-import '../../shared/widgets/doodle_border.dart';
 import '../mindmap/application/database_lock_provider.dart';
 import '../mindmap/application/mindmap_providers.dart';
+import '../mindmap/data/byok_ai_service.dart';
+import '../mindmap/domain/canvas_board.dart';
+import '../mindmap/domain/canvas_board_template.dart';
 import '../mindmap/domain/custom_node_template_codec.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
+import '../search/application/search_providers.dart';
 import '../sync/application/sync_controller.dart';
-import '../sync/application/sync_providers.dart';
-import '../sync/domain/sync_activity.dart';
-import '../sync/domain/sync_health.dart';
-import '../sync/domain/sync_restore_point.dart';
+import 'application/reminder_auto_scheduler.dart';
+import 'application/reminder_notification_navigation.dart';
+import 'data/persisted_reminder_notification_adapter.dart';
 import 'domain/reminder_notification_adapter.dart';
 import 'domain/reminder_planner.dart';
 import 'keyboard_shortcuts_dialog.dart';
+
+ShapeDecoration _settingsPanelDecoration(
+  BuildContext context, {
+  bool prominent = false,
+}) {
+  final theme = Theme.of(context);
+  final tokens = AppDesignTokens.of(context);
+  return ShapeDecoration(
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(
+        prominent ? tokens.radiusPage : tokens.radiusContainer,
+      ),
+      side: BorderSide(color: theme.dividerColor),
+    ),
+  );
+}
+
+class _CloudExtractionCard extends StatelessWidget {
+  const _CloudExtractionCard({required this.enabled, required this.onChanged});
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: SwitchListTile(
+        key: const ValueKey('settings-cloud-extraction'),
+        value: enabled,
+        onChanged: onChanged,
+        secondary: const Icon(Icons.cloud_outlined),
+        title: const Text('Cloud OCR and transcription'),
+        subtitle: const Text(
+          'Allow eligible attachments to use cloud extraction. Local-only content never uploads.',
+        ),
+      ),
+    );
+  }
+}
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -40,39 +83,44 @@ class SettingsPage extends ConsumerWidget {
         final theme = Theme.of(context);
         return AlertDialog(
           title: const Text('Select Palette'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: AppThemeVariant.values.map((v) {
-              final colors = AppThemeVariantColors.of(v);
-              return ListTile(
-                title: Text(v.name[0].toUpperCase() + v.name.substring(1)),
-                leading: Icon(
-                  v == active
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: v == active ? theme.colorScheme.primary : null,
-                ),
-                trailing: Container(
-                  width: 36,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    gradient: LinearGradient(
-                      colors: [
-                        colors.nodeColors[NodeType.task] ?? Colors.transparent,
-                        colors.nodeColors[NodeType.kanban] ??
-                            Colors.transparent,
-                        colors.nodeColors[NodeType.plan] ?? Colors.transparent,
-                      ],
+          content: SizedBox(
+            width: 420,
+            child: ListView(
+              shrinkWrap: true,
+              children: AppThemeVariant.valuesForSettings.map((v) {
+                final colors = AppThemeVariantColors.of(v);
+                return ListTile(
+                  title: Text(v.displayName),
+                  leading: Icon(
+                    v == active
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: v == active ? theme.colorScheme.primary : null,
+                  ),
+                  trailing: Container(
+                    width: 36,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      gradient: LinearGradient(
+                        colors: [
+                          colors.nodeColors[NodeType.task] ??
+                              Colors.transparent,
+                          colors.nodeColors[NodeType.kanban] ??
+                              Colors.transparent,
+                          colors.nodeColors[NodeType.plan] ??
+                              Colors.transparent,
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                onTap: () {
-                  ref.read(themeVariantProvider.notifier).setThemeVariant(v);
-                  Navigator.of(context).pop();
-                },
-              );
-            }).toList(),
+                  onTap: () {
+                    ref.read(themeVariantProvider.notifier).setThemeVariant(v);
+                    Navigator.of(context).pop();
+                  },
+                );
+              }).toList(),
+            ),
           ),
         );
       },
@@ -84,161 +132,246 @@ class SettingsPage extends ConsumerWidget {
     final theme = Theme.of(context);
     final mode = ref.watch(themeModeProvider);
     final variant = ref.watch(themeVariantProvider);
+    final effectiveMode = variant.effectiveThemeMode(mode);
+    final fontSize = ref.watch(themeFontSizeProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: const AppRouteChromeTabs(currentRoute: AppRoute.settings),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const _SettingsOverviewCard(),
-          const SizedBox(height: 16),
-          const _FeatureGuideCard(),
-          const SizedBox(height: 24),
-          Text('Appearance', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.dark_mode_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Theme', style: theme.textTheme.bodyLarge),
-                  ),
-                  SegmentedButton<ThemeMode>(
-                    segments: const [
-                      ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-                      ButtonSegment(
-                        value: ThemeMode.light,
-                        label: Text('Light'),
-                      ),
-                      ButtonSegment(
-                        value: ThemeMode.system,
-                        label: Text('Auto'),
-                      ),
-                    ],
-                    selected: {mode},
-                    onSelectionChanged: (s) => ref
-                        .read(themeModeProvider.notifier)
-                        .setThemeMode(s.first),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Palette'),
-              subtitle: Text(
-                'Active: ${variant.name[0].toUpperCase() + variant.name.substring(1)}. Marker colors are adapted to the active theme.',
-              ),
-              onTap: () => _showPaletteDialog(context, ref),
-              trailing: Container(
-                width: 44,
-                height: 24,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                  gradient: LinearGradient(
-                    colors: [
-                      theme.colorScheme.primary,
-                      theme.colorScheme.secondary,
-                      theme.colorScheme.tertiary,
-                    ],
-                  ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: ListView(
+            key: const ValueKey('settings-page'),
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _SettingsOverviewCard(),
+              const SizedBox(height: 16),
+              const _FeatureGuideCard(),
+              const SizedBox(height: 24),
+              Text('Appearance', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _AppearanceControl(
+                icon: Icons.dark_mode_outlined,
+                label: 'Theme',
+                control: SegmentedButton<ThemeMode>(
+                  segments: const [
+                    ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+                    ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                    ButtonSegment(value: ThemeMode.system, label: Text('Auto')),
+                  ],
+                  selected: {effectiveMode},
+                  onSelectionChanged: variant.forcesDarkMode
+                      ? null
+                      : (selection) => ref
+                            .read(themeModeProvider.notifier)
+                            .setThemeMode(selection.first),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text('Sync & backup', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _SyncBackupCard(),
-          const SizedBox(height: 24),
-          Text('Templates & saved views', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _TemplateManagerCard(),
-          const SizedBox(height: 12),
-          const _SavedViewsManagerCard(),
-          const SizedBox(height: 12),
-          const _GraphFiltersManagerCard(),
-          const SizedBox(height: 24),
-          Text('Reminders', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _ReminderPreviewCard(),
-          const SizedBox(height: 24),
-          Text('Security', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const _DatabaseLockCard(),
-          const SizedBox(height: 24),
-          const _DataManagementCard(),
-          const SizedBox(height: 24),
-          Text('Keyboard shortcuts', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'K'],
-                    desc: 'Open command palette',
+              const SizedBox(height: 12),
+              _AppearanceControl(
+                icon: Icons.format_size_outlined,
+                label: 'Text size',
+                control: SegmentedButton<AppFontSize>(
+                  segments: [
+                    for (final size in AppFontSize.values)
+                      ButtonSegment(value: size, label: Text(size.label)),
+                  ],
+                  selected: {fontSize},
+                  onSelectionChanged: (selection) => ref
+                      .read(themeFontSizeProvider.notifier)
+                      .setFontSize(selection.first),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text('Palette'),
+                  subtitle: Text(
+                    'Active: ${variant.displayName}. '
+                    '${variant.forcesDarkMode ? 'Dark only. ' : ''}'
+                    'Marker colors are adapted to the active theme.',
                   ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'N'],
-                    desc: 'Create new node',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Ctrl', 'T'],
-                    desc: 'Jump to today',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['1–6'],
-                    desc: 'Agenda quick filters',
-                  ),
-                  const Divider(height: 12),
-                  const _ShortcutRow(
-                    keys: ['Esc'],
-                    desc: 'Close panels / clear focus',
-                  ),
-                  const Divider(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => showKeyboardShortcutsDialog(context),
-                      icon: const Icon(Icons.keyboard, size: 18),
-                      label: const Text('View all shortcuts'),
+                  onTap: () => _showPaletteDialog(context, ref),
+                  trailing: Container(
+                    width: 44,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.primary,
+                          theme.colorScheme.secondary,
+                          theme.colorScheme.tertiary,
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text('About', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          const Card(
-            child: Column(
-              children: [
-                ListTile(
-                  leading: Icon(Icons.info_outline),
-                  title: Text(AppInfo.name),
-                  subtitle: Text(AppInfo.tagline),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 24),
+              Text('Search privacy', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              _CloudExtractionCard(
+                enabled:
+                    ref.watch(cloudExtractionEnabledProvider).value ?? false,
+                onChanged: (value) async {
+                  await ref
+                      .read(searchPrivacyPreferencesProvider)
+                      .setCloudExtractionEnabled(value);
+                  ref.invalidate(cloudExtractionEnabledProvider);
+                },
+              ),
+              const SizedBox(height: 24),
+              Text('Sync & backup', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  key: const ValueKey('settings-recovery-center-entry'),
+                  leading: const Icon(Icons.health_and_safety_outlined),
+                  title: const Text('Recovery Center'),
+                  subtitle: const Text(
+                    'Preview sync, restore points, and encrypted backups safely.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.go('/recovery'),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Templates & saved views',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              const _TemplateManagerCard(),
+              const SizedBox(height: 12),
+              const _BoardTemplatesManagerCard(),
+              const SizedBox(height: 12),
+              const _AutomationRulesManagerCard(),
+              const SizedBox(height: 12),
+              const _ByokAiManagerCard(),
+              const SizedBox(height: 12),
+              const _SavedViewsManagerCard(),
+              const SizedBox(height: 12),
+              const _GraphFiltersManagerCard(),
+              const SizedBox(height: 24),
+              Text('Reminders', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const _ReminderPreviewCard(),
+              const SizedBox(height: 24),
+              Text('Security', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const _DatabaseLockCard(),
+              const SizedBox(height: 24),
+              const _DataManagementCard(),
+              const SizedBox(height: 24),
+              Text('Keyboard shortcuts', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'K'],
+                        desc: 'Open command palette',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'N'],
+                        desc: 'Create new node',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Ctrl', 'T'],
+                        desc: 'Jump to today',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['1–6'],
+                        desc: 'Agenda quick filters',
+                      ),
+                      const Divider(height: 12),
+                      const _ShortcutRow(
+                        keys: ['Esc'],
+                        desc: 'Close panels / clear focus',
+                      ),
+                      const Divider(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => showKeyboardShortcutsDialog(context),
+                          icon: const Icon(Icons.keyboard, size: 18),
+                          label: const Text('View all shortcuts'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text('About', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              const Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text(AppInfo.name),
+                      subtitle: Text(AppInfo.tagline),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _AppearanceControl extends StatelessWidget {
+  const _AppearanceControl({
+    required this.icon,
+    required this.label,
+    required this.control,
+  });
+
+  final IconData icon;
+  final String label;
+  final Widget control;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final labelWidget = Row(
+            children: [
+              Icon(icon),
+              const SizedBox(width: 12),
+              Text(label, style: Theme.of(context).textTheme.bodyLarge),
+            ],
+          );
+          if (constraints.maxWidth < 600) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [labelWidget, const SizedBox(height: 8), control],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: labelWidget),
+              control,
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 Future<void> _showMarkdownImportDialog(
@@ -256,7 +389,6 @@ Future<void> _showMarkdownImportDialog(
         style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
         decoration: const InputDecoration(
           hintText: '## Note title\nBody with [[links]]',
-          border: OutlineInputBorder(),
         ),
       ),
       actions: [
@@ -307,7 +439,6 @@ Future<void> _showImportDialog(BuildContext context, WidgetRef ref) async {
             style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
             decoration: const InputDecoration(
               hintText: '[{"id": "node_1", ...}]',
-              border: OutlineInputBorder(),
             ),
           ),
         ],
@@ -367,9 +498,10 @@ Future<void> _showClearDataDialog(BuildContext context, WidgetRef ref) async {
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
-        TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.error,
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
           ),
           onPressed: () => Navigator.pop(context, true),
           child: const Text('Delete Everything'),
@@ -412,14 +544,7 @@ class _SettingsOverviewCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 22,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context, prominent: true),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -618,6 +743,273 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
   }
 }
 
+class _BoardTemplatesManagerCard extends ConsumerStatefulWidget {
+  const _BoardTemplatesManagerCard();
+
+  @override
+  ConsumerState<_BoardTemplatesManagerCard> createState() =>
+      _BoardTemplatesManagerCardState();
+}
+
+class _BoardTemplatesManagerCardState
+    extends ConsumerState<_BoardTemplatesManagerCard> {
+  bool _expanded = false;
+  String _query = '';
+
+  void _refresh(String workspaceName) {
+    ref.invalidate(availableBoardTemplatesProvider(workspaceName));
+    ref.invalidate(activeProjectCanvasBoardsProvider);
+  }
+
+  void _showError(String action, Object error) {
+    if (!mounted) return;
+    final message = error is StateError ? error.message : error;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to $action board template: $message')),
+    );
+  }
+
+  Future<String?> _nameDialog({
+    required String title,
+    required String action,
+    String initial = '',
+  }) async {
+    final controller = TextEditingController(text: initial);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          key: const ValueKey('board-template-name-field'),
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Template name'),
+          onSubmitted: (value) {
+            if (value.trim().isNotEmpty) {
+              Navigator.of(context).pop(value.trim());
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) Navigator.of(context).pop(name);
+            },
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    return value;
+  }
+
+  Future<void> _add(List<CanvasBoard> boards) async {
+    final source = await showDialog<CanvasBoard>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Choose source board'),
+        children: [
+          for (final group
+              in boards
+                  .groupListsBy((board) => board.workspaceName!)
+                  .entries) ...[
+            Semantics(header: true, child: ListTile(title: Text(group.key))),
+            for (final board in group.value)
+              SimpleDialogOption(
+                key: ValueKey('board-template-source-${board.id}'),
+                onPressed: () => Navigator.of(context).pop(board),
+                child: Text(board.title),
+              ),
+          ],
+        ],
+      ),
+    );
+    if (source == null || !mounted) return;
+    final name = await _nameDialog(
+      title: 'Save linked template',
+      action: 'Save',
+      initial: source.title,
+    );
+    if (name == null || !mounted) return;
+    try {
+      await ref
+          .read(boardTemplateServiceProvider)
+          .saveSourceAsTemplate(
+            sourceBoardId: source.id,
+            workspaceName: source.workspaceName!,
+            name: name,
+            now: DateTime.now(),
+          );
+      if (!mounted) return;
+      _refresh(source.workspaceName!);
+    } on Object catch (error) {
+      _showError('save', error);
+    }
+  }
+
+  Future<void> _rename(CanvasBoardTemplate template, String workspace) async {
+    final name = await _nameDialog(
+      title: 'Rename board template',
+      action: 'Rename',
+      initial: template.name,
+    );
+    if (name == null || !mounted) return;
+    try {
+      await ref
+          .read(boardTemplateServiceProvider)
+          .renameTemplate(
+            templateId: template.id,
+            expectedUpdatedAt: template.updatedAt,
+            name: name,
+            now: DateTime.now(),
+          );
+      if (!mounted) return;
+      _refresh(workspace);
+    } on Object catch (error) {
+      _showError('rename', error);
+    }
+  }
+
+  Future<void> _delete(CanvasBoardTemplate template, String workspace) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete board template?'),
+        content: Text('Delete “${template.name}”?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('board-template-delete-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ref.read(boardTemplateServiceProvider).deleteTemplate(template.id);
+      if (!mounted) return;
+      _refresh(workspace);
+    } on Object catch (error) {
+      _showError('delete', error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final boards =
+        ref.watch(activeProjectCanvasBoardsProvider).valueOrNull ?? const [];
+    final workspaces =
+        boards.map((board) => board.workspaceName!).toSet().toList()..sort();
+    final templates = <({CanvasBoardTemplate template, String workspace})>[
+      for (final workspace in workspaces)
+        for (final template
+            in ref
+                    .watch(availableBoardTemplatesProvider(workspace))
+                    .valueOrNull ??
+                const [])
+          (template: template, workspace: workspace),
+    ];
+    final query = _query.trim().toLowerCase();
+    final filtered = templates
+        .where((item) => item.template.name.toLowerCase().contains(query))
+        .toList(growable: false);
+    final panelShape = _settingsPanelDecoration(context).shape;
+    return Material(
+      color: theme.colorScheme.surface,
+      shape: panelShape,
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Icon(Icons.dashboard_outlined),
+                const SizedBox(width: 10),
+                Text('Board templates', style: theme.textTheme.bodyLarge),
+                TextButton.icon(
+                  key: const ValueKey('settings-board-template-add'),
+                  onPressed: boards.isEmpty
+                      ? null
+                      : () => unawaited(_add(boards)),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Add'),
+                ),
+                TextButton.icon(
+                  key: const ValueKey('settings-board-templates-toggle'),
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  icon: Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                  ),
+                  label: Text(_expanded ? 'Hide' : 'Show'),
+                ),
+              ],
+            ),
+            if (_expanded) ...[
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('settings-board-template-search'),
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  labelText: 'Search board templates',
+                  isDense: true,
+                ),
+                onChanged: (value) => setState(() => _query = value),
+              ),
+              const SizedBox(height: 8),
+              for (final template in builtInCanvasBoardTemplates)
+                if (template.name.toLowerCase().contains(query))
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.lock_outline),
+                    title: Text(template.name),
+                    subtitle: const Text('Built-in · Read-only'),
+                  ),
+              for (final item in filtered)
+                ListTile(
+                  dense: true,
+                  title: Text(item.template.name),
+                  subtitle: Text('${item.workspace} · Linked source'),
+                  trailing: PopupMenuButton<String>(
+                    key: ValueKey(
+                      'settings-board-template-menu-${item.template.id}',
+                    ),
+                    tooltip: 'Board template actions',
+                    onSelected: (action) {
+                      if (action == 'rename') {
+                        unawaited(_rename(item.template, item.workspace));
+                      } else if (action == 'delete') {
+                        unawaited(_delete(item.template, item.workspace));
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'rename', child: Text('Rename')),
+                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _TemplateManagerCard extends ConsumerStatefulWidget {
   const _TemplateManagerCard();
 
@@ -804,29 +1196,18 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
     final theme = Theme.of(context);
     final nodes = ref.watch(allMindmapNodesProvider).valueOrNull ?? const [];
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.dashboard_customize_outlined),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Template manager',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                ),
+                Text('Template manager', style: theme.textTheme.bodyLarge),
                 TextButton.icon(
                   onPressed: nodes.isEmpty
                       ? null
@@ -868,7 +1249,7 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
                 children: [
                   for (final template in defaultNodeTemplates)
                     Chip(
-                      avatar: Icon(_templateIcon(template.type), size: 16),
+                      avatar: Icon(NodeVisuals.icon(template.type), size: 16),
                       label: Text(template.label),
                     ),
                   for (final template in _customTemplates)
@@ -876,7 +1257,10 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         InputChip(
-                          avatar: Icon(_templateIcon(template.type), size: 16),
+                          avatar: Icon(
+                            NodeVisuals.icon(template.type),
+                            size: 16,
+                          ),
                           label: Text(template.label),
                           onPressed: () => unawaited(_editTemplate(template)),
                           onDeleted: () => _deleteTemplate(template.id),
@@ -918,6 +1302,181 @@ class _TemplateManagerCardState extends ConsumerState<_TemplateManagerCard> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AutomationRulesManagerCard extends StatelessWidget {
+  const _AutomationRulesManagerCard();
+
+  @override
+  Widget build(BuildContext context) => Card(
+    key: const ValueKey('settings-automation-rules-card'),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final addButton = FilledButton.icon(
+          onPressed: () => showAutomationRuleEditorDialog(context),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Add Rule'),
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high_outlined),
+              title: const Text('Automation & Smart Rules'),
+              subtitle: const Text(
+                'Configure custom event triggers, routine auto-creations, and rules.',
+              ),
+              trailing: constraints.maxWidth >= 400 ? addButton : null,
+            ),
+            if (constraints.maxWidth < 400)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: addButton,
+              ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _ByokAiManagerCard extends StatefulWidget {
+  const _ByokAiManagerCard();
+
+  @override
+  State<_ByokAiManagerCard> createState() => _ByokAiManagerCardState();
+}
+
+class _ByokAiManagerCardState extends State<_ByokAiManagerCard> {
+  final _keyController = TextEditingController();
+  final _modelController = TextEditingController(text: 'gpt-4o-mini');
+  final _urlController = TextEditingController(
+    text: 'https://api.openai.com/v1',
+  );
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfig();
+  }
+
+  Future<void> _loadConfig() async {
+    final config = await ByokAiService().loadConfig();
+    _keyController.text = config.apiKey;
+    _modelController.text = config.modelName;
+    _urlController.text = config.baseUrl;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _modelController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveConfig() async {
+    setState(() => _saving = true);
+    try {
+      final config = ByokAiConfig(
+        apiKey: _keyController.text.trim(),
+        modelName: _modelController.text.trim(),
+        baseUrl: _urlController.text.trim(),
+      );
+      await ByokAiService().saveConfig(config);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI Key & BYOK config saved')),
+      );
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save AI Key & BYOK config: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.key_outlined),
+              title: Text('Bring Your Own Key (BYOK) AI'),
+              subtitle: Text(
+                'Configure your API Key for live AI Task Auto-Decomposition.',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              key: const ValueKey('settings-byok-api-key'),
+              controller: _keyController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'API Key (OpenAI / Compatible)',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final fields = [
+                  TextFormField(
+                    controller: _modelController,
+                    decoration: const InputDecoration(
+                      labelText: 'Model Name',
+                      isDense: true,
+                    ),
+                  ),
+                  TextFormField(
+                    controller: _urlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Base URL',
+                      isDense: true,
+                    ),
+                  ),
+                ];
+                if (constraints.maxWidth < 400) {
+                  return Column(
+                    children: [
+                      fields.first,
+                      const SizedBox(height: 8),
+                      fields.last,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: fields.first),
+                    const SizedBox(width: 8),
+                    Expanded(child: fields.last),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                key: const ValueKey('settings-byok-save'),
+                onPressed: _saving ? null : _saveConfig,
+                icon: const Icon(Icons.save, size: 16),
+                label: Text(_saving ? 'Saving...' : 'Save AI Key'),
+              ),
+            ),
           ],
         ),
       ),
@@ -1262,30 +1821,25 @@ class _SavedViewsManagerCardState extends State<_SavedViewsManagerCard> {
       ),
     ];
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.view_quilt_outlined),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text('Saved views', style: theme.textTheme.bodyLarge),
-                ),
+                Text('Saved views', style: theme.textTheme.bodyLarge),
                 if (!_loaded)
-                  const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: SizedBox.square(
+                      dimension: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   )
                 else ...[
                   TextButton.icon(
@@ -1346,7 +1900,6 @@ class _SavedViewsManagerCardState extends State<_SavedViewsManagerCard> {
                 key: const ValueKey('settings-table-sort-mode'),
                 initialValue: _tableSort,
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
                   isDense: true,
                   labelText: 'Table sort',
                 ),
@@ -1639,7 +2192,6 @@ class _SavedViewDialogState extends State<_SavedViewDialog> {
                 key: const ValueKey('saved-view-dialog-table-sort'),
                 initialValue: _tableSort,
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
                   isDense: true,
                   labelText: 'Table sort',
                 ),
@@ -1668,36 +2220,6 @@ class _SavedViewDialogState extends State<_SavedViewDialog> {
     );
   }
 }
-
-IconData _templateIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
-};
 
 final class _SettingsGraphFilter {
   const _SettingsGraphFilter({
@@ -1885,14 +2407,7 @@ class _GraphFiltersManagerCardState extends State<_GraphFiltersManagerCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -2055,13 +2570,35 @@ class _ReminderPreviewCardState extends ConsumerState<_ReminderPreviewCard> {
   }
 
   Future<void> _syncReminderSchedule(ReminderPlan plan) async {
-    final adapter = InMemoryReminderNotificationAdapter();
-    await adapter.sync(plan, policy: _schedulePolicy);
-    if (!mounted) return;
-    setState(() {
-      _reminderSyncMessage =
-          'Prepared ${adapter.scheduled.length} notification payloads at ${_formatReminderTime(context)}.';
-    });
+    final notifications = buildScheduledReminderNotifications(
+      plan,
+      policy: _schedulePolicy,
+    );
+    await PersistedReminderNotificationAdapter().sync(
+      plan,
+      policy: _schedulePolicy,
+    );
+    try {
+      final nativeAdapter = ref.read(nativeReminderNotificationAdapterProvider);
+      if (!nativeAdapter.isSupported) {
+        throw UnsupportedError(
+          'Native scheduled notifications are unavailable on this platform.',
+        );
+      }
+      await nativeAdapter.sync(plan, policy: _schedulePolicy);
+      await ref.read(reminderAutoSchedulerProvider).setEnabled(true);
+      if (!mounted) return;
+      setState(() {
+        _reminderSyncMessage =
+            'Scheduled ${notifications.length} OS notifications at ${_formatReminderTime(context)}.';
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _reminderSyncMessage =
+            'Saved ${notifications.length} reminder payloads, but OS scheduling failed: $error';
+      });
+    }
   }
 
   Future<void> _importReminderPayloadsPreview() async {
@@ -2136,14 +2673,7 @@ class _ReminderPreviewCardState extends ConsumerState<_ReminderPreviewCard> {
     final theme = Theme.of(context);
     final nodes = ref.watch(allMindmapNodesProvider);
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: nodes.when(
@@ -2436,14 +2966,7 @@ class _FeatureGuideCardState extends State<_FeatureGuideCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -2574,19 +3097,12 @@ class _DataManagementCardState extends ConsumerState<_DataManagementCard> {
         Text('Data management', style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         DecoratedBox(
-          decoration: ShapeDecoration(
-            color: theme.colorScheme.surface,
-            shape: DoodleShapeBorder(
-              side: BorderSide(color: theme.dividerColor),
-              radius: 12,
-              wobble: 1.2,
-            ),
-          ),
+          decoration: _settingsPanelDecoration(context),
           child: Column(
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
+                child: Wrap(
                   children: [
                     const SizedBox(width: 8),
                     TextButton.icon(
@@ -2714,8 +3230,11 @@ class _ShortcutRow extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
         children: [
           Text(desc, style: theme.textTheme.bodyMedium),
           Row(
@@ -2754,1533 +3273,6 @@ class _ShortcutRow extends StatelessWidget {
   }
 }
 
-class _SyncBackupCard extends ConsumerStatefulWidget {
-  const _SyncBackupCard();
-
-  @override
-  ConsumerState<_SyncBackupCard> createState() => _SyncBackupCardState();
-}
-
-class _SyncBackupCardState extends ConsumerState<_SyncBackupCard> {
-  final _passphraseController = TextEditingController();
-  final _packageController = TextEditingController();
-  final _deviceNameController = TextEditingController();
-  String _lastDeviceLabel = '';
-  String _restoreSourceFilter = SyncRestorePointTimeline.allSourcesLabel;
-  bool _showCloudSync = false;
-  bool _showPortableBackup = false;
-
-  @override
-  void initState() {
-    super.initState();
-    Future<void>.microtask(() {
-      if (!mounted) return;
-      ref.read(syncControllerProvider.notifier).load();
-    });
-  }
-
-  @override
-  void dispose() {
-    _passphraseController.dispose();
-    _packageController.dispose();
-    _deviceNameController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final nodes = ref.watch(allMindmapNodesProvider);
-    final syncState = ref.watch(syncControllerProvider);
-    final remoteConfig = ref.watch(syncRemoteConfigProvider);
-    final theme = Theme.of(context);
-    _syncDeviceNameField(syncState.deviceIdentity?.label ?? '');
-
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
-      child: nodes.when(
-        data: (value) => Column(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.cloud_sync_outlined),
-              title: const Text('Local-first'),
-              subtitle: Text(
-                syncState.isSignedIn ? syncState.email : 'Signed out',
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: _SyncStatusBanner(
-                state: syncState,
-                nodeCount: value.length,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: _SyncBackupStatusChips(
-                state: syncState,
-                backendLabel: remoteConfig.hasEndpoint
-                    ? 'HTTP sync: ${remoteConfig.endpoint!.host}'
-                    : 'Firebase sync backend',
-                backendIcon: remoteConfig.hasEndpoint
-                    ? Icons.http_outlined
-                    : Icons.local_fire_department_outlined,
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _SyncMetric(
-                      icon: Icons.storage_outlined,
-                      label: _countLabel(value.length),
-                    ),
-                  ),
-                  Expanded(
-                    child: _SyncMetric(
-                      icon: Icons.check_circle_outline,
-                      label: syncState.lastConflictCount == 0
-                          ? 'No conflicts'
-                          : '${syncState.lastConflictCount} conflicts',
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: _SyncHealthPanel(
-                state: syncState,
-                deviceNameController: _deviceNameController,
-                onSaveDeviceName: _saveDeviceName,
-              ),
-            ),
-            ExpansionTile(
-              initiallyExpanded: _showCloudSync,
-              onExpansionChanged: (value) =>
-                  setState(() => _showCloudSync = value),
-              leading: const Icon(Icons.cloud_sync_outlined),
-              title: const Text('Cloud sync'),
-              subtitle: Text(
-                syncState.isSignedIn
-                    ? 'Signed in · push, pull, and resolve conflicts'
-                    : 'Sign in before syncing devices',
-              ),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.icon(
-                        key: const ValueKey('sync-sign-in-button'),
-                        icon: Icon(
-                          syncState.isSignedIn
-                              ? Icons.logout_outlined
-                              : Icons.login_outlined,
-                        ),
-                        label: Text(
-                          syncState.isSignedIn ? 'Sign out' : 'Sign in',
-                        ),
-                        onPressed: syncState.isBusy
-                            ? null
-                            : () => _openAuthDialog(syncState),
-                      ),
-                      FilledButton.tonalIcon(
-                        key: const ValueKey('sync-now-button'),
-                        icon: const Icon(Icons.sync_outlined),
-                        label: const Text('Sync now'),
-                        onPressed: syncState.isBusy || !syncState.isSignedIn
-                            ? null
-                            : () => ref
-                                  .read(syncControllerProvider.notifier)
-                                  .syncNow(),
-                      ),
-                      OutlinedButton.icon(
-                        key: const ValueKey('sync-push-button'),
-                        icon: const Icon(Icons.cloud_upload_outlined),
-                        label: const Text('Push'),
-                        onPressed: syncState.isBusy || !syncState.isSignedIn
-                            ? null
-                            : () => ref
-                                  .read(syncControllerProvider.notifier)
-                                  .pushBackup(),
-                      ),
-                      OutlinedButton.icon(
-                        key: const ValueKey('sync-pull-button'),
-                        icon: const Icon(Icons.cloud_download_outlined),
-                        label: const Text('Pull'),
-                        onPressed: syncState.isBusy || !syncState.isSignedIn
-                            ? null
-                            : () => ref
-                                  .read(syncControllerProvider.notifier)
-                                  .pullBackup(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            ExpansionTile(
-              initiallyExpanded: _showPortableBackup,
-              onExpansionChanged: (value) =>
-                  setState(() => _showPortableBackup = value),
-              leading: const Icon(Icons.enhanced_encryption_outlined),
-              title: const Text('Portable encrypted backup'),
-              subtitle: const Text('Manual export/import package'),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Column(
-                    children: [
-                      TextField(
-                        key: const ValueKey('portable-passphrase-field'),
-                        controller: _passphraseController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.lock_outline),
-                          labelText: 'Backup passphrase',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const ValueKey('portable-package-field'),
-                        controller: _packageController,
-                        minLines: 3,
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.data_object_outlined),
-                          labelText: 'Encrypted package',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton.tonalIcon(
-                            key: const ValueKey('portable-export-button'),
-                            icon: const Icon(Icons.file_upload_outlined),
-                            label: const Text('Export'),
-                            onPressed: syncState.isBusy
-                                ? null
-                                : _exportPortableBackup,
-                          ),
-                          OutlinedButton.icon(
-                            key: const ValueKey('portable-import-button'),
-                            icon: const Icon(Icons.restore_page_outlined),
-                            label: const Text('Import'),
-                            onPressed: syncState.isBusy
-                                ? null
-                                : _importPortableBackup,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (syncState.lastMessage.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    syncState.lastMessage,
-                    style: theme.textTheme.labelLarge,
-                  ),
-                ),
-              ),
-            if (syncState.pendingConflicts.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: _ConflictQueue(
-                  conflicts: syncState.pendingConflicts,
-                  isBusy: syncState.isBusy,
-                  onUseLocal: (nodeId) => ref
-                      .read(syncControllerProvider.notifier)
-                      .resolveConflictWithLocal(nodeId),
-                  onUseRemote: (nodeId) => ref
-                      .read(syncControllerProvider.notifier)
-                      .resolveConflictWithRemote(nodeId),
-                ),
-              ),
-            if (syncState.lastConflictCount > 0)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      key: const ValueKey('sync-use-remote-button'),
-                      icon: const Icon(Icons.cloud_done_outlined),
-                      label: const Text('Use remote'),
-                      onPressed: syncState.isBusy
-                          ? null
-                          : () => ref
-                                .read(syncControllerProvider.notifier)
-                                .resolveConflictsWithRemote(),
-                    ),
-                    FilledButton.tonalIcon(
-                      key: const ValueKey('sync-use-newest-button'),
-                      icon: const Icon(Icons.auto_awesome_motion_outlined),
-                      label: const Text('Use newest'),
-                      onPressed: syncState.isBusy
-                          ? null
-                          : () => ref
-                                .read(syncControllerProvider.notifier)
-                                .resolveConflictsWithNewest(),
-                    ),
-                    OutlinedButton.icon(
-                      key: const ValueKey('sync-keep-local-button'),
-                      icon: const Icon(Icons.devices_outlined),
-                      label: const Text('Keep local'),
-                      onPressed: syncState.isBusy
-                          ? null
-                          : () => ref
-                                .read(syncControllerProvider.notifier)
-                                .resolveConflictsWithLocal(),
-                    ),
-                  ],
-                ),
-              ),
-            if (syncState.lastSavedCount > 0 || syncState.lastDeletedCount > 0)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    _syncDeltaLabel(
-                      syncState.lastSavedCount,
-                      syncState.lastDeletedCount,
-                    ),
-                    style: theme.textTheme.labelMedium,
-                  ),
-                ),
-              ),
-            if (syncState.restorePoints.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: _RestorePoints(
-                  points: syncState.restorePoints,
-                  currentNodes: value,
-                  selectedSource: _restoreSourceFilter,
-                  onSourceChanged: _selectRestoreSource,
-                  onRestore: _previewRestorePoint,
-                  onDelete: (id) => ref
-                      .read(syncControllerProvider.notifier)
-                      .deleteRestorePoint(id),
-                ),
-              ),
-            if (syncState.activityLog.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: _ActivityLog(entries: syncState.activityLog),
-              ),
-          ],
-        ),
-        loading: () => const ListTile(
-          leading: SizedBox.square(
-            dimension: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          title: Text('Local-first'),
-          subtitle: Text('Loading'),
-        ),
-        error: (_, _) => ListTile(
-          leading: Icon(Icons.error_outline, color: theme.colorScheme.error),
-          title: const Text('Local-first'),
-          subtitle: const Text('Unavailable'),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportPortableBackup() async {
-    await ref
-        .read(syncControllerProvider.notifier)
-        .exportPortableBackup(passphrase: _passphraseController.text);
-    if (!mounted) return;
-
-    final package = ref.read(syncControllerProvider).lastPortablePackage;
-    if (package.isNotEmpty) {
-      _packageController.text = package;
-    }
-  }
-
-  Future<void> _importPortableBackup() async {
-    final controller = ref.read(syncControllerProvider.notifier);
-    await controller.createRestorePoint(label: 'Before portable import');
-    await controller.importPortableBackup(
-      package: _packageController.text,
-      passphrase: _passphraseController.text,
-    );
-  }
-
-  Future<void> _openAuthDialog(SyncControllerState syncState) async {
-    final controller = ref.read(syncControllerProvider.notifier);
-    if (syncState.isSignedIn) {
-      await controller.signOut();
-      return;
-    }
-
-    await showDialog<void>(
-      context: context,
-      builder: (context) => _SyncAuthDialog(controller: controller),
-    );
-  }
-
-  Future<void> _saveDeviceName() async {
-    await ref
-        .read(syncControllerProvider.notifier)
-        .renameDevice(_deviceNameController.text);
-  }
-
-  Future<void> _previewRestorePoint(SyncRestorePoint point) async {
-    final controller = ref.read(syncControllerProvider.notifier);
-    final impact = await controller.previewRestorePoint(point.id);
-    if (!mounted) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return _RestorePointPreviewDialog(point: point, impact: impact);
-      },
-    );
-    if (confirmed ?? false) {
-      await controller.restorePoint(point.id);
-    }
-  }
-
-  void _selectRestoreSource(String source) {
-    setState(() {
-      _restoreSourceFilter = source;
-    });
-  }
-
-  void _syncDeviceNameField(String label) {
-    if (label.isEmpty || label == _lastDeviceLabel) return;
-
-    _lastDeviceLabel = label;
-    if (_deviceNameController.text != label) {
-      _deviceNameController.text = label;
-    }
-  }
-}
-
-class _SyncAuthDialog extends StatefulWidget {
-  const _SyncAuthDialog({required this.controller});
-
-  final SyncController controller;
-
-  @override
-  State<_SyncAuthDialog> createState() => _SyncAuthDialogState();
-}
-
-class _SyncAuthDialogState extends State<_SyncAuthDialog> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _displayNameController = TextEditingController();
-  bool _isBusy = false;
-  String _message = '';
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    _displayNameController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Cloud sync sign in'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('sync-auth-email-field'),
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.email],
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const ValueKey('sync-auth-password-field'),
-              controller: _passwordController,
-              obscureText: true,
-              autofillHints: const [AutofillHints.password],
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const ValueKey('sync-auth-display-name-field'),
-              controller: _displayNameController,
-              autofillHints: const [AutofillHints.name],
-              decoration: const InputDecoration(
-                labelText: 'Display name (optional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (_message.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _message,
-                  key: const ValueKey('sync-auth-message'),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: _message == 'Password reset email sent'
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          key: const ValueKey('sync-auth-reset-button'),
-          onPressed: _isBusy ? null : _resetPassword,
-          child: const Text('Reset password'),
-        ),
-        TextButton(
-          onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        OutlinedButton(
-          key: const ValueKey('sync-auth-register-button'),
-          onPressed: _isBusy ? null : _register,
-          child: const Text('Register'),
-        ),
-        FilledButton(
-          key: const ValueKey('sync-auth-sign-in-submit-button'),
-          onPressed: _isBusy ? null : _signIn,
-          child: const Text('Sign in'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _signIn() async {
-    await _run(() async {
-      await widget.controller.signIn(
-        email: _emailController.text,
-        password: _passwordController.text,
-        displayName: _displayNameController.text,
-      );
-      if (widget.controller.isSignedIn) await widget.controller.syncNow();
-    }, close: true);
-  }
-
-  Future<void> _register() async {
-    await _run(() async {
-      await widget.controller.register(
-        email: _emailController.text,
-        password: _passwordController.text,
-        displayName: _displayNameController.text,
-      );
-      if (widget.controller.isSignedIn) await widget.controller.syncNow();
-    }, close: true);
-  }
-
-  Future<void> _resetPassword() async {
-    await _run(
-      () => widget.controller.sendPasswordResetEmail(
-        email: _emailController.text,
-      ),
-    );
-  }
-
-  Future<void> _run(
-    Future<void> Function() action, {
-    bool close = false,
-  }) async {
-    setState(() {
-      _isBusy = true;
-      _message = '';
-    });
-    await action();
-    if (!mounted) return;
-
-    final lastMessage = widget.controller.lastMessage;
-    setState(() {
-      _isBusy = false;
-      _message = lastMessage;
-    });
-    if (close && widget.controller.isSignedIn) {
-      Navigator.of(context).pop();
-    }
-  }
-}
-
-class _SyncBackupStatusChips extends StatelessWidget {
-  const _SyncBackupStatusChips({
-    required this.state,
-    required this.backendLabel,
-    required this.backendIcon,
-  });
-
-  final SyncControllerState state;
-  final String backendLabel;
-  final IconData backendIcon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      key: const ValueKey('sync-backup-status-chips'),
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        _SyncStatusChip(icon: backendIcon, label: backendLabel),
-        _SyncStatusChip(
-          icon: state.isSignedIn
-              ? Icons.verified_user_outlined
-              : Icons.lock_outline,
-          label: state.isSignedIn ? 'Cloud signed in' : 'Local only',
-        ),
-        _SyncStatusChip(
-          icon: state.autoBackupEnabled
-              ? Icons.event_repeat_outlined
-              : Icons.event_busy_outlined,
-          label: state.autoBackupEnabled
-              ? 'Auto backup: ${state.autoBackupFrequency}'
-              : 'Auto backup off',
-        ),
-        if (state.restorePoints.isNotEmpty)
-          _SyncStatusChip(
-            icon: Icons.restore_outlined,
-            label: '${state.restorePoints.length} restore points',
-          ),
-      ],
-    );
-  }
-}
-
-class _SyncStatusChip extends StatelessWidget {
-  const _SyncStatusChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 16),
-      label: Text(label),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-  }
-}
-
-class _SyncStatusBanner extends StatelessWidget {
-  const _SyncStatusBanner({required this.state, required this.nodeCount});
-
-  final SyncControllerState state;
-  final int nodeCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasConflicts =
-        state.lastConflictCount > 0 || state.pendingConflicts.isNotEmpty;
-    final color = hasConflicts
-        ? theme.colorScheme.error
-        : state.isSignedIn
-        ? theme.colorScheme.primary
-        : theme.colorScheme.outline;
-    final label = hasConflicts
-        ? '${state.lastConflictCount} conflicts need review'
-        : state.isSignedIn
-        ? 'Sync ready • $nodeCount local nodes protected'
-        : 'Offline safe • sign in to enable cloud backup';
-
-    return DecoratedBox(
-      key: const ValueKey('sync-status-banner'),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              hasConflicts
-                  ? Icons.warning_amber_outlined
-                  : Icons.verified_user_outlined,
-              color: color,
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: Text(label, style: theme.textTheme.labelLarge)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SyncHealthPanel extends StatelessWidget {
-  const _SyncHealthPanel({
-    required this.state,
-    required this.deviceNameController,
-    required this.onSaveDeviceName,
-  });
-
-  final SyncControllerState state;
-  final TextEditingController deviceNameController;
-  final VoidCallback onSaveDeviceName;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final health = state.syncHealth;
-    final identity = state.deviceIdentity;
-    final color = _healthColor(theme, health.level);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.monitor_heart_outlined, size: 18, color: color),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text('Sync health', style: theme.textTheme.labelLarge),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                health.label,
-                style: theme.textTheme.labelSmall?.copyWith(color: color),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(health.detail, style: theme.textTheme.bodySmall),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Icon(
-              Icons.devices_outlined,
-              size: 18,
-              color: theme.colorScheme.secondary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                identity?.label ?? 'This device',
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium,
-              ),
-            ),
-            if (identity != null)
-              Flexible(
-                child: Text(
-                  identity.id,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
-                  style: theme.textTheme.labelSmall,
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                key: const ValueKey('sync-device-name-field'),
-                controller: deviceNameController,
-                enabled: !state.isBusy,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.drive_file_rename_outline),
-                  labelText: 'Device name',
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              key: const ValueKey('sync-device-save-button'),
-              tooltip: 'Save device name',
-              icon: const Icon(Icons.save_outlined),
-              onPressed: state.isBusy ? null : onSaveDeviceName,
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ActivityLog extends StatelessWidget {
-  const _ActivityLog({required this.entries});
-
-  final List<SyncActivityEntry> entries;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.history_outlined,
-              size: 18,
-              color: theme.colorScheme.secondary,
-            ),
-            const SizedBox(width: 8),
-            Text('Recent activity', style: theme.textTheme.labelLarge),
-          ],
-        ),
-        const SizedBox(height: 8),
-        for (final entry in entries.take(3)) ...[
-          _ActivityLogRow(entry: entry),
-          if (entry != entries.take(3).last) const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-}
-
-class _RestorePoints extends StatelessWidget {
-  const _RestorePoints({
-    required this.points,
-    required this.currentNodes,
-    required this.selectedSource,
-    required this.onSourceChanged,
-    required this.onRestore,
-    required this.onDelete,
-  });
-
-  final List<SyncRestorePoint> points;
-  final List<MindmapNode> currentNodes;
-  final String selectedSource;
-  final ValueChanged<String> onSourceChanged;
-  final ValueChanged<SyncRestorePoint> onRestore;
-  final ValueChanged<String> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final timeline = SyncRestorePointTimeline.create(
-      points: points,
-      selectedSource: selectedSource,
-    );
-    final visible = timeline.filteredPoints.take(5).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.restore_outlined,
-              size: 18,
-              color: theme.colorScheme.secondary,
-            ),
-            const SizedBox(width: 8),
-            Text('Restore points', style: theme.textTheme.labelLarge),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (timeline.sourceLabels.length > 1) ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final source in timeline.sourceLabels) ...[
-                  ChoiceChip(
-                    key: ValueKey('restore-source-filter-$source'),
-                    label: Text(source),
-                    selected: timeline.selectedSource == source,
-                    onSelected: (selected) {
-                      if (selected) onSourceChanged(source);
-                    },
-                  ),
-                  if (source != timeline.sourceLabels.last)
-                    const SizedBox(width: 8),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (timeline.hiddenCount > 0) ...[
-          Text(
-            '${timeline.hiddenCount} hidden by source',
-            style: theme.textTheme.labelSmall,
-          ),
-          const SizedBox(height: 8),
-        ],
-        for (var index = 0; index < visible.length; index++) ...[
-          _RestorePointRow(
-            point: visible[index],
-            index: index,
-            currentNodes: currentNodes,
-            onRestore: onRestore,
-            onDelete: onDelete,
-          ),
-          if (index != visible.length - 1) const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-}
-
-class _RestorePointRow extends StatelessWidget {
-  const _RestorePointRow({
-    required this.point,
-    required this.index,
-    required this.currentNodes,
-    required this.onRestore,
-    required this.onDelete,
-  });
-
-  final SyncRestorePoint point;
-  final int index;
-  final List<MindmapNode> currentNodes;
-  final ValueChanged<SyncRestorePoint> onRestore;
-  final ValueChanged<String> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final impact = point.previewAgainst(currentNodes);
-
-    return Row(
-      children: [
-        Icon(
-          Icons.history_toggle_off_outlined,
-          size: 18,
-          color: theme.colorScheme.primary,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                point.label,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${_countLabel(point.nodeCount)} / ${point.deviceLabel}',
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Impact: ${impact.summaryLabel}',
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall,
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _RestoreRiskChip(impact: impact),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        IconButton.filledTonal(
-          key: ValueKey('restore-point-$index-button'),
-          tooltip: 'Restore point',
-          icon: const Icon(Icons.restore_page_outlined),
-          onPressed: () => onRestore(point),
-        ),
-        const SizedBox(width: 4),
-        IconButton(
-          key: ValueKey('restore-point-$index-delete-button'),
-          tooltip: 'Delete restore point',
-          icon: const Icon(Icons.delete_outline),
-          onPressed: () => onDelete(point.id),
-        ),
-      ],
-    );
-  }
-}
-
-class _RestoreRiskChip extends StatelessWidget {
-  const _RestoreRiskChip({required this.impact});
-
-  final SyncRestorePointImpact impact;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = impact.isDestructive
-        ? theme.colorScheme.error
-        : theme.colorScheme.primary;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        child: Text(
-          impact.riskLabel,
-          style: theme.textTheme.labelSmall?.copyWith(color: color),
-        ),
-      ),
-    );
-  }
-}
-
-class _RestorePointPreviewDialog extends StatefulWidget {
-  const _RestorePointPreviewDialog({required this.point, required this.impact});
-
-  final SyncRestorePoint point;
-  final SyncRestorePointImpact impact;
-
-  @override
-  State<_RestorePointPreviewDialog> createState() =>
-      _RestorePointPreviewDialogState();
-}
-
-class _RestorePointPreviewDialogState
-    extends State<_RestorePointPreviewDialog> {
-  bool _destructiveConfirmed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final requiresDestructiveConfirmation = widget.impact.isDestructive;
-
-    return AlertDialog(
-      title: const Text('Restore preview'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.point.label, style: theme.textTheme.labelLarge),
-            const SizedBox(height: 4),
-            Text(
-              '${_countLabel(widget.point.nodeCount)} / '
-              '${widget.point.deviceLabel}',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _RestoreImpactChip(
-                  icon: Icons.add_circle_outline,
-                  label: _impactPart(widget.impact.addedCount, 'add', 'adds'),
-                ),
-                _RestoreImpactChip(
-                  icon: Icons.edit_outlined,
-                  label: _impactPart(
-                    widget.impact.updatedCount,
-                    'update',
-                    'updates',
-                  ),
-                ),
-                _RestoreImpactChip(
-                  icon: Icons.delete_outline,
-                  label: _impactPart(
-                    widget.impact.deletedCount,
-                    'delete',
-                    'deletes',
-                  ),
-                ),
-              ],
-            ),
-            _RestoreImpactSection(
-              title: 'Will add',
-              titles: widget.impact.addedTitles,
-            ),
-            _RestoreImpactSection(
-              title: 'Will update',
-              titles: widget.impact.updatedTitles,
-            ),
-            _RestoreImpactSection(
-              title: 'Will delete',
-              titles: widget.impact.deletedTitles,
-            ),
-            if (requiresDestructiveConfirmation) ...[
-              const SizedBox(height: 12),
-              CheckboxListTile(
-                key: const ValueKey(
-                  'restore-destructive-confirmation-checkbox',
-                ),
-                value: _destructiveConfirmed,
-                onChanged: (value) {
-                  setState(() {
-                    _destructiveConfirmed = value ?? false;
-                  });
-                },
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text('I understand local nodes may be deleted'),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          key: const ValueKey('restore-point-cancel-button'),
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.icon(
-          key: const ValueKey('restore-point-confirm-button'),
-          icon: const Icon(Icons.restore_page_outlined),
-          label: const Text('Restore'),
-          onPressed: !requiresDestructiveConfirmation || _destructiveConfirmed
-              ? () => Navigator.of(context).pop(true)
-              : null,
-        ),
-      ],
-    );
-  }
-}
-
-class _RestoreImpactSection extends StatelessWidget {
-  const _RestoreImpactSection({required this.title, required this.titles});
-
-  final String title;
-  final List<String> titles;
-
-  @override
-  Widget build(BuildContext context) {
-    if (titles.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-    final visible = titles.take(4).toList();
-    final hiddenCount = titles.length - visible.length;
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: theme.textTheme.labelMedium),
-          const SizedBox(height: 6),
-          for (final item in visible) ...[
-            Text(
-              item,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall,
-            ),
-            if (item != visible.last) const SizedBox(height: 2),
-          ],
-          if (hiddenCount > 0) ...[
-            const SizedBox(height: 2),
-            Text('+$hiddenCount more', style: theme.textTheme.labelSmall),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _RestoreImpactChip extends StatelessWidget {
-  const _RestoreImpactChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: theme.colorScheme.primary),
-            const SizedBox(width: 6),
-            Text(label, style: theme.textTheme.labelMedium),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActivityLogRow extends StatelessWidget {
-  const _ActivityLogRow({required this.entry});
-
-  final SyncActivityEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(_activityIcon(entry), size: 18, color: theme.colorScheme.primary),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      entry.actionLabel,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelMedium,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(entry.statusLabel, style: theme.textTheme.labelSmall),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'Result: ${entry.message}',
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 2),
-              Text(_activityCounts(entry), style: theme.textTheme.labelSmall),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ConflictQueue extends StatelessWidget {
-  const _ConflictQueue({
-    required this.conflicts,
-    required this.isBusy,
-    required this.onUseLocal,
-    required this.onUseRemote,
-  });
-
-  final List<SyncConflictSummary> conflicts;
-  final bool isBusy;
-  final ValueChanged<String> onUseLocal;
-  final ValueChanged<String> onUseRemote;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.rule_folder_outlined,
-              size: 18,
-              color: theme.colorScheme.error,
-            ),
-            const SizedBox(width: 8),
-            Text('Conflict queue', style: theme.textTheme.labelLarge),
-          ],
-        ),
-        const SizedBox(height: 8),
-        for (final conflict in conflicts) ...[
-          _ConflictSummaryRow(
-            conflict: conflict,
-            isBusy: isBusy,
-            onUseLocal: onUseLocal,
-            onUseRemote: onUseRemote,
-          ),
-          if (conflict != conflicts.last) const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-}
-
-class _ConflictSummaryRow extends StatelessWidget {
-  const _ConflictSummaryRow({
-    required this.conflict,
-    required this.isBusy,
-    required this.onUseLocal,
-    required this.onUseRemote,
-  });
-
-  final SyncConflictSummary conflict;
-  final bool isBusy;
-  final ValueChanged<String> onUseLocal;
-  final ValueChanged<String> onUseRemote;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final outline = theme.colorScheme.outlineVariant.withValues(alpha: 0.7);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border.all(color: outline),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    conflict.kindLabel,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    conflict.nodeId,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium,
-                  ),
-                ),
-                if (conflict.hasSelectedResolution) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'Selected: ${conflict.selectedResolutionLabel}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                _ConflictVersion(
-                  label: 'Base',
-                  title: conflict.baselineTitle,
-                  detail: conflict.baselineDetail,
-                ),
-                _ConflictVersion(
-                  label: 'Local',
-                  title: conflict.localTitle,
-                  detail: conflict.localDetail,
-                ),
-                _ConflictVersion(
-                  label: 'Remote',
-                  title: conflict.remoteTitle,
-                  detail: conflict.remoteDetail,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  key: ValueKey('sync-conflict-use-local-${conflict.nodeId}'),
-                  icon: const Icon(Icons.devices_outlined, size: 16),
-                  label: const Text('Use local'),
-                  onPressed: isBusy ? null : () => onUseLocal(conflict.nodeId),
-                ),
-                FilledButton.tonalIcon(
-                  key: ValueKey('sync-conflict-use-remote-${conflict.nodeId}'),
-                  icon: const Icon(Icons.cloud_done_outlined, size: 16),
-                  label: const Text('Use remote'),
-                  onPressed: isBusy ? null : () => onUseRemote(conflict.nodeId),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ConflictVersion extends StatelessWidget {
-  const _ConflictVersion({
-    required this.label,
-    required this.title,
-    required this.detail,
-  });
-
-  final String label;
-  final String title;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: theme.textTheme.labelSmall),
-          const SizedBox(height: 2),
-          Text(
-            title.isEmpty ? '-' : title,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall,
-          ),
-          if (detail.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              detail,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _SyncMetric extends StatelessWidget {
-  const _SyncMetric({required this.icon, required this.label, this.color});
-
-  final IconData icon;
-  final String label;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 18, color: color ?? theme.colorScheme.secondary),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-String _countLabel(int count) => count == 1 ? '1 node' : '$count nodes';
-
-String _syncDeltaLabel(int saved, int deleted) {
-  final parts = <String>[
-    if (saved > 0) saved == 1 ? '1 saved' : '$saved saved',
-    if (deleted > 0) deleted == 1 ? '1 deleted' : '$deleted deleted',
-  ];
-  return parts.join(' / ');
-}
-
-String _impactPart(int count, String singular, String plural) {
-  return count == 1 ? '1 $singular' : '$count $plural';
-}
-
-IconData _activityIcon(SyncActivityEntry entry) {
-  return switch (entry.status) {
-    SyncActivityStatus.success => Icons.check_circle_outline,
-    SyncActivityStatus.blocked => Icons.report_problem_outlined,
-    SyncActivityStatus.failed => Icons.error_outline,
-  };
-}
-
-Color _healthColor(ThemeData theme, SyncHealthLevel level) {
-  return switch (level) {
-    SyncHealthLevel.signedOut => theme.colorScheme.outline,
-    SyncHealthLevel.healthy => theme.colorScheme.primary,
-    SyncHealthLevel.needsAttention => theme.colorScheme.tertiary,
-    SyncHealthLevel.degraded => theme.colorScheme.error,
-  };
-}
-
-String _activityCounts(SyncActivityEntry entry) {
-  return [
-    'Saved ${entry.savedCount}',
-    'Deleted ${entry.deletedCount}',
-    'Conflicts ${entry.conflictCount}',
-  ].join(' / ');
-}
-
 class _DatabaseLockCard extends ConsumerWidget {
   const _DatabaseLockCard();
 
@@ -4306,10 +3298,7 @@ class _DatabaseLockCard extends ConsumerWidget {
                 keyboardType: TextInputType.number,
                 autofocus: true,
                 maxLength: 6,
-                decoration: const InputDecoration(
-                  labelText: 'PIN',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: 'PIN'),
               ),
             ],
           ),
@@ -4341,16 +3330,8 @@ class _DatabaseLockCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lock = ref.watch(databaseLockProvider);
-    final theme = Theme.of(context);
     return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      decoration: _settingsPanelDecoration(context),
       child: ListTile(
         leading: const Icon(Icons.security_outlined),
         title: const Text('Database PIN Lock'),

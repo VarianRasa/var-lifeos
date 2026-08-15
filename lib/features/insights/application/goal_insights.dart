@@ -60,8 +60,14 @@ GoalInsightSummary buildGoalInsightSummary({
   required Iterable<MindmapNode> nodes,
 }) {
   final normalizedToday = today.dateOnly;
+  final allNodes = nodes.toList(growable: false);
+  final openTaskIds = {
+    for (final node in allNodes)
+      if (node.type == NodeType.task && !node.isArchived && !_isComplete(node))
+        node.id,
+  };
   final items = <GoalProgressItem>[];
-  for (final node in nodes) {
+  for (final node in allNodes) {
     if (node.isArchived || node.type != NodeType.goal) continue;
     final progress = goalProgressFor(node);
     final milestones = goalMilestones(node);
@@ -81,7 +87,7 @@ GoalInsightSummary buildGoalInsightSummary({
         isStalled: !isComplete && progress < 1 && daysSinceUpdate >= 14,
         recentlyProgressed: !isComplete && progress > 0 && daysSinceUpdate <= 7,
         needsNextAction:
-            !isComplete && (next == null || node.relatedNodeIds.isEmpty),
+            !isComplete && !node.relatedNodeIds.any(openTaskIds.contains),
       ),
     );
   }

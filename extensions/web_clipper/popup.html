@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 300px; font-family: sans-serif; padding: 12px; margin: 0; }
+    h3 { margin-top: 0; }
+    label { display: block; margin-bottom: 4px; font-size: 12px; }
+    select, button, input { width: 100%; padding: 8px; margin-bottom: 12px; box-sizing: border-box; }
+    button { background: #6200ee; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #ccc; }
+  </style>
+</head>
+<body>
+  <h3>Var Web Clipper</h3>
+  <label for="clipMode">Clip Mode</label>
+  <select id="clipMode">
+    <option value="article">Full Article</option>
+    <option value="selection">Selection</option>
+    <option value="bookmark">Bookmark</option>
+  </select>
+
+  <label for="boardSelect">Destination Board</label>
+  <select id="boardSelect">
+    <option value="">Loading boards...</option>
+  </select>
+
+  <button id="saveBtn" disabled>Clip to Var</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

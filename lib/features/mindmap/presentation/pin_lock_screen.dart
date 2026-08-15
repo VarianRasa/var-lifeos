@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_design_tokens.dart';
 import '../application/database_lock_provider.dart';
 
 class PinLockScreen extends ConsumerStatefulWidget {
@@ -34,73 +37,62 @@ class _PinLockScreenState extends ConsumerState<PinLockScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
+    final tokens = AppDesignTokens.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFF121212), // blackboard dark
       body: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 320),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF333333)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.lock_outline,
-                size: 48,
-                color: Colors.amber,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Var is Locked',
-                style: theme.textTheme.titleMedium?.copyWith(color: Colors.white),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Enter PIN to decrypt database',
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _controller,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
-                maxLength: 6,
-                autofocus: true,
-                buildCounter: (context, {required currentLength, required isFocused, maxLength}) => null,
-                decoration: InputDecoration(
-                  hintText: '••••',
-                  hintStyle: const TextStyle(color: Colors.grey),
-                  filled: true,
-                  fillColor: const Color(0xFF2A2A2A),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+        child: Card(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lock_outline, size: 48, color: semantic.warning),
+                  const SizedBox(height: 16),
+                  Text('Var is Locked', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter PIN to decrypt database',
+                    style: theme.textTheme.bodySmall,
                   ),
-                  errorText: _error,
-                  errorStyle: const TextStyle(color: Colors.redAccent),
-                ),
-                onSubmitted: (_) => _submit(),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _controller,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineLarge?.copyWith(
+                      letterSpacing: 8,
+                    ),
+                    maxLength: 6,
+                    autofocus: true,
+                    buildCounter:
+                        (
+                          context, {
+                          required currentLength,
+                          required isFocused,
+                          maxLength,
+                        }) => null,
+                    decoration: InputDecoration(
+                      hintText: '••••',
+                      errorText: _error,
+                    ),
+                    onSubmitted: (_) => _submit(),
                   ),
-                ),
-                child: const Text('Unlock', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: tokens.minimumTarget,
+                    child: FilledButton(
+                      onPressed: _submit,
+                      child: const Text('Unlock'),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

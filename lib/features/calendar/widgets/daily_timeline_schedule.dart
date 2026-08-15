@@ -3,13 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/theme/app_design_tokens.dart';
+import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../mindmap/application/mindmap_mutation_controller.dart';
 import '../../mindmap/application/mindmap_providers.dart';
 import '../../mindmap/domain/canvas_position.dart';
 import '../../mindmap/domain/mindmap_node.dart';
 import '../../mindmap/domain/mindmap_node_data.dart';
-import '../../mindmap/presentation/mindmap_canvas.dart'; // for nodeIcon, nodeColor
 import '../domain/calendar_node_payload.dart';
 import '../domain/time_block.dart';
 
@@ -62,124 +63,191 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
       return timeBlockForNode(node).isUnscheduled;
     }).toList();
 
+    int selectedDurationMinutes = 60;
+    const selectedNodeType = NodeType.task;
+
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          title: Text(
-            'Schedule Slot: ${formatTimeOfDay(hour * 60 + minute)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          content: SizedBox(
-            width: 340,
-            child: unscheduledNodes.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 36,
-                          color: theme.colorScheme.onSurfaceVariant.withValues(
-                            alpha: 0.5,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                'Schedule Slot: ${formatTimeOfDay(hour * 60 + minute)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: SizedBox(
+                width: 380,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Preset Durasi Time Block:',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        children: [15, 30, 60, 90, 120].map((dur) {
+                          final isSelected = selectedDurationMinutes == dur;
+                          final label = dur >= 60
+                              ? '${dur / 60} Jam'
+                              : '$dur Menit';
+                          return ChoiceChip(
+                            label: Text(label),
+                            selected: isSelected,
+                            onSelected: (val) {
+                              if (val) {
+                                setDialogState(
+                                  () => selectedDurationMinutes = dur,
+                                );
+                              }
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Pilih Node Unscheduled / Buat Baru:',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      if (unscheduledNodes.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'Tidak ada node unscheduled. Pilih durasi dan klik "Buat Task Baru" di bawah.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        )
+                      else
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 180),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: unscheduledNodes.length,
+                            itemBuilder: (ctx, index) {
+                              final node = unscheduledNodes[index];
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  NodeVisuals.icon(node.type),
+                                  color: NodeVisuals.color(context, node.type),
+                                ),
+                                title: Text(
+                                  node.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(_nodeSubtitle(node)),
+                                onTap: () async {
+                                  final startMinute = hour * 60 + minute;
+                                  final endMinute =
+                                      (startMinute + selectedDurationMinutes)
+                                          .clamp(1, 1440);
+                                  final updated = await ref
+                                      .read(mindmapMutationControllerProvider)
+                                      .scheduleNode(
+                                        node,
+                                        TimeBlock(
+                                          startMinute: startMinute,
+                                          endMinute: endMinute,
+                                        ),
+                                      );
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  widget.onNodeSelected(updated);
+                                },
+                              );
+                            },
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No unscheduled nodes for today.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontWeight: FontWeight.w500),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Create one in the palette on the left or save a new scheduled task directly.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: unscheduledNodes.length,
-                    itemBuilder: (ctx, index) {
-                      final node = unscheduledNodes[index];
-                      return ListTile(
-                        dense: true,
-                        leading: Icon(
-                          nodeIcon(node.type),
-                          color: nodeColor(node.type),
-                        ),
-                        title: Text(
-                          node.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(_nodeSubtitle(node)),
-                        onTap: () async {
-                          final updated = await ref
-                              .read(mindmapMutationControllerProvider)
-                              .scheduleNode(
-                                node,
-                                TimeBlock(
-                                  startMinute: hour * 60 + minute,
-                                  endMinute:
-                                      ((hour + 1).clamp(0, 24) * 60) + minute,
-                                ),
-                              );
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          widget.onNodeSelected(updated);
-                        },
-                      );
-                    },
+                    ],
                   ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            if (unscheduledNodes.isEmpty)
-              FilledButton.icon(
-                onPressed: () async {
-                  final startMinute = hour * 60 + minute;
-                  final endMinute = (startMinute + 60).clamp(1, 1440);
-                  final now = DateTime.now();
-                  final newTask = MindmapNode(
-                    id: const Uuid().v4(),
-                    type: NodeType.task,
-                    title: 'Scheduled Task',
-                    day: widget.day.dateOnly,
-                    createdAt: now,
-                    updatedAt: now,
-                    position: const CanvasPosition(200, 200),
-                    data: dataWithTimeBlock(
-                      const {},
-                      TimeBlock(startMinute: startMinute, endMinute: endMinute),
-                    ),
-                  );
-
-                  final saved = await ref
-                      .read(mindmapMutationControllerProvider)
-                      .saveNode(newTask);
-                  if (ctx.mounted) {
-                    Navigator.pop(ctx);
-                    widget.onNodeSelected(saved);
-                  }
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('Create Task'),
+                ),
               ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Batal'),
+                ),
+                FilledButton.icon(
+                  onPressed: () async {
+                    final startMinute = hour * 60 + minute;
+                    final endMinute = (startMinute + selectedDurationMinutes)
+                        .clamp(1, 1440);
+                    final now = DateTime.now();
+                    final newTask = MindmapNode(
+                      id: const Uuid().v4(),
+                      type: selectedNodeType,
+                      title: 'Scheduled Task',
+                      day: widget.day.dateOnly,
+                      createdAt: now,
+                      updatedAt: now,
+                      position: const CanvasPosition(200, 200),
+                      data: dataWithTimeBlock(
+                        const {},
+                        TimeBlock(
+                          startMinute: startMinute,
+                          endMinute: endMinute,
+                        ),
+                      ),
+                    );
+
+                    final saved = await ref
+                        .read(mindmapMutationControllerProvider)
+                        .saveNode(newTask);
+                    if (ctx.mounted) {
+                      Navigator.pop(ctx);
+                      widget.onNodeSelected(saved);
+                    }
+                  },
+                  icon: const Icon(Icons.add),
+                  label: Text('Buat Slot (${selectedDurationMinutes}m)'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
+  Future<void> _autoResolveConflicts(
+    List<_TimelineEntry> scheduledEntries,
+  ) async {
+    final dayBlocks = [
+      for (final entry in scheduledEntries)
+        DayTimeBlock(
+          id: entry.node.id,
+          block: entry.block,
+          isHighPriority:
+              entry.node.priority == NodePriority.high ||
+              entry.node.priority == NodePriority.urgent,
+          isDone: entry.node.isDone || entry.node.status == NodeStatus.done,
+        ),
+    ];
+
+    final resolved = autoResolveConflicts(dayBlocks);
+    if (resolved.isEmpty) return;
+
+    final controller = ref.read(mindmapMutationControllerProvider);
+    for (final entry in scheduledEntries) {
+      if (resolved.containsKey(entry.node.id)) {
+        await controller.scheduleNode(entry.node, resolved[entry.node.id]!);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
     final parsedNodes = _ParsedTimelineNodes.fromNodes(widget.nodes);
     final scheduledEntries = _layoutOverlaps(parsedNodes.scheduled);
     final conflicts = detectTimeBlockConflicts([
@@ -201,11 +269,77 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
     final now = DateTime.now();
     final nowMinute = now.hour * 60 + now.minute;
 
+    final totalScheduledMinutes = scheduledEntries.fold<int>(
+      0,
+      (sum, entry) => sum + entry.block.durationMinutes,
+    );
+    final totalHoursLabel = (totalScheduledMinutes / 60.0).toStringAsFixed(1);
+    final workloadCapacityPercent = ((totalScheduledMinutes / 480.0) * 100)
+        .clamp(0, 100)
+        .toInt();
+
     return SingleChildScrollView(
       controller: _scrollController,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Dynamic Workload & Capacity Bar Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh.withValues(
+                  alpha: 0.6,
+                ),
+                borderRadius: BorderRadius.circular(tokens.radiusContainer),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.4,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.schedule,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Daily Workload: ${totalHoursLabel}h scheduled',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: (totalScheduledMinutes / 480.0).clamp(0.0, 1.0),
+                        minHeight: 6,
+                        backgroundColor:
+                            theme.colorScheme.surfaceContainerHighest,
+                        color: workloadCapacityPercent > 100
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$workloadCapacityPercent% of 8h',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           if (parsedNodes.invalid.isNotEmpty)
             _NodeLane(
               key: const ValueKey('timeline-invalid-lane'),
@@ -228,6 +362,7 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
               key: const ValueKey('timeline-conflict-lane'),
               conflicts: conflicts,
               nodesById: {for (final node in widget.nodes) node.id: node},
+              onAutoResolve: () => _autoResolveConflicts(scheduledEntries),
             ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,8 +372,8 @@ class _DailyTimelineScheduleState extends ConsumerState<DailyTimelineSchedule> {
                 height: 24 * _hourHeight,
                 padding: const EdgeInsets.only(top: 8),
                 decoration: BoxDecoration(
-                  border: Border(
-                    right: BorderSide(
+                  border: BorderDirectional(
+                    end: BorderSide(
                       color: theme.colorScheme.outlineVariant.withValues(
                         alpha: 0.5,
                       ),
@@ -461,7 +596,8 @@ class _TimelineNodeCard extends StatelessWidget {
     final node = entry.node;
     final block = entry.block;
     final theme = Theme.of(context);
-    final color = nodeColor(node.type);
+    final tokens = AppDesignTokens.of(context);
+    final color = NodeVisuals.color(context, node.type);
     final isDone = node.isDone || node.status == NodeStatus.done;
     final borderColor = hasConflict ? theme.colorScheme.error : color;
     final stateLabel = isDone
@@ -476,126 +612,135 @@ class _TimelineNodeCard extends StatelessWidget {
         : color;
     final height = (block.durationMinutes / 60.0) * _hourHeight;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: () => onNodeSelected(node),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: isDone
-                ? theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.35,
-                  )
-                : color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: borderColor.withValues(alpha: hasConflict ? 0.9 : 0.6),
-              width: hasConflict ? 2 : 1.5,
+    return Semantics(
+      button: true,
+      label: '${node.title}, ${block.rangeLabel}, $stateLabel',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(tokens.radiusElement),
+        child: InkWell(
+          onTap: () => onNodeSelected(node),
+          child: Container(
+            constraints: BoxConstraints(minHeight: tokens.minimumTarget),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDone
+                  ? theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.35,
+                    )
+                  : color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(tokens.radiusElement),
+              border: Border.all(
+                color: borderColor.withValues(alpha: hasConflict ? 0.9 : 0.6),
+                width: hasConflict ? 2 : 1.5,
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              if (node.type == NodeType.task || node.type == NodeType.habit)
-                Transform.scale(
-                  scale: 0.8,
-                  child: Checkbox(
-                    value: node.isDone,
-                    activeColor: color,
-                    onChanged: (val) {
-                      if (val != null) onTaskDoneChanged(node, val);
-                    },
-                  ),
-                ),
-              Icon(nodeIcon(node.type), size: 16, color: color),
-              if (hasConflict) ...[
-                const SizedBox(width: 6),
-                Icon(
-                  Icons.report_problem_outlined,
-                  key: ValueKey('timeline-conflict-icon-${node.id}'),
-                  size: 15,
-                  color: theme.colorScheme.error,
-                ),
-              ],
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      node.title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        decoration: isDone ? TextDecoration.lineThrough : null,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                      maxLines: height < 40 ? 1 : 2,
-                      overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                if (node.type == NodeType.task || node.type == NodeType.habit)
+                  Transform.scale(
+                    scale: 0.8,
+                    child: Checkbox(
+                      value: node.isDone,
+                      activeColor: color,
+                      onChanged: (val) {
+                        if (val != null) onTaskDoneChanged(node, val);
+                      },
                     ),
-                    if (height >= 40)
+                  ),
+                Icon(NodeVisuals.icon(node.type), size: 16, color: color),
+                if (hasConflict) ...[
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.report_problem_outlined,
+                    key: ValueKey('timeline-conflict-icon-${node.id}'),
+                    size: 15,
+                    color: theme.colorScheme.error,
+                  ),
+                ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
                       Text(
-                        '${block.rangeLabel} • ${_nodeSubtitle(node)}',
+                        node.title,
                         style: TextStyle(
-                          fontSize: 10,
-                          color: theme.colorScheme.onSurfaceVariant.withValues(
-                            alpha: 0.8,
-                          ),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          decoration: isDone
+                              ? TextDecoration.lineThrough
+                              : null,
+                          color: theme.colorScheme.onSurface,
                         ),
-                        maxLines: 1,
+                        maxLines: height < 40 ? 1 : 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    if (height >= 52)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: stateColor.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: stateColor.withValues(alpha: 0.35),
-                            ),
+                      if (height >= 40)
+                        Text(
+                          '${block.rangeLabel} • ${_nodeSubtitle(node)}',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: theme.colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.8),
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 1,
-                            ),
-                            child: Text(
-                              stateLabel,
-                              key: ValueKey(
-                                'timeline-state-${node.id}-$stateLabel',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (height >= 52)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: stateColor.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: stateColor.withValues(alpha: 0.35),
                               ),
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                color: stateColor,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              child: Text(
+                                stateLabel,
+                                key: ValueKey(
+                                  'timeline-state-${node.id}-$stateLabel',
+                                ),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: stateColor,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Schedule actions',
+                  icon: const Icon(Icons.more_vert, size: 16),
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'extend':
+                        onExtend();
+                      case 'clear':
+                        onUnschedule();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'extend', child: Text('Extend 15m')),
+                    PopupMenuItem(
+                      value: 'clear',
+                      child: Text('Clear schedule'),
+                    ),
                   ],
                 ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'Schedule actions',
-                icon: const Icon(Icons.more_vert, size: 16),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'extend':
-                      onExtend();
-                    case 'clear':
-                      onUnschedule();
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'extend', child: Text('Extend 15m')),
-                  PopupMenuItem(value: 'clear', child: Text('Clear schedule')),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -662,7 +807,7 @@ class _NodeLane extends StatelessWidget {
                       feedback: Material(
                         color: Colors.transparent,
                         child: Chip(
-                          avatar: Icon(nodeIcon(node.type), size: 16),
+                          avatar: Icon(NodeVisuals.icon(node.type), size: 16),
                           label: Text(node.title),
                         ),
                       ),
@@ -704,7 +849,11 @@ class _ScheduleNodeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InputChip(
-      avatar: Icon(nodeIcon(node.type), size: 16, color: nodeColor(node.type)),
+      avatar: Icon(
+        NodeVisuals.icon(node.type),
+        size: 16,
+        color: NodeVisuals.color(context, node.type),
+      ),
       label: Text(node.title),
       onPressed: () => onNodeSelected(node),
       onDeleted: onScheduleNext == null ? null : () => onScheduleNext!(node),
@@ -719,10 +868,12 @@ class _ConflictLane extends StatelessWidget {
     super.key,
     required this.conflicts,
     required this.nodesById,
+    required this.onAutoResolve,
   });
 
   final List<TimeBlockConflict> conflicts;
   final Map<String, MindmapNode> nodesById;
+  final VoidCallback onAutoResolve;
 
   @override
   Widget build(BuildContext context) {
@@ -745,10 +896,29 @@ class _ConflictLane extends StatelessWidget {
                 children: [
                   Icon(Icons.report_problem_outlined, size: 16, color: color),
                   const SizedBox(width: 8),
-                  Text(
-                    'Schedule conflicts (${conflicts.length})',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      'Schedule conflicts (${conflicts.length})',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: theme.colorScheme.onError,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: onAutoResolve,
+                    icon: const Icon(Icons.auto_fix_high, size: 14),
+                    label: const Text(
+                      'Auto-Shift Conflicts',
+                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                 ],

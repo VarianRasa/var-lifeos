@@ -5,19 +5,20 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:var_app/features/mindmap/domain/workspace_context.dart';
 import 'package:var_app/features/workspace/data/workspace_sort_repository.dart';
 import 'package:var_app/features/workspace/data/workspace_title_repository.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
-import '../../shared/layout/adaptive_scaffold.dart';
-import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/mindmap_node.dart';
+import '../mindmap/domain/workspace_context.dart';
 import 'application/workspace_filters.dart';
 import 'application/workspace_health.dart';
 import 'application/workspace_overview.dart';
@@ -79,6 +80,8 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
   Widget build(BuildContext context) {
     final contexts = ref.watch(workspaceContextsProvider);
     final today = ref.watch(currentDateProvider);
+    final showInlineSearch =
+        MediaQuery.sizeOf(context).width >= LayoutConstants.mobileBreakpoint;
 
     return CallbackShortcuts(
       bindings: {
@@ -102,7 +105,7 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const AppRouteChromeTabs(currentRoute: AppRoute.workspaces),
+          title: const Text('Workspaces'),
           actions: [
             IconButton(
               icon: Icon(
@@ -115,14 +118,42 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
                 });
               },
             ),
-            SearchField(
-              controller: _searchController,
-              hintText: 'Filter workspaces...',
-              onChanged: (value) {
-                setState(() => _searchQuery = value.trim().toLowerCase());
-              },
-            ),
-            const SizedBox(width: 16),
+            if (showInlineSearch)
+              SearchField(
+                controller: _searchController,
+                hintText: 'Filter workspaces...',
+                onChanged: (value) {
+                  setState(() => _searchQuery = value.trim().toLowerCase());
+                },
+              )
+            else
+              IconButton(
+                key: const ValueKey('workspace-mobile-search'),
+                tooltip: 'Filter workspaces',
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Filter workspaces'),
+                    content: SearchField(
+                      controller: _searchController,
+                      hintText: 'Filter workspaces...',
+                      onChanged: (value) {
+                        setState(
+                          () => _searchQuery = value.trim().toLowerCase(),
+                        );
+                      },
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('Done'),
+                      ),
+                    ],
+                  ),
+                ),
+                icon: const Icon(Icons.search),
+              ),
+            const SizedBox(width: 8),
           ],
         ),
         body: contexts.when(
@@ -201,7 +232,10 @@ class _WorkspacesBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+    final spacing =
+        MediaQuery.sizeOf(context).width <= LayoutConstants.contentBreakpoint
+        ? 12.0
+        : 16.0;
 
     final sortState = ref.watch(workspaceSortProvider);
     final overview = buildWorkspaceOverview(contexts, today);
@@ -248,58 +282,67 @@ class _WorkspacesBody extends ConsumerWidget {
         sortedAreas.isNotEmpty ||
         sortedDailies.isNotEmpty;
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(spacing),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (showStats) ...[
-            _WorkspaceMetricRail(summary: overview),
-            SizedBox(height: spacing),
-          ],
-          _WorkspaceFilterBar(
-            filter: filter,
-            onChanged: onFilterChanged,
-            onClearSearch: onClearSearch,
+    return LayoutBuilder(
+      builder: (context, constraints) => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          key: const ValueKey('workspace-index-content'),
+          constraints: const BoxConstraints(maxWidth: 1120),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(spacing),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (showStats) ...[
+                  _WorkspaceMetricRail(summary: overview),
+                  SizedBox(height: spacing),
+                ],
+                _WorkspaceFilterBar(
+                  filter: filter,
+                  onChanged: onFilterChanged,
+                  onClearSearch: onClearSearch,
+                ),
+                SizedBox(height: spacing),
+                if (showStats) ...[
+                  _WorkspaceFocusStrip(
+                    contexts: contexts,
+                    visibleCount:
+                        sortedProjects.length +
+                        sortedAreas.length +
+                        sortedDailies.length,
+                    hasSearch: searchQuery.isNotEmpty,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+                if (!hasMatches)
+                  const _WorkspaceNoMatches()
+                else ...[
+                  _WorkspaceSection(
+                    title: 'Projects',
+                    contexts: sortedProjects,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                  _WorkspaceSection(
+                    title: 'Areas',
+                    contexts: sortedAreas,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+                if (hasMatches && sortedDailies.isNotEmpty) ...[
+                  _WorkspaceSection(
+                    title: 'Dailies',
+                    contexts: sortedDailies,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                ],
+              ],
+            ),
           ),
-          SizedBox(height: spacing),
-          if (showStats) ...[
-            _WorkspaceFocusStrip(
-              contexts: contexts,
-              visibleCount:
-                  sortedProjects.length +
-                  sortedAreas.length +
-                  sortedDailies.length,
-              hasSearch: searchQuery.isNotEmpty,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-          if (!hasMatches)
-            const _WorkspaceNoMatches()
-          else ...[
-            _WorkspaceSection(
-              title: 'Projects',
-              contexts: sortedProjects,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-            _WorkspaceSection(
-              title: 'Areas',
-              contexts: sortedAreas,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-          if (hasMatches && sortedDailies.isNotEmpty) ...[
-            _WorkspaceSection(
-              title: 'Dailies',
-              contexts: sortedDailies,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -592,9 +635,8 @@ class _WorkspaceActiveFilterChips extends StatelessWidget {
           _WorkspaceFilterChip(
             icon: Icons.sort_outlined,
             label: 'Sort: ${_workspaceSortLabel(filter.sortMode)}',
-            onRemove: () => onChanged(
-              filter.copyWith(sortMode: WorkspaceSortMode.manual),
-            ),
+            onRemove: () =>
+                onChanged(filter.copyWith(sortMode: WorkspaceSortMode.manual)),
           ),
       ],
     );
@@ -620,7 +662,6 @@ class _WorkspaceFilterChip extends StatelessWidget {
       onDeleted: onRemove,
       deleteIcon: const Icon(Icons.close, size: 14),
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 }
@@ -821,10 +862,7 @@ class _WorkspaceSection extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: contexts.length,
-            onReorder: (oldIndex, newIndex) {
-              if (oldIndex < newIndex) {
-                newIndex -= 1;
-              }
+            onReorderItem: (oldIndex, newIndex) {
               final List<WorkspaceContext> updatedList = List.from(contexts);
               final item = updatedList.removeAt(oldIndex);
               updatedList.insert(newIndex, item);
@@ -846,9 +884,26 @@ class _WorkspaceSection extends ConsumerWidget {
                   'workspace-card-${workspaceContext.type.name}-${workspaceContext.name}',
                 ),
                 padding: const EdgeInsets.only(bottom: 12.0),
-                child: _WorkspaceContextCard(
-                  contextSummary: workspaceContext,
-                  today: today,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox.square(
+                      dimension: 44,
+                      child: ReorderableDragStartListener(
+                        key: ValueKey(
+                          'workspace-reorder-${workspaceContext.type.name}-${workspaceContext.name}',
+                        ),
+                        index: index,
+                        child: const Icon(Icons.drag_handle),
+                      ),
+                    ),
+                    Expanded(
+                      child: _WorkspaceContextCard(
+                        contextSummary: workspaceContext,
+                        today: today,
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -988,19 +1043,20 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
     BuildContext context,
     String currentTitle,
   ) async {
-    final controller = TextEditingController(text: currentTitle);
+    var draft = currentTitle;
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Set Workspace Title'),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: currentTitle,
           decoration: const InputDecoration(
             hintText: 'Enter custom title',
             border: OutlineInputBorder(),
           ),
           autofocus: true,
-          onSubmitted: (val) => Navigator.pop(context, val),
+          onChanged: (value) => draft = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [
           TextButton(
@@ -1008,7 +1064,7 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, controller.text),
+            onPressed: () => Navigator.pop(context, draft),
             child: const Text('Save'),
           ),
         ],
@@ -1036,6 +1092,8 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
+    final tokens = AppDesignTokens.of(context);
     final nextActions = widget.contextSummary.nextActions(widget.today);
     final completionPercent = (widget.contextSummary.completionRate * 100)
         .round();
@@ -1058,21 +1116,20 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
       key: ValueKey(
         'workspace-context-${widget.contextSummary.type.name}-${workspaceContextKey(widget.contextSummary.name)}',
       ),
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
-      transformAlignment: Alignment.center,
-      transform: Matrix4.translationValues(0.0, _isHovered ? -4.0 : 0.0, 0.0),
+      duration: tokens.effectiveDuration(context, tokens.motionFast),
+      curve: tokens.motionCurve,
       decoration: ShapeDecoration(
         color: _isHovered
             ? theme.colorScheme.primary.withValues(alpha: 0.06)
             : theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
           side: BorderSide(
             color: _isHovered ? theme.colorScheme.primary : theme.dividerColor,
             width: _isHovered ? 1.8 : 1.0,
           ),
-          radius: 12,
-          wobble: _isHovered ? 2.0 : 1.2,
         ),
       ),
       child: Padding(
@@ -1177,8 +1234,8 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
                 backgroundColor: theme.colorScheme.surfaceContainerHighest,
                 valueColor: AlwaysStoppedAnimation<Color>(
                   widget.contextSummary.completionRate == 1.0
-                      ? Colors.green
-                      : theme.colorScheme.primary,
+                      ? semantic.success
+                      : semantic.accent,
                 ),
               ),
             ),
@@ -1202,7 +1259,7 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
                 ),
                 Chip(
                   label: Text(health.label),
-                  backgroundColor: _healthColor(theme, health),
+                  backgroundColor: _healthColor(theme, semantic, health),
                   side: BorderSide.none,
                 ),
               ],
@@ -1309,34 +1366,50 @@ class _WorkspaceContextCardState extends ConsumerState<_WorkspaceContextCard> {
       ),
     );
 
-    return MouseRegion(
-      onEnter: (_) => _onHoverChange(true),
-      onHover: (_) => _onHoverChange(true),
-      onExit: (_) => _onHoverChange(false),
-      cursor: SystemMouseCursors.click,
-      child: Listener(
-        onPointerHover: (_) => _onHoverChange(true),
-        onPointerDown: (event) {
-          // Fallback for right-click on web where onSecondaryTap might be swallowed
-          if (event.buttons == 2) {
-            // 2 == kSecondaryButton
-            _showRenameDialog(context, customTitle ?? '');
-          }
+    void openWorkspace() {
+      _hideOverlay();
+      final type = widget.contextSummary.type.name;
+      final name = Uri.encodeComponent(widget.contextSummary.name);
+      context.go('/workspaces/$type/$name');
+    }
+
+    return Semantics(
+      button: true,
+      label:
+          '${widget.contextSummary.type.label} ${widget.contextSummary.name}, ${widget.contextSummary.activeNodeCount} active, $completionPercent percent done',
+      onTap: openWorkspace,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter): openWorkspace,
+          const SingleActivator(LogicalKeyboardKey.space): openWorkspace,
         },
-        child: GestureDetector(
-          onTap: () {
-            _hideOverlay();
-            final type = widget.contextSummary.type.name;
-            final name = Uri.encodeComponent(widget.contextSummary.name);
-            context.go('/workspaces/$type/$name');
-          },
-          onSecondaryTap: () {
-            _showRenameDialog(context, customTitle ?? '');
-          },
-          onLongPress: () {
-            _showRenameDialog(context, customTitle ?? '');
-          },
-          child: container,
+        child: Focus(
+          child: MouseRegion(
+            onEnter: (_) => _onHoverChange(true),
+            onHover: (_) => _onHoverChange(true),
+            onExit: (_) => _onHoverChange(false),
+            cursor: SystemMouseCursors.click,
+            child: Listener(
+              onPointerHover: (_) => _onHoverChange(true),
+              onPointerDown: (event) {
+                // Fallback for right-click on web where onSecondaryTap might be swallowed
+                if (event.buttons == 2) {
+                  // 2 == kSecondaryButton
+                  _showRenameDialog(context, customTitle ?? '');
+                }
+              },
+              child: GestureDetector(
+                onTap: openWorkspace,
+                onSecondaryTap: () {
+                  _showRenameDialog(context, customTitle ?? '');
+                },
+                onLongPress: () {
+                  _showRenameDialog(context, customTitle ?? '');
+                },
+                child: container,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1350,23 +1423,26 @@ class _WorkspaceActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      key: ValueKey('workspace-action-${node.id}'),
-      dense: true,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      onTap: () => goToDay(context, node.day, highlightNodeId: node.id),
-      hoverColor: Theme.of(
-        context,
-      ).colorScheme.primaryContainer.withValues(alpha: 0.5),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-      leading: Icon(
-        _nodeIcon(node.type),
-        size: 20,
-        color: Theme.of(context).colorScheme.primary,
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        key: ValueKey('workspace-action-${node.id}'),
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        onTap: () => goToDay(context, node.day, highlightNodeId: node.id),
+        hoverColor: Theme.of(
+          context,
+        ).colorScheme.primaryContainer.withValues(alpha: 0.5),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        leading: Icon(
+          NodeVisuals.icon(node.type),
+          size: 20,
+          color: NodeVisuals.color(context, node.type),
+        ),
+        title: Text(node.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(_actionSubtitle(node)),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
       ),
-      title: Text(node.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(_actionSubtitle(node)),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
     );
   }
 }
@@ -1394,11 +1470,6 @@ class _WorkspaceMetricPillState extends State<_WorkspaceMetricPill> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutBack,
-        transform: Matrix4.diagonal3Values(
-          _isHovered ? 1.05 : 1.0,
-          _isHovered ? 1.05 : 1.0,
-          1.0,
-        ),
         decoration: BoxDecoration(
           color: _isHovered
               ? theme.colorScheme.primaryContainer
@@ -1465,12 +1536,16 @@ String _actionSubtitle(MindmapNode node) {
   ].join(' - ');
 }
 
-Color _healthColor(ThemeData theme, WorkspaceHealthStatus health) {
+Color _healthColor(
+  ThemeData theme,
+  AppSemanticColors semantic,
+  WorkspaceHealthStatus health,
+) {
   return switch (health) {
-    WorkspaceHealthStatus.healthy => Colors.green.withValues(alpha: 0.18),
+    WorkspaceHealthStatus.healthy => semantic.successMuted,
     WorkspaceHealthStatus.quiet => theme.colorScheme.surfaceContainerHighest,
-    WorkspaceHealthStatus.busy => theme.colorScheme.primaryContainer,
-    WorkspaceHealthStatus.atRisk => theme.colorScheme.errorContainer,
+    WorkspaceHealthStatus.busy => semantic.warningMuted,
+    WorkspaceHealthStatus.atRisk => semantic.dangerMuted,
   };
 }
 
@@ -1478,36 +1553,6 @@ IconData _workspaceIcon(WorkspaceContextType type) => switch (type) {
   WorkspaceContextType.project => Icons.account_tree_outlined,
   WorkspaceContextType.area => Icons.category_outlined,
   WorkspaceContextType.daily => Icons.today_outlined,
-};
-
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
 };
 
 String _countLabel(int count, String singular) {

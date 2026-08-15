@@ -14,16 +14,17 @@ class CollaboratorCursorWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final foregroundColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF0A1317);
     return TweenAnimationBuilder<Offset>(
       tween: Tween<Offset>(begin: position, end: position),
       duration: const Duration(milliseconds: 120),
       curve: Curves.easeOutCubic,
       builder: (context, animPos, child) {
-        return Positioned(
-          left: animPos.dx,
-          top: animPos.dy,
-          child: child!,
-        );
+        return Positioned(left: animPos.dx, top: animPos.dy, child: child!);
       },
       child: IgnorePointer(
         child: Stack(
@@ -32,7 +33,7 @@ class CollaboratorCursorWidget extends StatelessWidget {
             // Cursor Arrow
             CustomPaint(
               size: const Size(18, 20),
-              painter: _CursorArrowPainter(color),
+              painter: _CursorArrowPainter(color, colorScheme.outline),
             ),
             // User name banner
             Positioned(
@@ -47,18 +48,18 @@ class CollaboratorCursorWidget extends StatelessWidget {
                     bottomLeft: Radius.circular(4),
                     bottomRight: Radius.circular(4),
                   ),
-                  boxShadow: const [
+                  boxShadow: [
                     BoxShadow(
-                      color: Colors.black26,
+                      color: colorScheme.shadow.withValues(alpha: 0.26),
                       blurRadius: 4,
-                      offset: Offset(0, 2),
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
                 child: Text(
                   name,
-                  style: const TextStyle(
-                    color: Colors.black,
+                  style: TextStyle(
+                    color: foregroundColor,
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
                   ),
@@ -73,8 +74,9 @@ class CollaboratorCursorWidget extends StatelessWidget {
 }
 
 class _CursorArrowPainter extends CustomPainter {
-  _CursorArrowPainter(this.color);
+  _CursorArrowPainter(this.color, this.borderColor);
   final Color color;
+  final Color borderColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -83,7 +85,7 @@ class _CursorArrowPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final borderPaint = Paint()
-      ..color = Colors.black
+      ..color = borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
@@ -99,5 +101,7 @@ class _CursorArrowPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _CursorArrowPainter oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.borderColor != borderColor;
+  }
 }

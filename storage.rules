@@ -1,0 +1,44 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isCanonicalAttachmentId(attachmentId) {
+      return attachmentId.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+    }
+
+    function isSupportedContentType() {
+      return request.resource.contentType.matches('^(image/(gif|jpeg|png|webp)|video/(mp4|quicktime|webm)|audio/(aac|m4a|mpeg|mp4|ogg|wav|webm))$');
+    }
+
+    function isValidUpload() {
+      return request.resource.size > 0
+        && request.resource.size <= 100 * 1024 * 1024
+        && isSupportedContentType();
+    }
+
+    function hasImmutableMetadata() {
+      return request.resource.contentType == resource.contentType
+        && request.resource.metadata == resource.metadata;
+    }
+
+    match /attachments/{userId}/{attachmentId} {
+      allow read: if isOwner(userId)
+        && isCanonicalAttachmentId(attachmentId);
+      allow create: if isOwner(userId)
+        && isCanonicalAttachmentId(attachmentId)
+        && isValidUpload();
+      allow update: if isOwner(userId)
+        && isCanonicalAttachmentId(attachmentId)
+        && isValidUpload()
+        && hasImmutableMetadata();
+      allow delete: if false;
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "var-firebase-firestore-rules-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test firestore.rules.test.cjs"
+  },
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.2.1"
+  }
+}

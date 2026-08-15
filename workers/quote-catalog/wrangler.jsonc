@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "var-quote-catalog",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-17",
+  "vars": {
+    "QUOTE_API_BASE_URL": "https://dummyjson.com",
+    "ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:5000,http://localhost:8080"
+  }
+}

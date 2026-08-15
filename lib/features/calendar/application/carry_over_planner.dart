@@ -51,7 +51,12 @@ List<CarryOverCandidate> buildCarryOverCandidates({
   final candidates = <CarryOverCandidate>[];
 
   for (final node in nodes) {
-    if (node.isArchived || !node.day.dateOnly.isBefore(day)) continue;
+    if (node.isArchived ||
+        node.status == NodeStatus.next ||
+        node.status == NodeStatus.someday ||
+        !node.day.dateOnly.isBefore(day)) {
+      continue;
+    }
 
     final reason = _carryOverReason(node);
     if (reason == null) continue;

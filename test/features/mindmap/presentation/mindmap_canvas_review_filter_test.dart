@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/domain/canvas_position.dart';
@@ -38,15 +39,17 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Show search'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('mindmap-review-filter-needsReview')),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Review launch plan'), findsOneWidget);
-    expect(find.text('Active note'), findsNothing);
+    expect(find.byKey(const ValueKey('mindmap-node-review-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mindmap-node-active-1')), findsNothing);
   });
 
   testWidgets('MindmapCanvas filters next-action candidates', (tester) async {
@@ -80,12 +83,14 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Show search'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('mindmap-next-action-filter')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Ship important fix'), findsOneWidget);
-    expect(find.text('Someday idea'), findsNothing);
+    expect(find.byKey(const ValueKey('mindmap-node-next-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mindmap-node-later-1')), findsNothing);
   });
 }

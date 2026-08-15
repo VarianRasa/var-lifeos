@@ -2,22 +2,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/config/runtime_config.dart';
 
 void main() {
-  test('RuntimeConfig defaults to safe local-only behavior', () {
-    const config = RuntimeConfig();
+  test('RuntimeConfig environment uses production transcription endpoint', () {
+    final config = RuntimeConfig.fromEnvironment();
 
-    expect(config.syncEndpoint, isNull);
-    expect(config.syncEnabled, isFalse);
-    expect(config.demoSeedEnabled, isFalse);
+    expect(
+      config.audioTranscriptionEndpoint,
+      Uri.parse('https://var-audio-transcription.mp2n2-var-app.workers.dev'),
+    );
   });
 
-  test('RuntimeConfig exposes enabled sync endpoint', () {
+  test('RuntimeConfig defaults optional features to disabled', () {
+    const config = RuntimeConfig();
+
+    expect(config.demoSeedEnabled, isFalse);
+    expect(config.quoteDiscoveryEnabled, isFalse);
+    expect(config.audioTranscriptionEnabled, isFalse);
+  });
+
+  test('RuntimeConfig exposes audio transcription endpoint', () {
     final config = RuntimeConfig(
-      syncEndpoint: Uri.parse('https://sync.example.test'),
-      demoSeedEnabled: true,
+      audioTranscriptionEndpoint: Uri.parse('https://audio.example.test'),
+    );
+    expect(config.audioTranscriptionEnabled, isTrue);
+  });
+
+  test('RuntimeConfig exposes Quote discovery endpoint', () {
+    final config = RuntimeConfig(
+      quoteEndpoint: Uri.parse('https://quotes.example.test'),
     );
 
-    expect(config.syncEnabled, isTrue);
-    expect(config.syncEndpoint, Uri.parse('https://sync.example.test'));
+    expect(config.quoteDiscoveryEnabled, isTrue);
+    expect(config.quoteEndpoint, Uri.parse('https://quotes.example.test'));
+  });
+
+  test('RuntimeConfig exposes enabled demo seed', () {
+    const config = RuntimeConfig(demoSeedEnabled: true);
+
     expect(config.demoSeedEnabled, isTrue);
   });
 }

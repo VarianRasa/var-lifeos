@@ -53,6 +53,14 @@ void main() {
         now: DateTime(2026, 7, 13),
       ),
       MindmapNode.create(
+        id: 'task-1',
+        type: NodeType.task,
+        title: 'Closed related task',
+        day: today,
+        status: NodeStatus.done,
+        now: DateTime(2026, 7, 13),
+      ),
+      MindmapNode.create(
         id: 'done',
         type: NodeType.goal,
         title: 'Done goal',
@@ -75,7 +83,10 @@ void main() {
     expect(summary.inProgressCount, 2);
     expect(summary.stalledGoals.single.node.title, 'Stalled goal');
     expect(summary.recentlyProgressedGoals.first.node.title, 'Recent goal');
-    expect(summary.needsNextActionGoals.single.node.title, 'Stalled goal');
+    expect(summary.needsNextActionGoals.map((item) => item.node.title), [
+      'Stalled goal',
+      'Recent goal',
+    ]);
     expect(summary.milestoneMomentumCount, 1);
   });
 }

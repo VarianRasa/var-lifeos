@@ -1,0 +1,16 @@
+{
+  "name": "var-voting-api-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "npm run build && node --test --experimental-strip-types test/**/*.test.ts",
+    "types": "wrangler types worker-configuration.d.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260717.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.112.0"
+  }
+}

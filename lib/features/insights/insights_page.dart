@@ -2,19 +2,19 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
-import '../../shared/layout/adaptive_scaffold.dart';
-import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -33,6 +33,8 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
+import '../mindmap/presentation/workspace_rhythm_tracker.dart';
 import 'application/context_health.dart' as health;
 import 'application/focus_insights.dart' as focus;
 import 'application/goal_insights.dart' as goals;
@@ -45,7 +47,18 @@ import 'application/insights_markdown_export.dart' as md_export;
 import 'application/insights_summary.dart' as mission;
 import 'application/insights_trends.dart' as trends;
 import 'application/review_insights.dart' as reviews;
+import 'domain/executive_dashboard_summary.dart';
 import 'domain/insights_summary.dart';
+import 'insights_export_stub.dart'
+    if (dart.library.io) 'insights_export_io.dart'
+    if (dart.library.js_interop) 'insights_export_web.dart';
+import 'presentation/deep_work_focus_card.dart';
+import 'presentation/eisenhower_matrix_card.dart';
+import 'presentation/executive_dashboard_panel.dart';
+import 'presentation/expense_budget_card.dart';
+import 'presentation/habit_matrix_heatmap.dart';
+import 'presentation/para_okr_rollup_card.dart';
+import 'presentation/smart_goal_milestone_tracker.dart';
 
 class _SetInsightRangeIntent extends Intent {
   const _SetInsightRangeIntent(this.preset);
@@ -55,6 +68,20 @@ class _SetInsightRangeIntent extends Intent {
 
 class _FocusInsightSearchIntent extends Intent {
   const _FocusInsightSearchIntent();
+}
+
+RoundedRectangleBorder _astryxBorder(
+  BuildContext context, {
+  required Color color,
+  bool inner = false,
+}) {
+  final tokens = AppDesignTokens.of(context);
+  return RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(
+      inner ? tokens.radiusElement : tokens.radiusContainer,
+    ),
+    side: BorderSide(color: color),
+  );
 }
 
 class _ExportInsightReportIntent extends Intent {
@@ -124,6 +151,8 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
     final smartViews = ref.watch(smartNodeViewsProvider);
     final automationSuggestions = ref.watch(automationSuggestionsProvider);
     final today = ref.watch(currentDateProvider);
+    final showInlineSearch =
+        MediaQuery.sizeOf(context).width >= LayoutConstants.mobileBreakpoint;
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -184,9 +213,15 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
           autofocus: true,
           child: Scaffold(
             appBar: AppBar(
-              title: const AppRouteChromeTabs(currentRoute: AppRoute.insights),
+              title: const Text('Insights'),
               actions: [
                 IconButton(
+                  tooltip: 'Automation & Smart Rules',
+                  icon: const Icon(Icons.auto_fix_high_outlined),
+                  onPressed: () => showAutomationRuleEditorDialog(context),
+                ),
+                IconButton(
+                  key: const ValueKey('insights-dashboard-toggle'),
                   tooltip: _showDashboardPanels
                       ? 'Hide dashboard panels'
                       : 'Show dashboard panels',
@@ -199,16 +234,38 @@ class _InsightsPageState extends ConsumerState<InsightsPage> {
                     _showDashboardPanels = !_showDashboardPanels;
                   }),
                 ),
-                SearchField(
-                  key: const ValueKey('insights-search-field'),
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  hintText: 'Search nodes...',
-                  onChanged: (value) {
-                    setState(() => _query = value.trim().toLowerCase());
-                  },
-                ),
-                const SizedBox(width: 16),
+                if (showInlineSearch)
+                  SearchField(
+                    key: const ValueKey('insights-search-field'),
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    hintText: 'Search nodes...',
+                    onChanged: (value) {
+                      setState(() => _query = value.trim().toLowerCase());
+                    },
+                  )
+                else
+                  IconButton(
+                    key: const ValueKey('insights-mobile-search'),
+                    tooltip: 'Search insights',
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Search insights'),
+                        content: SearchField(
+                          key: const ValueKey('insights-search-field'),
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          hintText: 'Search nodes...',
+                          onChanged: (value) {
+                            setState(() => _query = value.trim().toLowerCase());
+                          },
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.search),
+                  ),
+                if (showInlineSearch) const SizedBox(width: 16),
               ],
             ),
             body: smartViews.when(
@@ -767,7 +824,10 @@ class _InsightsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+    final spacing =
+        MediaQuery.sizeOf(context).width <= LayoutConstants.contentBreakpoint
+        ? 12.0
+        : 16.0;
 
     // Compute stats for Productivity Distribution & Overdue/Wins
     final effortCounts = <NodeEffort, int>{};
@@ -816,296 +876,434 @@ class _InsightsBody extends StatelessWidget {
         workspaceContexts.isNotEmpty && showOverviewPanels;
     final isEmptyWorkspace = nodes.isEmpty && hasCleanDashboardScope;
 
-    return Padding(
-      padding: EdgeInsets.all(spacing),
-      child: ListView(
-        children: [
-          if (showOverviewPanels) ...[
-            _buildWeeklyDigest(context),
-            SizedBox(height: spacing),
-          ],
-          _InsightRangeFilterBar(
-            rangePreset: rangePreset,
-            typeFilter: typeFilter,
-            tagFilter: tagFilter,
-            nodes: nodes,
-            onRangePresetChanged: onRangePresetChanged,
-            onTypeChanged: onTypeChanged,
-            onTagChanged: onTagChanged,
-            onClear: onClearInsightFilters,
+    Widget adaptiveLegacyPanel(Widget child, {double minWidth = 680}) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= minWidth) return child;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(width: minWidth, child: child),
+          );
+        },
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth =
+            constraints.maxWidth >= LayoutConstants.desktopBreakpoint
+            ? 1280.0
+            : double.infinity;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: ListView(
+              padding: EdgeInsets.all(spacing),
+              children: [
+                if (showOverviewPanels) ...[
+                  adaptiveLegacyPanel(_buildWeeklyDigest(context)),
+                  SizedBox(height: spacing),
+                ],
+                Semantics(
+                  key: const ValueKey('insights-filter-region'),
+                  container: true,
+                  header: true,
+                  explicitChildNodes: true,
+                  label: 'Insight filters',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      adaptiveLegacyPanel(
+                        _InsightRangeFilterBar(
+                          rangePreset: rangePreset,
+                          typeFilter: typeFilter,
+                          tagFilter: tagFilter,
+                          nodes: nodes,
+                          onRangePresetChanged: onRangePresetChanged,
+                          onTypeChanged: onTypeChanged,
+                          onTagChanged: onTagChanged,
+                          onClear: onClearInsightFilters,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _RangeDateLabel(preset: rangePreset, today: today),
+                      if (_hasActiveFilters(
+                        smartView: smartViewFilter,
+                        project: projectFilter,
+                        area: areaFilter,
+                        status: statusFilter,
+                        priority: priorityFilter,
+                        type: typeFilter,
+                        tag: tagFilter,
+                      )) ...[
+                        const SizedBox(height: 8),
+                        _ActiveFilterRail(
+                          smartView: smartViewFilter,
+                          project: projectFilter,
+                          area: areaFilter,
+                          status: statusFilter,
+                          priority: priorityFilter,
+                          type: typeFilter,
+                          tag: tagFilter,
+                          onSmartViewChanged: onSmartViewChanged,
+                          onProjectChanged: onProjectChanged,
+                          onAreaChanged: onAreaChanged,
+                          onStatusChanged: onStatusChanged,
+                          onPriorityChanged: onPriorityChanged,
+                          onTypeChanged: onTypeChanged,
+                          onTagChanged: onTagChanged,
+                          onClearAll: onClearInsightFilters,
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      const _InsightShortcutHintBar(),
+                    ],
+                  ),
+                ),
+                SizedBox(height: spacing),
+                if (isEmptyWorkspace) ...[
+                  const _NewUserEmptyState(),
+                  SizedBox(height: spacing),
+                ],
+                _MetricRail(
+                  children: [
+                    _MetricPill(
+                      icon: Icons.hub_outlined,
+                      label: '${nodes.length} nodes',
+                    ),
+                    _MetricPill(
+                      icon: Icons.check_circle_outline,
+                      label: '${nodeIndex.completedCount} done',
+                    ),
+                    _MetricPill(
+                      icon: Icons.flag_outlined,
+                      label:
+                          '${nodeIndex.highPriorityOpenTaskCount} high priority',
+                    ),
+                    if (insightsSummary.taskCount > 0)
+                      _MetricPill(
+                        icon: Icons.task_alt_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.taskCompletionRate)} task completion',
+                      ),
+                    if (insightsSummary.overdueCount > 0)
+                      _MetricPill(
+                        icon: Icons.warning_amber_outlined,
+                        label: '${insightsSummary.overdueCount} overdue',
+                      ),
+                    if (insightsSummary.productiveDayCount > 0)
+                      _MetricPill(
+                        icon: Icons.calendar_view_week_outlined,
+                        label:
+                            '${insightsSummary.productiveDayCount} productive days',
+                      ),
+                    if (insightsSummary.habitConsistency > 0)
+                      _MetricPill(
+                        icon: Icons.repeat_on_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.habitConsistency)} habit consistency',
+                      ),
+                    if (insightsSummary.activeDayCount > 0)
+                      _MetricPill(
+                        icon: Icons.calendar_today_outlined,
+                        label: '${insightsSummary.activeDayCount} active days',
+                      ),
+                    if (insightsSummary.averageNodesPerActiveDay > 0)
+                      _MetricPill(
+                        icon: Icons.query_stats_outlined,
+                        label:
+                            '${insightsSummary.averageNodesPerActiveDay.toStringAsFixed(1)} nodes/day',
+                      ),
+                    if (insightsSummary.averageGoalProgress > 0)
+                      _MetricPill(
+                        icon: Icons.stacked_line_chart_outlined,
+                        label:
+                            '${_percentLabel(insightsSummary.averageGoalProgress)} goal progress',
+                      ),
+                    if (insightsSummary.monthlyReviewCount > 0)
+                      _MetricPill(
+                        icon: Icons.event_note_outlined,
+                        label:
+                            '${insightsSummary.monthlyReviewCount} monthly review',
+                      ),
+                    if (lifeSummary.bestHabitStreak > 0)
+                      _MetricPill(
+                        icon: Icons.local_fire_department_outlined,
+                        label: '${lifeSummary.bestHabitStreak} habit streak',
+                      ),
+                    if (lifeSummary.averageMood > 0)
+                      _MetricPill(
+                        icon: Icons.mood_outlined,
+                        label:
+                            '${lifeSummary.averageMood.toStringAsFixed(1)} mood',
+                      ),
+                    if (lifeSummary.averageGoalProgress > 0)
+                      _MetricPill(
+                        icon: Icons.track_changes_outlined,
+                        label:
+                            '${(lifeSummary.averageGoalProgress * 100).round()}% goals',
+                      ),
+                    if (lifeSummary.weeklyReviewCount > 0)
+                      _MetricPill(
+                        icon: Icons.rate_review_outlined,
+                        label: '${lifeSummary.weeklyReviewCount} weekly review',
+                      ),
+                    if (insightsSummary.totalFocusMinutesToday > 0)
+                      _MetricPill(
+                        icon: Icons.hourglass_empty,
+                        label:
+                            '${insightsSummary.totalFocusMinutesToday} mins focused today',
+                      ),
+                  ],
+                ),
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _InsightActionStrip(
+                      overdueCount: nodeIndex.overdueTaskCount,
+                      highPriorityCount: nodeIndex.highPriorityOpenTaskCount,
+                      automationCount: automationSuggestions?.readyCount ?? 0,
+                      onOverdue: () =>
+                          onSmartViewChanged(SmartNodeViewType.overdue),
+                      onHighPriority: () =>
+                          onPriorityChanged(NodePriority.high),
+                      onAutomations: automationSuggestions == null
+                          ? null
+                          : () => onReviewAutomations(automationSuggestions!),
+                    ),
+                  ),
+                ],
+                if (showAttentionPanel) ...[
+                  SizedBox(height: spacing),
+                  _AttentionPanel(attention: attention),
+                ],
+                SizedBox(height: spacing),
+                _SmartViewsBand(
+                  views: smartViews,
+                  selectedView: smartViewFilter,
+                  onChanged: onSmartViewChanged,
+                ),
+                SizedBox(height: spacing),
+                _WorkspaceContextsBand(
+                  contexts: workspaceContexts,
+                  selectedProject: projectFilter,
+                  selectedArea: areaFilter,
+                  onProjectChanged: onProjectChanged,
+                  onAreaChanged: onAreaChanged,
+                ),
+                if (showAutomationPanel) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _AutomationPanel(
+                      suggestions: automationSuggestions!,
+                      onReview: () =>
+                          onReviewAutomations(automationSuggestions!),
+                    ),
+                  ),
+                ],
+                if (showAutomationForecast) ...[
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _AutomationForecastPanel(forecast: automationForecast),
+                  ),
+                ],
+                if (showAutomationHealth) ...[
+                  SizedBox(height: spacing),
+                  _AutomationHealthPanel(
+                    health: automationHealth,
+                    onPauseIssue: onPauseAutomationIssue,
+                  ),
+                ],
+                if (showAutomationHistory) ...[
+                  SizedBox(height: spacing),
+                  _AutomationHistoryPanel(events: automationEvents),
+                ],
+                if (showWorkspaceFocus) ...[
+                  SizedBox(height: spacing),
+                  _WorkspaceFocusPanel(
+                    contexts: workspaceContexts,
+                    today: today,
+                    onProjectChanged: onProjectChanged,
+                    onAreaChanged: onAreaChanged,
+                  ),
+                ],
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  _LifeRhythmPanel(rhythm: lifeRhythm),
+                  SizedBox(height: spacing),
+                  _WeeklyPulsePanel(pulse: weeklyPulse),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _WeeklyReviewPanel(
+                      review: weeklyReview,
+                      onCreateWeeklyReview: onCreateWeeklyReview,
+                      onRescheduleNode: onRescheduleNode,
+                      onCompleteNode: onCompleteNode,
+                      onPinGoal: onPinGoal,
+                      onCreateGoalNextAction: onCreateGoalNextAction,
+                    ),
+                  ),
+                  SizedBox(height: spacing),
+                  _FocusTimerAnalyticsPanel(
+                    summary: insightsSummary,
+                    focusSummary: focusInsights,
+                    today: today,
+                  ),
+                  SizedBox(height: spacing),
+                  _KnowledgeGraphPanel(graph: nodeGraph),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _MissionDashboardPanel(summaries: missionSummaries),
+                    minWidth: 900,
+                  ),
+                  SizedBox(height: spacing),
+                  _WorkloadTrendPanel(series: completionTrend),
+                  SizedBox(height: spacing),
+                  ExecutiveDashboardPanel(
+                    summary: ExecutiveDashboardSummary.fromNodes(nodes),
+                    onAreaTap: (area) => onAreaChanged(area.name),
+                    onStartWeeklyReview: onCreateWeeklyReview,
+                  ),
+                  SizedBox(height: spacing),
+                  HabitMatrixHeatmap(
+                    habitNodes: [
+                      for (final node in nodes)
+                        if (!node.isArchived && node.type == NodeType.habit)
+                          node,
+                    ],
+                  ),
+                  SizedBox(height: spacing),
+                  _HabitRoutineInsightPanel(summary: habitRoutineInsights),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _ReviewInsightPanel(summary: reviewInsights),
+                  ),
+                  SizedBox(height: spacing),
+                  _ContextHealthPanel(summary: contextHealth),
+                  SizedBox(height: spacing),
+                  _GoalInsightPanel(summary: goalInsights),
+                  SizedBox(height: spacing),
+                  _InsightRiskPanel(riskItems: insightRisks),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _RecommendationPanel(
+                      recommendations: recommendations,
+                      onSmartViewChanged: onSmartViewChanged,
+                      onPriorityChanged: onPriorityChanged,
+                      onCreateWeeklyReview: onCreateWeeklyReview,
+                      onProjectChanged: onProjectChanged,
+                      markdownReport: markdownReport,
+                    ),
+                  ),
+                  SizedBox(height: spacing),
+                  _InsightDrillDownPanel(
+                    nodeIndex: nodeIndex,
+                    contextHealth: contextHealth,
+                    habitSummary: habitRoutineInsights.habits,
+                    reviewSummary: reviewInsights,
+                    goalSummary: goalInsights,
+                    onProjectChanged: onProjectChanged,
+                    onAreaChanged: onAreaChanged,
+                  ),
+                  SizedBox(height: spacing),
+                  _buildProductivityDistribution(
+                    context,
+                    effortCounts,
+                    reviewCounts,
+                  ),
+                  SizedBox(height: spacing),
+                  adaptiveLegacyPanel(
+                    _buildOverdueAndWins(context, overdueWork, weeklyWins),
+                  ),
+                ],
+                SizedBox(height: spacing),
+                adaptiveLegacyPanel(
+                  _FilterBand(
+                    statusFilter: statusFilter,
+                    priorityFilter: priorityFilter,
+                    onStatusChanged: onStatusChanged,
+                    onPriorityChanged: onPriorityChanged,
+                  ),
+                ),
+                SizedBox(height: spacing),
+                Semantics(
+                  key: const ValueKey('insights-results-region'),
+                  container: true,
+                  header: true,
+                  explicitChildNodes: true,
+                  label: 'Insight results',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _SectionLabel(
+                        icon: Icons.manage_search_outlined,
+                        title: 'Focus results',
+                        subtitle: filteredNodes.isEmpty
+                            ? 'No nodes match the active filters'
+                            : '${filteredNodes.length} sorted nodes ready to inspect',
+                      ),
+                      SizedBox(height: spacing * 0.75),
+                      if (filteredNodes.isEmpty)
+                        const SizedBox(height: 260, child: _EmptyResults())
+                      else
+                        for (
+                          var index = 0;
+                          index < filteredNodes.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(height: 10),
+                          _InsightNodeTile(node: filteredNodes[index]),
+                        ],
+                    ],
+                  ),
+                ),
+                if (showOverviewPanels) ...[
+                  SizedBox(height: spacing),
+                  Column(
+                    key: const ValueKey('insights-supplemental-region'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      adaptiveLegacyPanel(
+                        WorkspaceRhythmTracker(
+                          workspaceContexts: workspaceContexts,
+                          nodes: nodes,
+                        ),
+                        minWidth: 760,
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        SmartGoalMilestoneTracker(nodes: nodes, today: today),
+                        minWidth: 800,
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        EisenhowerMatrixCard(
+                          nodes: nodes,
+                          today: today,
+                          onNodeSelected: (node) => goToDay(
+                            context,
+                            node.day,
+                            highlightNodeId: node.id,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(
+                        DeepWorkFocusCard(nodes: nodes, today: today),
+                      ),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(ExpenseBudgetCard(nodes: nodes)),
+                      SizedBox(height: spacing),
+                      adaptiveLegacyPanel(const ParaOkrRollupCard()),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          _RangeDateLabel(preset: rangePreset, today: today),
-          if (_hasActiveFilters(
-            smartView: smartViewFilter,
-            project: projectFilter,
-            area: areaFilter,
-            status: statusFilter,
-            priority: priorityFilter,
-            type: typeFilter,
-            tag: tagFilter,
-          )) ...[
-            const SizedBox(height: 8),
-            _ActiveFilterRail(
-              smartView: smartViewFilter,
-              project: projectFilter,
-              area: areaFilter,
-              status: statusFilter,
-              priority: priorityFilter,
-              type: typeFilter,
-              tag: tagFilter,
-              onSmartViewChanged: onSmartViewChanged,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-              onStatusChanged: onStatusChanged,
-              onPriorityChanged: onPriorityChanged,
-              onTypeChanged: onTypeChanged,
-              onTagChanged: onTagChanged,
-              onClearAll: onClearInsightFilters,
-            ),
-          ],
-          const SizedBox(height: 8),
-          const _InsightShortcutHintBar(),
-          SizedBox(height: spacing),
-          if (isEmptyWorkspace) ...[
-            const _NewUserEmptyState(),
-            SizedBox(height: spacing),
-          ],
-          _MetricRail(
-            children: [
-              _MetricPill(
-                icon: Icons.hub_outlined,
-                label: '${nodes.length} nodes',
-              ),
-              _MetricPill(
-                icon: Icons.check_circle_outline,
-                label: '${nodeIndex.completedCount} done',
-              ),
-              _MetricPill(
-                icon: Icons.flag_outlined,
-                label: '${nodeIndex.highPriorityOpenTaskCount} high priority',
-              ),
-              if (insightsSummary.taskCount > 0)
-                _MetricPill(
-                  icon: Icons.task_alt_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.taskCompletionRate)} task completion',
-                ),
-              if (insightsSummary.overdueCount > 0)
-                _MetricPill(
-                  icon: Icons.warning_amber_outlined,
-                  label: '${insightsSummary.overdueCount} overdue',
-                ),
-              if (insightsSummary.productiveDayCount > 0)
-                _MetricPill(
-                  icon: Icons.calendar_view_week_outlined,
-                  label:
-                      '${insightsSummary.productiveDayCount} productive days',
-                ),
-              if (insightsSummary.habitConsistency > 0)
-                _MetricPill(
-                  icon: Icons.repeat_on_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.habitConsistency)} habit consistency',
-                ),
-              if (insightsSummary.activeDayCount > 0)
-                _MetricPill(
-                  icon: Icons.calendar_today_outlined,
-                  label: '${insightsSummary.activeDayCount} active days',
-                ),
-              if (insightsSummary.averageNodesPerActiveDay > 0)
-                _MetricPill(
-                  icon: Icons.query_stats_outlined,
-                  label:
-                      '${insightsSummary.averageNodesPerActiveDay.toStringAsFixed(1)} nodes/day',
-                ),
-              if (insightsSummary.averageGoalProgress > 0)
-                _MetricPill(
-                  icon: Icons.stacked_line_chart_outlined,
-                  label:
-                      '${_percentLabel(insightsSummary.averageGoalProgress)} goal progress',
-                ),
-              if (insightsSummary.monthlyReviewCount > 0)
-                _MetricPill(
-                  icon: Icons.event_note_outlined,
-                  label: '${insightsSummary.monthlyReviewCount} monthly review',
-                ),
-              if (lifeSummary.bestHabitStreak > 0)
-                _MetricPill(
-                  icon: Icons.local_fire_department_outlined,
-                  label: '${lifeSummary.bestHabitStreak} habit streak',
-                ),
-              if (lifeSummary.averageMood > 0)
-                _MetricPill(
-                  icon: Icons.mood_outlined,
-                  label: '${lifeSummary.averageMood.toStringAsFixed(1)} mood',
-                ),
-              if (lifeSummary.averageGoalProgress > 0)
-                _MetricPill(
-                  icon: Icons.track_changes_outlined,
-                  label:
-                      '${(lifeSummary.averageGoalProgress * 100).round()}% goals',
-                ),
-              if (lifeSummary.weeklyReviewCount > 0)
-                _MetricPill(
-                  icon: Icons.rate_review_outlined,
-                  label: '${lifeSummary.weeklyReviewCount} weekly review',
-                ),
-              if (insightsSummary.totalFocusMinutesToday > 0)
-                _MetricPill(
-                  icon: Icons.hourglass_empty,
-                  label:
-                      '${insightsSummary.totalFocusMinutesToday} mins focused today',
-                ),
-            ],
-          ),
-          if (showOverviewPanels) ...[
-            SizedBox(height: spacing),
-            _InsightActionStrip(
-              overdueCount: nodeIndex.overdueTaskCount,
-              highPriorityCount: nodeIndex.highPriorityOpenTaskCount,
-              automationCount: automationSuggestions?.readyCount ?? 0,
-              onOverdue: () => onSmartViewChanged(SmartNodeViewType.overdue),
-              onHighPriority: () => onPriorityChanged(NodePriority.high),
-              onAutomations: automationSuggestions == null
-                  ? null
-                  : () => onReviewAutomations(automationSuggestions!),
-            ),
-          ],
-          if (showAttentionPanel) ...[
-            SizedBox(height: spacing),
-            _AttentionPanel(attention: attention),
-          ],
-          SizedBox(height: spacing),
-          _SmartViewsBand(
-            views: smartViews,
-            selectedView: smartViewFilter,
-            onChanged: onSmartViewChanged,
-          ),
-          SizedBox(height: spacing),
-          _WorkspaceContextsBand(
-            contexts: workspaceContexts,
-            selectedProject: projectFilter,
-            selectedArea: areaFilter,
-            onProjectChanged: onProjectChanged,
-            onAreaChanged: onAreaChanged,
-          ),
-          if (showAutomationPanel) ...[
-            SizedBox(height: spacing),
-            _AutomationPanel(
-              suggestions: automationSuggestions!,
-              onReview: () => onReviewAutomations(automationSuggestions!),
-            ),
-          ],
-          if (showAutomationForecast) ...[
-            SizedBox(height: spacing),
-            _AutomationForecastPanel(forecast: automationForecast),
-          ],
-          if (showAutomationHealth) ...[
-            SizedBox(height: spacing),
-            _AutomationHealthPanel(
-              health: automationHealth,
-              onPauseIssue: onPauseAutomationIssue,
-            ),
-          ],
-          if (showAutomationHistory) ...[
-            SizedBox(height: spacing),
-            _AutomationHistoryPanel(events: automationEvents),
-          ],
-          if (showWorkspaceFocus) ...[
-            SizedBox(height: spacing),
-            _WorkspaceFocusPanel(
-              contexts: workspaceContexts,
-              today: today,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-            ),
-          ],
-          if (showOverviewPanels) ...[
-            SizedBox(height: spacing),
-            _LifeRhythmPanel(rhythm: lifeRhythm),
-            SizedBox(height: spacing),
-            _WeeklyPulsePanel(pulse: weeklyPulse),
-            SizedBox(height: spacing),
-            _WeeklyReviewPanel(
-              review: weeklyReview,
-              onCreateWeeklyReview: onCreateWeeklyReview,
-              onRescheduleNode: onRescheduleNode,
-              onCompleteNode: onCompleteNode,
-              onPinGoal: onPinGoal,
-              onCreateGoalNextAction: onCreateGoalNextAction,
-            ),
-            SizedBox(height: spacing),
-            _FocusTimerAnalyticsPanel(
-              summary: insightsSummary,
-              focusSummary: focusInsights,
-              today: today,
-            ),
-            SizedBox(height: spacing),
-            _KnowledgeGraphPanel(graph: nodeGraph),
-            SizedBox(height: spacing),
-            _MissionDashboardPanel(summaries: missionSummaries),
-            SizedBox(height: spacing),
-            _WorkloadTrendPanel(series: completionTrend),
-            SizedBox(height: spacing),
-            _HabitRoutineInsightPanel(summary: habitRoutineInsights),
-            SizedBox(height: spacing),
-            _ReviewInsightPanel(summary: reviewInsights),
-            SizedBox(height: spacing),
-            _ContextHealthPanel(summary: contextHealth),
-            SizedBox(height: spacing),
-            _GoalInsightPanel(summary: goalInsights),
-            SizedBox(height: spacing),
-            _InsightRiskPanel(riskItems: insightRisks),
-            SizedBox(height: spacing),
-            _RecommendationPanel(
-              recommendations: recommendations,
-              onSmartViewChanged: onSmartViewChanged,
-              onPriorityChanged: onPriorityChanged,
-              onCreateWeeklyReview: onCreateWeeklyReview,
-              onProjectChanged: onProjectChanged,
-              markdownReport: markdownReport,
-            ),
-            SizedBox(height: spacing),
-            _InsightDrillDownPanel(
-              nodeIndex: nodeIndex,
-              contextHealth: contextHealth,
-              habitSummary: habitRoutineInsights.habits,
-              reviewSummary: reviewInsights,
-              goalSummary: goalInsights,
-              onProjectChanged: onProjectChanged,
-              onAreaChanged: onAreaChanged,
-            ),
-            SizedBox(height: spacing),
-            _buildProductivityDistribution(context, effortCounts, reviewCounts),
-            SizedBox(height: spacing),
-            _buildOverdueAndWins(context, overdueWork, weeklyWins),
-          ],
-          SizedBox(height: spacing),
-          _FilterBand(
-            statusFilter: statusFilter,
-            priorityFilter: priorityFilter,
-            onStatusChanged: onStatusChanged,
-            onPriorityChanged: onPriorityChanged,
-          ),
-          SizedBox(height: spacing),
-          _SectionLabel(
-            icon: Icons.manage_search_outlined,
-            title: 'Focus results',
-            subtitle: filteredNodes.isEmpty
-                ? 'No nodes match the active filters'
-                : '${filteredNodes.length} sorted nodes ready to inspect',
-          ),
-          SizedBox(height: spacing * 0.75),
-          if (filteredNodes.isEmpty)
-            const SizedBox(height: 260, child: _EmptyResults())
-          else
-            for (var index = 0; index < filteredNodes.length; index++) ...[
-              if (index > 0) const SizedBox(height: 10),
-              _InsightNodeTile(node: filteredNodes[index]),
-            ],
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1116,8 +1314,9 @@ class _InsightsBody extends StatelessWidget {
   ) {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
-    final chalk = theme.colorScheme.onSurface.withValues(alpha: 0.86);
-    final board = theme.colorScheme.surfaceContainerHighest.withValues(
+    final semantic = AppSemanticColors.of(context);
+    final textColor = theme.colorScheme.onSurface.withValues(alpha: 0.86);
+    final panelSurface = theme.colorScheme.surfaceContainerHighest.withValues(
       alpha: 0.42,
     );
 
@@ -1130,10 +1329,10 @@ class _InsightsBody extends StatelessWidget {
             color.withValues(alpha: 0.07),
             theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.74),
           ),
-          shape: DoodleShapeBorder(
-            side: BorderSide(color: color.withValues(alpha: 0.22)),
-            radius: 12,
-            wobble: 1.2,
+          shape: _astryxBorder(
+            context,
+            color: color.withValues(alpha: 0.22),
+            inner: true,
           ),
         ),
         child: Row(
@@ -1144,7 +1343,7 @@ class _InsightsBody extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: textTheme.labelSmall?.copyWith(color: chalk),
+                style: textTheme.labelSmall?.copyWith(color: textColor),
               ),
             ),
             Expanded(
@@ -1153,7 +1352,7 @@ class _InsightsBody extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: pct,
                   minHeight: 5,
-                  backgroundColor: Colors.black.withValues(alpha: 0.22),
+                  backgroundColor: semantic.track,
                   valueColor: AlwaysStoppedAnimation<Color>(color),
                 ),
               ),
@@ -1172,32 +1371,26 @@ class _InsightsBody extends StatelessWidget {
     }
 
     Widget buildColumn(String title, Iterable<Widget> rows, Color color) {
-      return Expanded(
-        child: DecoratedBox(
-          decoration: ShapeDecoration(
-            color: board,
-            shape: DoodleShapeBorder(
-              side: BorderSide(color: color.withValues(alpha: 0.26)),
-              radius: 14,
-              wobble: 1.5,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: textTheme.labelLarge?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w900,
-                  ),
+      return DecoratedBox(
+        decoration: ShapeDecoration(
+          color: panelSurface,
+          shape: _astryxBorder(context, color: color.withValues(alpha: 0.26)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: textTheme.labelLarge?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w900,
                 ),
-                const SizedBox(height: 8),
-                for (final row in rows) ...[row, const SizedBox(height: 6)],
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+              for (final row in rows) ...[row, const SizedBox(height: 6)],
+            ],
           ),
         ),
       );
@@ -1211,12 +1404,9 @@ class _InsightsBody extends StatelessWidget {
     return DecoratedBox(
       decoration: ShapeDecoration(
         color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.86),
-        shape: DoodleShapeBorder(
-          side: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
-          ),
-          radius: 18,
-          wobble: 1.9,
+        shape: _astryxBorder(
+          context,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
         ),
       ),
       child: Padding(
@@ -1228,45 +1418,64 @@ class _InsightsBody extends StatelessWidget {
               children: [
                 Icon(Icons.query_stats_rounded, size: 17, color: primary),
                 const SizedBox(width: 8),
-                Text(
-                  'Productivity Distribution',
-                  style: textTheme.titleSmall?.copyWith(
-                    color: chalk,
-                    fontWeight: FontWeight.w900,
+                Expanded(
+                  child: Text(
+                    'Productivity Distribution',
+                    style: textTheme.titleSmall?.copyWith(
+                      color: textColor,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                buildColumn(
-                  'Effort',
-                  NodeEffort.values.map(
-                    (e) => buildMiniBar(
-                      e.label,
-                      efforts[e] ?? 0,
-                      totalEfforts,
-                      primary,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = <Widget>[
+                  buildColumn(
+                    'Effort',
+                    NodeEffort.values.map(
+                      (e) => buildMiniBar(
+                        e.label,
+                        efforts[e] ?? 0,
+                        totalEfforts,
+                        primary,
+                      ),
                     ),
+                    primary,
                   ),
-                  primary,
-                ),
-                const SizedBox(width: 10),
-                buildColumn(
-                  'Review State',
-                  NodeReviewState.values.map(
-                    (r) => buildMiniBar(
-                      r.label,
-                      reviews[r] ?? 0,
-                      totalReviews,
-                      secondary,
+                  buildColumn(
+                    'Review State',
+                    NodeReviewState.values.map(
+                      (r) => buildMiniBar(
+                        r.label,
+                        reviews[r] ?? 0,
+                        totalReviews,
+                        secondary,
+                      ),
                     ),
+                    secondary,
                   ),
-                  secondary,
-                ),
-              ],
+                ];
+                if (constraints.maxWidth < 680) {
+                  return Column(
+                    children: [
+                      columns.first,
+                      const SizedBox(height: 10),
+                      columns.last,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: columns.first),
+                    const SizedBox(width: 10),
+                    Expanded(child: columns.last),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -1281,7 +1490,7 @@ class _InsightsBody extends StatelessWidget {
   ) {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
-    final chalk = theme.colorScheme.onSurface.withValues(alpha: 0.86);
+    final textColor = theme.colorScheme.onSurface.withValues(alpha: 0.86);
     final danger = theme.colorScheme.error;
     final win = theme.colorScheme.secondary;
 
@@ -1295,10 +1504,10 @@ class _InsightsBody extends StatelessWidget {
             color.withValues(alpha: 0.08),
             theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.68),
           ),
-          shape: DoodleShapeBorder(
-            side: BorderSide(color: color.withValues(alpha: 0.25)),
-            radius: 12,
-            wobble: 1.2,
+          shape: _astryxBorder(
+            context,
+            color: color.withValues(alpha: 0.25),
+            inner: true,
           ),
         ),
         child: Row(
@@ -1312,7 +1521,7 @@ class _InsightsBody extends StatelessWidget {
             Expanded(
               child: Text(
                 '• ${node.title}',
-                style: textTheme.labelMedium?.copyWith(color: chalk),
+                style: textTheme.labelMedium?.copyWith(color: textColor),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1336,11 +1545,7 @@ class _InsightsBody extends StatelessWidget {
             color: theme.colorScheme.surfaceContainerHighest.withValues(
               alpha: 0.42,
             ),
-            shape: DoodleShapeBorder(
-              side: BorderSide(color: color.withValues(alpha: 0.28)),
-              radius: 14,
-              wobble: 1.5,
-            ),
+            shape: _astryxBorder(context, color: color.withValues(alpha: 0.28)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(10),
@@ -1395,12 +1600,9 @@ class _InsightsBody extends StatelessWidget {
     return DecoratedBox(
       decoration: ShapeDecoration(
         color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.86),
-        shape: DoodleShapeBorder(
-          side: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
-          ),
-          radius: 18,
-          wobble: 1.9,
+        shape: _astryxBorder(
+          context,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.52),
         ),
       ),
       child: Padding(
@@ -1433,6 +1635,7 @@ class _InsightsBody extends StatelessWidget {
 
   Widget _buildWeeklyDigest(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
 
     final totalTasks = insightsSummary.taskCount;
     final doneTasks = insightsSummary.completedTaskCount;
@@ -1452,17 +1655,11 @@ class _InsightsBody extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(tokens.radiusContainer),
         border: Border.all(
           color: theme.colorScheme.primary.withValues(alpha: 0.2),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: tokens.shadowMedium,
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1636,7 +1833,10 @@ class _InsightsLoadingSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+    final spacing =
+        MediaQuery.sizeOf(context).width <= LayoutConstants.contentBreakpoint
+        ? 12.0
+        : 16.0;
     return Padding(
       padding: EdgeInsets.all(spacing),
       child: ListView(
@@ -1977,11 +2177,7 @@ class _MissionDashboardPanel extends StatelessWidget {
       key: const ValueKey('insights-mission-dashboard'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2033,7 +2229,8 @@ class _MissionWindowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final statusColor = _missionStatusColor(theme, summary.status);
+    final semantic = AppSemanticColors.of(context);
+    final statusColor = _missionStatusColor(theme, semantic, summary.status);
     final metrics = summary.current;
 
     return DecoratedBox(
@@ -2146,10 +2343,11 @@ class _MissionMetric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     final isGood = lowerIsBetter ? delta < 0 : delta > 0;
     final isBad = lowerIsBetter ? delta > 0 : delta < 0;
     final deltaColor = isGood
-        ? Colors.greenAccent.shade400
+        ? semantic.success
         : isBad
         ? theme.colorScheme.error
         : theme.colorScheme.onSurfaceVariant;
@@ -2204,17 +2402,18 @@ String _missionStatusLabel(mission.InsightMissionStatus status) {
 
 Color _missionStatusColor(
   ThemeData theme,
+  AppSemanticColors semantic,
   mission.InsightMissionStatus status,
 ) {
   switch (status) {
     case mission.InsightMissionStatus.stable:
-      return theme.colorScheme.primary;
+      return semantic.info;
     case mission.InsightMissionStatus.improving:
-      return Colors.greenAccent.shade400;
+      return semantic.success;
     case mission.InsightMissionStatus.atRisk:
-      return Colors.orangeAccent.shade400;
+      return semantic.warning;
     case mission.InsightMissionStatus.critical:
-      return theme.colorScheme.error;
+      return semantic.danger;
   }
 }
 
@@ -2231,6 +2430,7 @@ class _WorkloadTrendPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     final totalDone = series.points.fold<int>(
       0,
       (total, point) => total + point.completedTasks,
@@ -2252,11 +2452,7 @@ class _WorkloadTrendPanel extends StatelessWidget {
       key: const ValueKey('insights-workload-trend-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2295,7 +2491,7 @@ class _WorkloadTrendPanel extends StatelessWidget {
                   _TrendTotalPill(
                     label: 'Done',
                     value: totalDone,
-                    color: Colors.greenAccent.shade400,
+                    color: semantic.success,
                   ),
                   _TrendTotalPill(
                     label: 'Open',
@@ -2310,7 +2506,7 @@ class _WorkloadTrendPanel extends StatelessWidget {
                   _TrendTotalPill(
                     label: 'High',
                     value: totalHighPriority,
-                    color: Colors.orangeAccent.shade400,
+                    color: semantic.warning,
                   ),
                 ],
               ),
@@ -2370,10 +2566,8 @@ class _TrendTotalPill extends StatelessWidget {
     return DecoratedBox(
       decoration: ShapeDecoration(
         color: color.withValues(alpha: 0.08),
-        shape: DoodleShapeBorder(
+        shape: StadiumBorder(
           side: BorderSide(color: color.withValues(alpha: 0.4)),
-          radius: 999,
-          wobble: 0.8,
         ),
       ),
       child: Padding(
@@ -2395,6 +2589,7 @@ class _TrendDayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     final maxValue = [
       point.openTasks,
       point.completedTasks,
@@ -2411,7 +2606,7 @@ class _TrendDayBar extends StatelessWidget {
           _MiniBar(
             value: point.completedTasks,
             maxValue: maxValue,
-            color: Colors.greenAccent.shade400,
+            color: semantic.success,
           ),
           const SizedBox(height: 2),
           _MiniBar(
@@ -2429,7 +2624,7 @@ class _TrendDayBar extends StatelessWidget {
           _MiniBar(
             value: point.highPriorityOpenTasks,
             maxValue: maxValue,
-            color: Colors.orangeAccent.shade400,
+            color: semantic.warning,
           ),
           const SizedBox(height: 6),
           Text(
@@ -2479,7 +2674,8 @@ class _TrendChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = _trendColor(theme, direction);
+    final semantic = AppSemanticColors.of(context);
+    final color = _trendColor(theme, semantic, direction);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.14),
@@ -2530,16 +2726,20 @@ IconData _trendIcon(trends.InsightTrendDirection direction) {
   }
 }
 
-Color _trendColor(ThemeData theme, trends.InsightTrendDirection direction) {
+Color _trendColor(
+  ThemeData theme,
+  AppSemanticColors semantic,
+  trends.InsightTrendDirection direction,
+) {
   switch (direction) {
     case trends.InsightTrendDirection.up:
-      return Colors.greenAccent.shade400;
+      return semantic.success;
     case trends.InsightTrendDirection.down:
-      return Colors.orangeAccent.shade400;
+      return semantic.warning;
     case trends.InsightTrendDirection.flat:
       return theme.colorScheme.onSurfaceVariant;
     case trends.InsightTrendDirection.volatile:
-      return theme.colorScheme.error;
+      return semantic.danger;
   }
 }
 
@@ -2558,11 +2758,7 @@ class _HabitRoutineInsightPanel extends StatelessWidget {
       key: const ValueKey('insights-habit-routine-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2688,11 +2884,7 @@ class _ReviewInsightPanel extends StatelessWidget {
       key: const ValueKey('insights-review-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2783,17 +2975,14 @@ class _ContextHealthPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     final visibleItems = summary.items.take(6).toList(growable: false);
 
     return DecoratedBox(
       key: const ValueKey('insights-context-health-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2861,7 +3050,11 @@ class _ContextHealthPanel extends StatelessWidget {
                             Text(
                               _contextHealthLabel(item.status),
                               style: TextStyle(
-                                color: _contextHealthColor(theme, item.status),
+                                color: _contextHealthColor(
+                                  theme,
+                                  semantic,
+                                  item.status,
+                                ),
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -2908,16 +3101,20 @@ String _contextHealthLabel(health.ContextHealthStatus status) {
   }
 }
 
-Color _contextHealthColor(ThemeData theme, health.ContextHealthStatus status) {
+Color _contextHealthColor(
+  ThemeData theme,
+  AppSemanticColors semantic,
+  health.ContextHealthStatus status,
+) {
   switch (status) {
     case health.ContextHealthStatus.good:
-      return Colors.greenAccent.shade400;
+      return semantic.success;
     case health.ContextHealthStatus.watch:
-      return Colors.orangeAccent.shade400;
+      return semantic.warning;
     case health.ContextHealthStatus.stale:
-      return theme.colorScheme.tertiary;
+      return semantic.info;
     case health.ContextHealthStatus.critical:
-      return theme.colorScheme.error;
+      return semantic.danger;
   }
 }
 
@@ -2929,16 +3126,13 @@ class _GoalInsightPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
 
     return DecoratedBox(
       key: const ValueKey('insights-goal-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3022,14 +3216,14 @@ class _GoalInsightPanel extends StatelessWidget {
                       icon: Icons.trending_up,
                       label:
                           'Recently progressed: ${summary.recentlyProgressedGoals.first.node.title}',
-                      color: Colors.greenAccent.shade400,
+                      color: semantic.success,
                     ),
                   if (summary.needsNextActionGoals.isNotEmpty)
                     _GoalInsightChip(
                       icon: Icons.add_task_outlined,
                       label:
                           'Next action: ${summary.needsNextActionGoals.first.node.title}',
-                      color: Colors.orangeAccent.shade400,
+                      color: semantic.warning,
                     ),
                 ],
               ),
@@ -3093,11 +3287,7 @@ class _InsightRiskPanel extends StatelessWidget {
       key: const ValueKey('insights-risk-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3153,7 +3343,8 @@ class _InsightRiskTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = _riskSeverityColor(theme, risk.severity);
+    final semantic = AppSemanticColors.of(context);
+    final color = _riskSeverityColor(semantic, risk.severity);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: DecoratedBox(
@@ -3200,16 +3391,18 @@ class _InsightRiskTile extends StatelessWidget {
   }
 }
 
-Color _riskSeverityColor(ThemeData theme, risks.InsightRiskSeverity severity) {
+Color _riskSeverityColor(
+  AppSemanticColors semantic,
+  risks.InsightRiskSeverity severity,
+) {
   switch (severity) {
     case risks.InsightRiskSeverity.info:
-      return theme.colorScheme.primary;
+      return semantic.info;
     case risks.InsightRiskSeverity.watch:
-      return Colors.orangeAccent.shade400;
+      return semantic.warning;
     case risks.InsightRiskSeverity.high:
-      return theme.colorScheme.tertiary;
     case risks.InsightRiskSeverity.critical:
-      return theme.colorScheme.error;
+      return semantic.danger;
   }
 }
 
@@ -3269,11 +3462,7 @@ class _RecommendationPanel extends StatelessWidget {
       key: const ValueKey('insights-recommendation-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3595,11 +3784,7 @@ class _WeeklyReviewPanel extends StatelessWidget {
       key: const ValueKey('insights-weekly-review-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -5585,7 +5770,8 @@ class _AttentionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = _attentionColor(theme, signal.severity);
+    final semantic = AppSemanticColors.of(context);
+    final color = _attentionColor(semantic, signal.severity);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5732,9 +5918,8 @@ class _RangeDateLabel extends StatelessWidget {
       today: today,
     );
     final formatter = DateFormat.MMMd();
-    final label = '${formatter.format(range.start)} – ${formatter.format(
-      range.end,
-    )}';
+    final label =
+        '${formatter.format(range.start)} – ${formatter.format(range.end)}';
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -5794,10 +5979,7 @@ class _ActiveFilterPill extends StatelessWidget {
       onDeleted: onRemove,
       deleteIcon: const Icon(Icons.close, size: 14),
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      side: BorderSide(
-        color: theme.colorScheme.outlineVariant,
-      ),
+      side: BorderSide(color: theme.colorScheme.outlineVariant),
     );
   }
 }
@@ -5897,7 +6079,6 @@ class _ActiveFilterRail extends StatelessWidget {
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 32),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               foregroundColor: theme.colorScheme.onSurfaceVariant,
             ),
             child: const Text('Clear all'),
@@ -6127,11 +6308,7 @@ class _KnowledgeGraphPanel extends StatelessWidget {
       key: const ValueKey('insights-knowledge-graph-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -6191,7 +6368,7 @@ class _GraphHubRow extends StatelessWidget {
     return Row(
       children: [
         Icon(
-          _nodeIcon(node.node.type),
+          NodeVisuals.icon(node.node.type),
           size: 18,
           color: theme.colorScheme.primary,
         ),
@@ -6267,7 +6444,7 @@ class _InsightNodeTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              _nodeIcon(node.type),
+              NodeVisuals.icon(node.type),
               size: 20,
               color: theme.colorScheme.primary,
             ),
@@ -6507,36 +6684,6 @@ String _dueDateLabel(DateTime dueDate) {
   return 'Due ${dayKey(normalizedDueDate)}';
 }
 
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
-};
-
 IconData _attentionIcon(LifeOsAttentionType type) => switch (type) {
   LifeOsAttentionType.overdueTask => Icons.assignment_late_outlined,
   LifeOsAttentionType.habitDue => Icons.repeat_on_outlined,
@@ -6572,11 +6719,14 @@ List<WorkspaceContext> _workspaceFocusContexts(
   return focusContexts.take(4).toList(growable: false);
 }
 
-Color _attentionColor(ThemeData theme, LifeOsAttentionSeverity severity) {
+Color _attentionColor(
+  AppSemanticColors semantic,
+  LifeOsAttentionSeverity severity,
+) {
   return switch (severity) {
-    LifeOsAttentionSeverity.critical => theme.colorScheme.error,
-    LifeOsAttentionSeverity.warning => theme.colorScheme.tertiary,
-    LifeOsAttentionSeverity.info => theme.colorScheme.primary,
+    LifeOsAttentionSeverity.critical => semantic.danger,
+    LifeOsAttentionSeverity.warning => semantic.warning,
+    LifeOsAttentionSeverity.info => semantic.info,
   };
 }
 
@@ -6663,6 +6813,14 @@ class _AnimatedCounterState extends State<AnimatedCounter>
 
   @override
   Widget build(BuildContext context) {
+    final tokens = AppDesignTokens.of(context);
+    final duration = tokens.effectiveDuration(context, tokens.motionSlow);
+    if (_controller.duration != duration) {
+      _controller.duration = duration;
+      if (duration == Duration.zero) {
+        _controller.value = 1;
+      }
+    }
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
@@ -6834,19 +6992,22 @@ class _ExportDataDialogState extends State<_ExportDataDialog> {
         OutlinedButton.icon(
           onPressed: () async {
             try {
-              final directory = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
               final ext = switch (_format) {
                 _ExportFormat.markdown => 'md',
                 _ExportFormat.json => 'json',
                 _ExportFormat.csv => 'csv',
               };
-              final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
-              final file = File('${directory.path}/var_insights_export_$timestamp.$ext');
-              await file.writeAsString(_data);
+              final timestamp = DateTime.now()
+                  .toIso8601String()
+                  .replaceAll(':', '-')
+                  .split('.')
+                  .first;
+              final fileName = 'var_insights_export_$timestamp.$ext';
+              final location = await saveInsightsExport(_data, fileName);
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Saved to: ${file.path}')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Saved to: $location')));
                 Navigator.pop(context);
               }
             } catch (e) {
@@ -6928,16 +7089,10 @@ class _InsightDrillDownPanel extends StatelessWidget {
             .take(8)
             .toList(growable: false);
 
-    return DecoratedBox(
+    return Material(
       key: const ValueKey('insights-drill-down-panel'),
-      decoration: ShapeDecoration(
-        color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
-      ),
+      color: theme.colorScheme.surface,
+      shape: _astryxBorder(context, color: theme.dividerColor),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -7113,7 +7268,7 @@ class _NodeDrillDownRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       dense: true,
-      leading: Icon(_nodeIcon(node.type)),
+      leading: Icon(NodeVisuals.icon(node.type)),
       title: Text(node.title),
       subtitle: Text(subtitle),
       trailing: const Icon(Icons.open_in_new, size: 16),
@@ -7190,11 +7345,7 @@ class _FocusTimerAnalyticsPanel extends StatelessWidget {
       key: const ValueKey('insights-focus-timer-panel'),
       decoration: ShapeDecoration(
         color: theme.colorScheme.surface,
-        shape: DoodleShapeBorder(
-          side: BorderSide(color: theme.dividerColor),
-          radius: 12,
-          wobble: 1.2,
-        ),
+        shape: _astryxBorder(context, color: theme.dividerColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),

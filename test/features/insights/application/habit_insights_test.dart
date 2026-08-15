@@ -14,7 +14,7 @@ void main() {
         id: 'workout',
         type: NodeType.habit,
         title: 'Workout',
-        day: today,
+        day: start,
         data: const {
           'habit': {
             'completions': ['2026-07-04', '2026-07-05'],
@@ -26,7 +26,7 @@ void main() {
         id: 'read',
         type: NodeType.habit,
         title: 'Read',
-        day: today,
+        day: start,
         data: const {
           'habit': {
             'completions': ['2026-07-04', '2026-07-05', '2026-07-06'],
@@ -51,6 +51,73 @@ void main() {
     expect(summary.mostConsistentHabit?.title, 'Read');
     expect(summary.mostConsistentHabit?.currentStreak, 3);
     expect(summary.streakAtRisk?.title, 'Workout');
+    expect(summary.aggregateStrengthScore, greaterThan(0.0));
+  });
+
+  test('habit opportunities respect start date and recurrence', () {
+    final start = DateTime(2026, 7, 6);
+    final end = DateTime(2026, 7, 12);
+    final nodes = [
+      MindmapNode.create(
+        id: 'old-weekdays',
+        type: NodeType.habit,
+        title: 'Weekday habit',
+        day: DateTime(2026, 6, 1),
+        data: const {
+          'habit': {
+            'recurrence': 'weekdays',
+            'completions': ['2026-07-06', '2026-07-07'],
+          },
+        },
+      ),
+      MindmapNode.create(
+        id: 'new-daily',
+        type: NodeType.habit,
+        title: 'New habit',
+        day: DateTime(2026, 7, 10),
+        data: const {
+          'habit': {
+            'recurrence': 'daily',
+            'completions': ['2026-07-10'],
+          },
+        },
+      ),
+      MindmapNode.create(
+        id: 'weekly',
+        type: NodeType.habit,
+        title: 'Weekly habit',
+        day: DateTime(2026, 6, 29),
+        data: const {
+          'habit': {
+            'recurrence': 'weekly',
+            'completions': ['2026-07-06'],
+          },
+        },
+      ),
+      MindmapNode.create(
+        id: 'monthly',
+        type: NodeType.habit,
+        title: 'Monthly habit',
+        day: DateTime(2026, 6, 8),
+        data: const {
+          'habit': {
+            'recurrence': 'monthly',
+            'completions': ['2026-07-08'],
+          },
+        },
+      ),
+    ];
+
+    final summary = buildHabitInsightSummary(
+      start: start,
+      end: end,
+      today: end,
+      nodes: nodes,
+    );
+
+    expect(summary.habitCount, 4);
+    expect(summary.expectedCount, 10);
+    expect(summary.completedCount, 5);
   });
 
   test('buildRoutineInsightSummary counts routine markers', () {
@@ -104,5 +171,24 @@ void main() {
     expect(summary.skippedCount, 1);
     expect(summary.snoozedCount, 2);
     expect(summary.frequentlySnoozedRoutine, 'Workout');
+  });
+
+  test('calculateHabitStrength calculates score using exponential decay', () {
+    final today = DateTime(2026, 7, 6);
+    final habitNode = MindmapNode.create(
+      id: 'habit-test',
+      type: NodeType.habit,
+      title: 'Daily Meditation',
+      day: today,
+      data: const {
+        'habit': {
+          'completions': ['2026-07-06', '2026-07-05', '2026-07-04'],
+        },
+      },
+    );
+
+    final score = calculateHabitStrength(habitNode, today);
+    expect(score, greaterThan(50.0));
+    expect(score, lessThanOrEqualTo(100.0));
   });
 }

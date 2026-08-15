@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
+import 'package:var_app/features/mindmap/domain/node_mini_app_data.dart';
 import 'package:var_app/features/mindmap/domain/recurring_routine.dart';
 import 'package:var_app/features/settings/domain/reminder_planner.dart';
 
@@ -88,5 +89,68 @@ void main() {
     );
 
     expect(plan.items, isEmpty);
+  });
+
+  test('buildReminderPlan schedules enabled habits at stored local time', () {
+    final now = DateTime(2026, 6, 29, 12);
+    final base = MindmapNode.create(
+      id: 'habit-1',
+      type: NodeType.habit,
+      title: 'Walk',
+      day: now,
+      now: now,
+    );
+    final habit = updateNodeMiniAppSection(base, 'habit', {
+      'reminderEnabled': true,
+      'reminderTime': '18:30',
+    });
+
+    final plan = buildReminderPlan(
+      nodes: [habit],
+      routines: const [],
+      options: ReminderPlannerOptions(
+        today: now,
+        lookaheadDays: 1,
+        dueRemindersEnabled: false,
+        routineRemindersEnabled: false,
+      ),
+    );
+
+    expect(plan.habits, hasLength(2));
+    expect(plan.habits.first.scheduledAt, DateTime(2026, 6, 29, 18, 30));
+    expect(plan.habits.last.scheduledAt, DateTime(2026, 6, 30, 18, 30));
+  });
+
+  test('habit reminders skip elapsed, malformed, archived, and done items', () {
+    final now = DateTime(2026, 6, 29, 20);
+    MindmapNode habit(String id, String time) => updateNodeMiniAppSection(
+      MindmapNode.create(
+        id: id,
+        type: NodeType.habit,
+        title: id,
+        day: now,
+        now: now,
+      ),
+      'habit',
+      {'reminderEnabled': true, 'reminderTime': time},
+    );
+
+    final plan = buildReminderPlan(
+      nodes: [
+        habit('elapsed', '08:00'),
+        habit('malformed', '25:00'),
+        habit('archived', '21:00').copyWith(isArchived: true),
+        habit('done', '21:00').copyWith(isDone: true),
+      ],
+      routines: const [],
+      options: ReminderPlannerOptions(
+        today: now,
+        lookaheadDays: 0,
+        dueRemindersEnabled: false,
+        routineRemindersEnabled: false,
+      ),
+    );
+
+    expect(plan.habits, isEmpty);
   });
 }

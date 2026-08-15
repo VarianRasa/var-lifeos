@@ -14,16 +14,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
-import '../../shared/layout/adaptive_scaffold.dart';
-import '../../shared/widgets/doodle_border.dart';
 import '../../shared/widgets/error_message.dart';
 import '../../shared/widgets/search_field.dart';
 import '../mindmap/application/mindmap_providers.dart';
 import '../mindmap/domain/mindmap_node.dart';
 import '../mindmap/domain/node_graph.dart';
 import '../mindmap/domain/workspace_context.dart';
-import '../mindmap/presentation/mindmap_canvas.dart';
 import 'application/context_graph.dart';
 import 'application/goal_dependency_graph.dart';
 import 'application/graph_filters.dart';
@@ -33,6 +32,7 @@ import 'application/graph_relation_suggestions.dart';
 import 'application/graph_relationship_insights.dart';
 import 'application/graph_risk_overlay.dart';
 import 'domain/node_graph_explorer.dart';
+import 'presentation/graph_physics_canvas.dart';
 
 class GraphPage extends ConsumerStatefulWidget {
   const GraphPage({super.key});
@@ -44,9 +44,11 @@ class GraphPage extends ConsumerStatefulWidget {
 class _GraphPageState extends ConsumerState<GraphPage> {
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
+  final _searchActionFocusNode = FocusNode();
   final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
   NodeGraphExplorerQuery _query = const NodeGraphExplorerQuery();
   ContextGraphMode _contextMode = ContextGraphMode.nodes;
+  bool _usePhysicsMode = false;
   List<_GraphSavedFilter> _savedFilters = const [];
 
   Uri? _lastFilterUri;
@@ -79,86 +81,165 @@ class _GraphPageState extends ConsumerState<GraphPage> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _searchActionFocusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final graph = ref.watch(nodeGraphProvider);
-    return Scaffold(
-      appBar: AppBar(
-        title: const AppRouteChromeTabs(currentRoute: AppRoute.graph),
-        actions: [
-          SearchField(
-            key: const ValueKey('graph-search-field'),
-            controller: _searchController,
-            focusNode: _searchFocusNode,
-            hintText: 'Search graph...',
-            onChanged: _changeSearchQuery,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Graph'),
+            actions: [
+              IconButton(
+                tooltip: _usePhysicsMode
+                    ? 'Switch to standard view'
+                    : 'Switch to 2D Physics Force-Directed View',
+                icon: Icon(
+                  _usePhysicsMode
+                      ? Icons.account_tree_outlined
+                      : Icons.bubble_chart_outlined,
+                ),
+                onPressed: () =>
+                    setState(() => _usePhysicsMode = !_usePhysicsMode),
+              ),
+              if (compact)
+                IconButton(
+                  key: const ValueKey('graph-search-action'),
+                  focusNode: _searchActionFocusNode,
+                  tooltip: 'Search graph',
+                  icon: const Icon(Icons.search),
+                  onPressed: _openCompactSearch,
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: SearchField(
+                    key: const ValueKey('graph-search-field'),
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    hintText: 'Search graph...',
+                    onChanged: _changeSearchQuery,
+                  ),
+                ),
+              const SizedBox(width: 8),
+            ],
           ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: graph.when(
-        data: (value) {
-          if (value.nodes.isEmpty) return const _GraphEmptyState();
-          final view = NodeGraphExplorerView.fromGraph(value, query: _query);
-          return CallbackShortcuts(
-            bindings: {
-              const SingleActivator(LogicalKeyboardKey.slash): () {
-                _searchFocusNode.requestFocus();
+          body: KeyedSubtree(
+            key: const ValueKey('graph-page-body'),
+            child: graph.when(
+              data: (value) {
+                if (value.nodes.isEmpty) return const _GraphEmptyState();
+                final view = NodeGraphExplorerView.fromGraph(
+                  value,
+                  query: _query,
+                );
+
+                return CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.slash): () {
+                      _searchFocusNode.requestFocus();
+                    },
+                    const SingleActivator(LogicalKeyboardKey.escape):
+                        _clearFilters,
+                    const SingleActivator(LogicalKeyboardKey.keyC): () {
+                      _changeRelationState(GraphRelationState.connected);
+                    },
+                    const SingleActivator(LogicalKeyboardKey.keyR):
+                        _clearFilters,
+                    const SingleActivator(LogicalKeyboardKey.keyF): () {
+                      if (view.visibleNodes.isNotEmpty) {
+                        _focusNode(view.visibleNodes.first.id);
+                      }
+                    },
+                  },
+                  child: Focus(
+                    autofocus: true,
+                    child: _GraphBody(
+                      graph: value,
+                      view: view,
+                      usePhysicsMode: _usePhysicsMode,
+
+                      onTypeChanged: _changeTypeFilter,
+                      onStatusChanged: _changeStatusFilter,
+                      onPriorityChanged: _changePriorityFilter,
+                      onTagChanged: _changeTagFilter,
+                      onProjectChanged: _changeProjectFilter,
+                      onAreaChanged: _changeAreaFilter,
+                      onRelationLabelChanged: _changeRelationLabelFilter,
+                      onCrossDayChanged: _changeCrossDayOnly,
+                      onRelationStateChanged: _changeRelationState,
+                      onContextModeChanged: _changeContextMode,
+                      onExportReport: _exportReport,
+                      contextMode: _contextMode,
+                      onFocusNode: _focusNode,
+                      onClearFocus: _clearFocus,
+                      onClearFilters: _clearFilters,
+                      onRelationLabelEdited: _editRelationLabel,
+                      savedFilters: _savedFilters,
+                      onSaveFilter: _saveCurrentFilter,
+                      onApplyFilter: _applySavedFilter,
+                      onDeleteFilter: _deleteSavedFilter,
+                      onRenameFilter: _renameSavedFilter,
+                      onDuplicateFilter: _duplicateSavedFilter,
+                      onExportFilters: _exportSavedFilters,
+                      onImportFilters: _importSavedFilters,
+                    ),
+                  ),
+                );
               },
-              const SingleActivator(LogicalKeyboardKey.escape): _clearFilters,
-              const SingleActivator(LogicalKeyboardKey.keyC): () {
-                _changeRelationState(GraphRelationState.connected);
-              },
-              const SingleActivator(LogicalKeyboardKey.keyR): _clearFilters,
-              const SingleActivator(LogicalKeyboardKey.keyF): () {
-                if (view.visibleNodes.isNotEmpty) {
-                  _focusNode(view.visibleNodes.first.id);
-                }
-              },
-            },
-            child: Focus(
-              autofocus: true,
-              child: _GraphBody(
-                graph: value,
-                view: view,
-                onTypeChanged: _changeTypeFilter,
-                onStatusChanged: _changeStatusFilter,
-                onPriorityChanged: _changePriorityFilter,
-                onTagChanged: _changeTagFilter,
-                onProjectChanged: _changeProjectFilter,
-                onAreaChanged: _changeAreaFilter,
-                onRelationLabelChanged: _changeRelationLabelFilter,
-                onCrossDayChanged: _changeCrossDayOnly,
-                onRelationStateChanged: _changeRelationState,
-                onContextModeChanged: _changeContextMode,
-                onExportReport: _exportReport,
-                contextMode: _contextMode,
-                onFocusNode: _focusNode,
-                onClearFocus: _clearFocus,
-                onClearFilters: _clearFilters,
-                onRelationLabelEdited: _editRelationLabel,
-                savedFilters: _savedFilters,
-                onSaveFilter: _saveCurrentFilter,
-                onApplyFilter: _applySavedFilter,
-                onDeleteFilter: _deleteSavedFilter,
-                onRenameFilter: _renameSavedFilter,
-                onDuplicateFilter: _duplicateSavedFilter,
-                onExportFilters: _exportSavedFilters,
-                onImportFilters: _importSavedFilters,
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) => ErrorMessage(
+                message: 'Unable to load graph',
+                onRetry: () => ref.invalidate(allMindmapNodesProvider),
               ),
             ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => ErrorMessage(
-          message: 'Unable to load graph',
-          onRetry: () => ref.invalidate(allMindmapNodesProvider),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openCompactSearch() async {
+    _searchFocusNode.requestFocus();
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsetsDirectional.all(16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Close search',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SearchField(
+                        key: const ValueKey('graph-search-field'),
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        hintText: 'Search graph...',
+                        onChanged: _changeSearchQuery,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
+    if (mounted) _searchActionFocusNode.requestFocus();
   }
 
   Future<void> _loadSavedFilters() async {
@@ -288,19 +369,20 @@ class _GraphPageState extends ConsumerState<GraphPage> {
   }
 
   Future<void> _importSavedFilters() async {
-    final controller = TextEditingController();
+    var draft = '';
     final raw = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Import graph filters'),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: draft,
           autofocus: true,
           maxLines: 8,
           decoration: const InputDecoration(
             labelText: 'Graph filters JSON',
             alignLabelWithHint: true,
           ),
+          onChanged: (value) => draft = value,
         ),
         actions: [
           TextButton(
@@ -308,16 +390,15 @@ class _GraphPageState extends ConsumerState<GraphPage> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            onPressed: () => Navigator.of(context).pop(draft.trim()),
             child: const Text('Import'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (raw == null || raw.isEmpty) return;
     try {
-      final imported = _decodeGraphSavedFilters(raw);
+      final imported = _decodeGraphSavedFilters(raw, strict: true);
       final merged = <String, _GraphSavedFilter>{
         for (final filter in _savedFilters) filter.id: filter,
         for (final filter in imported) filter.id: filter,
@@ -538,16 +619,27 @@ final class _GraphSavedFilter {
   }
 }
 
-List<_GraphSavedFilter> _decodeGraphSavedFilters(String? raw) {
+List<_GraphSavedFilter> _decodeGraphSavedFilters(
+  String? raw, {
+  bool strict = false,
+}) {
   if (raw == null || raw.trim().isEmpty) return const [];
   try {
     final decoded = jsonDecode(raw);
-    if (decoded is! List<Object?>) return const [];
-    return decoded
+    if (decoded is! List<Object?>) {
+      if (strict) throw const FormatException('Expected a JSON list');
+      return const [];
+    }
+    final filters = decoded
         .map(_GraphSavedFilter.fromJson)
         .nonNulls
         .toList(growable: false);
+    if (strict && filters.length != decoded.length) {
+      throw const FormatException('Invalid graph filter entry');
+    }
+    return filters;
   } on FormatException {
+    if (strict) rethrow;
     return const [];
   }
 }
@@ -564,6 +656,7 @@ class _GraphBody extends StatelessWidget {
   const _GraphBody({
     required this.graph,
     required this.view,
+    required this.usePhysicsMode,
     required this.onTypeChanged,
     required this.onStatusChanged,
     required this.onPriorityChanged,
@@ -592,6 +685,7 @@ class _GraphBody extends StatelessWidget {
 
   final NodeGraph graph;
   final NodeGraphExplorerView view;
+  final bool usePhysicsMode;
   final ValueChanged<NodeType> onTypeChanged;
   final ValueChanged<NodeStatus> onStatusChanged;
   final ValueChanged<NodePriority> onPriorityChanged;
@@ -620,7 +714,10 @@ class _GraphBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final spacing = MediaQuery.sizeOf(context).width < 720 ? 12.0 : 16.0;
+    final spacing =
+        MediaQuery.sizeOf(context).width <= LayoutConstants.contentBreakpoint
+        ? 12.0
+        : 16.0;
     final nodes = [for (final node in graph.nodes) node.node];
     final tags = _availableTags(nodes);
     final relationLabels = _availableRelationLabels(nodes);
@@ -745,21 +842,36 @@ class _GraphBody extends StatelessWidget {
                   ],
                 ),
                 SizedBox(height: spacing),
-                SizedBox(
-                  height: 600,
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: 320,
+                    maxHeight: math.max(
+                      320,
+                      MediaQuery.sizeOf(context).height * 0.65,
+                    ),
+                  ),
                   child: TabBarView(
                     children: [
-                      VisualGraphView(
-                        nodes: view.visibleNodes,
-                        edges: view.visibleEdges,
-                        onNodeTapped: (graphNode) {
-                          goToDay(
-                            context,
-                            graphNode.node.day,
-                            highlightNodeId: graphNode.id,
-                          );
-                        },
-                      ),
+                      if (usePhysicsMode)
+                        GraphPhysicsCanvas(
+                          nodes: [
+                            for (final node in view.visibleNodes) node.node,
+                          ],
+                          graph: graph,
+                          onNodeTap: onFocusNode,
+                        )
+                      else
+                        VisualGraphView(
+                          nodes: view.visibleNodes,
+                          edges: view.visibleEdges,
+                          onNodeTapped: (graphNode) {
+                            goToDay(
+                              context,
+                              graphNode.node.day,
+                              highlightNodeId: graphNode.id,
+                            );
+                          },
+                        ),
                       SingleChildScrollView(
                         child: Column(
                           children: [
@@ -853,6 +965,8 @@ class _GraphDashboardPanelToggleState
 
   @override
   Widget build(BuildContext context) {
+    final tokens = AppDesignTokens.of(context);
+    final duration = tokens.effectiveDuration(context, tokens.motionFast);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -870,7 +984,7 @@ class _GraphDashboardPanelToggleState
           ),
         ),
         AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
+          duration: duration,
           child: _showPanels
               ? Column(
                   key: ValueKey('graph-${widget.label}-panels'),
@@ -897,10 +1011,11 @@ class _GraphOverviewHud extends StatelessWidget {
     return DecoratedBox(
       decoration: ShapeDecoration(
         color: colorScheme.surface,
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusPage,
+          ),
           side: BorderSide(color: theme.dividerColor),
-          radius: 28,
-          wobble: 2.6,
         ),
       ),
       child: Padding(
@@ -1005,17 +1120,21 @@ class _GraphOverviewCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return SizedBox(
-      width: 156,
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minWidth: 140,
+        maxWidth: math.max(140, MediaQuery.sizeOf(context).width - 56),
+      ),
       child: DecoratedBox(
         decoration: ShapeDecoration(
           color: colorScheme.surface.withValues(alpha: 0.72),
-          shape: DoodleShapeBorder(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(
+              AppDesignTokens.of(context).radiusContainer,
+            ),
             side: BorderSide(
               color: colorScheme.outlineVariant.withValues(alpha: 0.7),
             ),
-            radius: 18,
-            wobble: 1.8,
           ),
         ),
         child: Padding(
@@ -1164,8 +1283,11 @@ class _GraphDiagnosticCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 320,
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minWidth: 280,
+        maxWidth: math.max(280, MediaQuery.sizeOf(context).width - 48),
+      ),
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -1273,10 +1395,11 @@ class _GraphGuidanceStrip extends StatelessWidget {
         color: theme.colorScheme.surfaceContainerHighest.withValues(
           alpha: 0.32,
         ),
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusContainer,
+          ),
           side: BorderSide(color: theme.colorScheme.outlineVariant),
-          radius: 18,
-          wobble: 1.8,
         ),
       ),
       child: Padding(
@@ -1402,10 +1525,11 @@ class _GraphFilterBandState extends State<_GraphFilterBand> {
 
     return DecoratedBox(
       decoration: ShapeDecoration(
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusElement,
+          ),
           side: BorderSide(color: theme.dividerColor),
-          radius: 8,
-          wobble: 1.2,
         ),
       ),
       child: Padding(
@@ -1413,7 +1537,10 @@ class _GraphFilterBandState extends State<_GraphFilterBand> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 OutlinedButton.icon(
                   key: const ValueKey('graph-filter-band-toggle'),
@@ -1679,10 +1806,11 @@ class _GraphSection extends StatelessWidget {
 
     return DecoratedBox(
       decoration: ShapeDecoration(
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusElement,
+          ),
           side: BorderSide(color: theme.dividerColor),
-          radius: 8,
-          wobble: 1.2,
         ),
       ),
       child: Padding(
@@ -1716,7 +1844,7 @@ class _GraphNeighborhoodPanel extends StatelessWidget {
           ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            leading: Icon(_nodeIcon(neighborhood.focusedNode.node.type)),
+            leading: Icon(NodeVisuals.icon(neighborhood.focusedNode.node.type)),
             title: Text(neighborhood.focusedNode.node.title),
             subtitle: Text(
               '${neighborhood.focusedNode.node.type.label} • ${neighborhood.focusedNode.node.status.label} • ${neighborhood.focusedNode.node.priority.label} • ${_countLabel(neighborhood.totalConnectionCount, 'connection')}',
@@ -1737,9 +1865,11 @@ class _GraphNeighborhoodPanel extends StatelessWidget {
               ),
               ActionChip(
                 avatar: const Icon(Icons.open_in_new_outlined, size: 16),
-                label: const Text('Open node'),
-                onPressed: () => context.go(
-                  '/calendar/${dayKey(neighborhood.focusedNode.node.day)}/node/${neighborhood.focusedNode.id}',
+                label: const Text('Open inline'),
+                onPressed: () => goToDay(
+                  context,
+                  neighborhood.focusedNode.node.day,
+                  highlightNodeId: neighborhood.focusedNode.id,
                 ),
               ),
               ActionChip(
@@ -1827,7 +1957,7 @@ class _GraphNeighborhoodGroup extends StatelessWidget {
               for (final node in nodes)
                 ActionChip(
                   key: ValueKey('$keyPrefix-${node.id}'),
-                  avatar: Icon(_nodeIcon(node.node.type), size: 16),
+                  avatar: Icon(NodeVisuals.icon(node.node.type), size: 16),
                   label: Text(node.node.title),
                   onPressed: () =>
                       goToDay(context, node.node.day, highlightNodeId: node.id),
@@ -1854,7 +1984,7 @@ class _GraphHubTile extends StatelessWidget {
       dense: true,
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        _nodeIcon(node.node.type),
+        NodeVisuals.icon(node.node.type),
         color: theme.colorScheme.primary,
       ),
       title: Text(
@@ -1882,7 +2012,7 @@ class _GraphHubTile extends StatelessWidget {
               onPressed: () => onFocus(node.id),
             ),
             IconButton(
-              tooltip: 'Open node',
+              tooltip: 'Open inline',
               icon: const Icon(Icons.open_in_new),
               onPressed: () =>
                   goToDay(context, node.node.day, highlightNodeId: node.id),
@@ -2105,19 +2235,6 @@ List<String> _availableRelationLabels(List<MindmapNode> nodes) {
   return labels.toList()..sort();
 }
 
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
-  _ => Icons.radio_button_unchecked,
-};
-
 String _countLabel(int count, String singular) {
   if (singular == 'match') return '$count ${count == 1 ? 'match' : 'matches'}';
   return '$count $singular${count == 1 ? '' : 's'}';
@@ -2156,6 +2273,7 @@ class _VisualGraphViewState extends State<VisualGraphView> {
   String? _hoveredNodeId;
   String? _selectedNodeId;
   bool _showControls = false;
+  bool _showNodeList = false;
 
   @override
   void initState() {
@@ -2189,8 +2307,11 @@ class _VisualGraphViewState extends State<VisualGraphView> {
   }
 
   void _zoomBy(double factor) {
-    final nextScale = (_transformationController.value.getMaxScaleOnAxis() * factor)
-        .clamp(0.4, 2.0);
+    final nextScale =
+        (_transformationController.value.getMaxScaleOnAxis() * factor).clamp(
+          0.4,
+          2.0,
+        );
     _centerGraph(scale: nextScale);
   }
 
@@ -2293,144 +2414,204 @@ class _VisualGraphViewState extends State<VisualGraphView> {
         ? null
         : widget.nodes.where((node) => node.id == _selectedNodeId).firstOrNull;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+    final tokens = AppDesignTokens.of(context);
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label:
+          'Graph canvas, ${widget.nodes.length} nodes and '
+          '${widget.edges.length} ${widget.edges.length == 1 ? 'link' : 'links'}',
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(tokens.radiusContainer),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          ),
         ),
-      ),
-      clipBehavior: Clip.hardEdge,
-      child: Stack(
-        children: [
-          InteractiveViewer(
-            transformationController: _transformationController,
-            constrained: false,
-            boundaryMargin: const EdgeInsets.all(400),
-            minScale: 0.4,
-            maxScale: 2.0,
-            child: SizedBox(
-              width: 1200,
-              height: 800,
-              child: GestureDetector(
-                onTapUp: (details) {
-                  final renderBox = context.findRenderObject() as RenderBox?;
-                  if (renderBox != null) {
-                    final localOffset = renderBox.globalToLocal(
-                      details.globalPosition,
-                    );
-                    final sceneOffset = _transformationController.toScene(
-                      localOffset,
-                    );
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              transformationController: _transformationController,
+              constrained: false,
+              boundaryMargin: const EdgeInsets.all(400),
+              minScale: 0.4,
+              maxScale: 2.0,
+              child: SizedBox(
+                width: 1200,
+                height: 800,
+                child: GestureDetector(
+                  onTapUp: (details) {
+                    final renderBox = context.findRenderObject() as RenderBox?;
+                    if (renderBox != null) {
+                      final localOffset = renderBox.globalToLocal(
+                        details.globalPosition,
+                      );
+                      final sceneOffset = _transformationController.toScene(
+                        localOffset,
+                      );
 
-                    for (final node in widget.nodes) {
-                      final pos = _positions[node.id]!;
-                      if ((sceneOffset - pos).distance <= 28.0) {
-                        setState(() => _selectedNodeId = node.id);
-                        break;
+                      for (final node in widget.nodes) {
+                        final pos = _positions[node.id]!;
+                        if ((sceneOffset - pos).distance <= 28.0) {
+                          setState(() => _selectedNodeId = node.id);
+                          break;
+                        }
                       }
                     }
-                  }
-                },
-                child: MouseRegion(
-                  onHover: (event) {
-                    final sceneOffset = _transformationController.toScene(
-                      event.localPosition,
-                    );
-                    String? newHoverId;
-                    for (final node in widget.nodes) {
-                      final pos = _positions[node.id]!;
-                      if ((sceneOffset - pos).distance <= 28.0) {
-                        newHoverId = node.id;
-                        break;
+                  },
+                  child: MouseRegion(
+                    onHover: (event) {
+                      final sceneOffset = _transformationController.toScene(
+                        event.localPosition,
+                      );
+                      String? newHoverId;
+                      for (final node in widget.nodes) {
+                        final pos = _positions[node.id]!;
+                        if ((sceneOffset - pos).distance <= 28.0) {
+                          newHoverId = node.id;
+                          break;
+                        }
                       }
-                    }
-                    if (newHoverId != _hoveredNodeId) {
+                      if (newHoverId != _hoveredNodeId) {
+                        setState(() {
+                          _hoveredNodeId = newHoverId;
+                        });
+                      }
+                    },
+                    onExit: (_) {
                       setState(() {
-                        _hoveredNodeId = newHoverId;
+                        _hoveredNodeId = null;
                       });
-                    }
-                  },
-                  onExit: (_) {
-                    setState(() {
-                      _hoveredNodeId = null;
-                    });
-                  },
-                  child: CustomPaint(
-                    painter: _VisualGraphPainter(
-                      nodes: widget.nodes,
-                      edges: widget.edges,
-                      positions: _positions,
-                      hoveredNodeId: _hoveredNodeId,
+                    },
+                    child: CustomPaint(
+                      painter: _VisualGraphPainter(
+                        nodes: widget.nodes,
+                        edges: widget.edges,
+                        positions: Map<String, Offset>.unmodifiable(_positions),
+                        hoveredNodeId: _hoveredNodeId,
+                        nodeColors: {
+                          for (final type in NodeType.values)
+                            type: NodeVisuals.color(context, type),
+                        },
+                        nodeOutlineColor: Theme.of(context).colorScheme.outline,
+                        labelColor: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          if (selectedNode != null)
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: _GraphNodeDetailDrawer(
-                node: selectedNode,
-                onClose: () => setState(() => _selectedNodeId = null),
-                onOpen: () => widget.onNodeTapped(selectedNode),
-              ),
-            ),
-          Positioned(
-            top: 12,
-            right: 12,
-            child: _showControls
-                ? Card(
-                    color: theme.colorScheme.surface.withValues(alpha: 0.86),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+            if (_showNodeList)
+              PositionedDirectional(
+                start: 12,
+                top: 12,
+                bottom: 12,
+                child: SizedBox(
+                  width: 280,
+                  child: Material(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(tokens.radiusContainer),
+                    child: Semantics(
+                      label: 'Graph nodes',
+                      child: ListView(
                         children: [
-                          const Icon(Icons.info_outline, size: 14),
-                          const SizedBox(width: 6),
-                          const Text(
-                            'Drag to pan, pinch to zoom, tap node for details',
-                            style: TextStyle(fontSize: 10),
-                          ),
-                          IconButton(
-                            tooltip: 'Zoom out',
-                            icon: const Icon(Icons.remove, size: 16),
-                            onPressed: () => _zoomBy(0.85),
-                          ),
-                          IconButton(
-                            tooltip: 'Reset graph view',
-                            icon: const Icon(Icons.center_focus_strong, size: 16),
-                            onPressed: _resetView,
-                          ),
-                          IconButton(
-                            tooltip: 'Zoom in',
-                            icon: const Icon(Icons.add, size: 16),
-                            onPressed: () => _zoomBy(1.18),
-                          ),
-                          IconButton(
-                            tooltip: 'Hide graph controls',
-                            icon: const Icon(Icons.close, size: 16),
-                            onPressed: () =>
-                                setState(() => _showControls = false),
-                          ),
+                          for (final node in widget.nodes)
+                            ListTile(
+                              title: Text(node.node.title),
+                              subtitle: Text(
+                                '${node.node.type.label}, ${_countLabel(node.totalDegree, 'link')}',
+                              ),
+                              onTap: () {
+                                setState(() => _selectedNodeId = node.id);
+                                widget.onNodeTapped(node);
+                              },
+                            ),
                         ],
                       ),
                     ),
-                  )
-                : IconButton.filledTonal(
-                    tooltip: 'Show graph controls',
-                    icon: const Icon(Icons.tune, size: 18),
-                    onPressed: () => setState(() => _showControls = true),
                   ),
-          ),
-        ],
+                ),
+              ),
+            if (selectedNode != null && !_showNodeList)
+              PositionedDirectional(
+                start: 12,
+                bottom: 12,
+                child: _GraphNodeDetailDrawer(
+                  node: selectedNode,
+                  onClose: () => setState(() => _selectedNodeId = null),
+                  onOpen: () => widget.onNodeTapped(selectedNode),
+                ),
+              ),
+            PositionedDirectional(
+              top: 12,
+              end: 12,
+              child: _showControls
+                  ? Card(
+                      color: theme.colorScheme.surface.withValues(alpha: 0.86),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.info_outline, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Drag to pan, pinch to zoom, tap node for details',
+                              style: theme.textTheme.labelSmall,
+                            ),
+                            IconButton(
+                              tooltip: _showNodeList
+                                  ? 'Show visual graph'
+                                  : 'Show graph node list',
+                              icon: Icon(
+                                _showNodeList ? Icons.hub_outlined : Icons.list,
+                                size: 16,
+                              ),
+                              onPressed: () => setState(
+                                () => _showNodeList = !_showNodeList,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Zoom out',
+                              icon: const Icon(Icons.remove, size: 16),
+                              onPressed: () => _zoomBy(0.85),
+                            ),
+                            IconButton(
+                              tooltip: 'Reset graph view',
+                              icon: const Icon(
+                                Icons.center_focus_strong,
+                                size: 16,
+                              ),
+                              onPressed: _resetView,
+                            ),
+                            IconButton(
+                              tooltip: 'Zoom in',
+                              icon: const Icon(Icons.add, size: 16),
+                              onPressed: () => _zoomBy(1.18),
+                            ),
+                            IconButton(
+                              tooltip: 'Hide graph controls',
+                              icon: const Icon(Icons.close, size: 16),
+                              onPressed: () =>
+                                  setState(() => _showControls = false),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : IconButton.filledTonal(
+                      tooltip: 'Show graph controls',
+                      icon: const Icon(Icons.tune, size: 18),
+                      onPressed: () => setState(() => _showControls = true),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2463,7 +2644,7 @@ class _GraphNodeDetailDrawer extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(_nodeIcon(node.node.type), size: 18),
+                  Icon(NodeVisuals.icon(node.node.type), size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -2491,6 +2672,11 @@ class _GraphNodeDetailDrawer extends StatelessWidget {
                     Chip(label: Text('Project ${node.node.project}')),
                   if (node.totalDegree > 0)
                     Chip(label: Text(_countLabel(node.totalDegree, 'link'))),
+                  if (node.node.body.contains('[['))
+                    const Chip(
+                      avatar: Icon(Icons.link, size: 14),
+                      label: Text('[[wikilink]]'),
+                    ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -2517,12 +2703,18 @@ class _VisualGraphPainter extends CustomPainter {
     required this.edges,
     required this.positions,
     required this.hoveredNodeId,
+    required this.nodeColors,
+    required this.nodeOutlineColor,
+    required this.labelColor,
   });
 
   final List<NodeGraphNode> nodes;
   final List<NodeGraphEdge> edges;
   final Map<String, Offset> positions;
   final String? hoveredNodeId;
+  final Map<NodeType, Color> nodeColors;
+  final Color nodeOutlineColor;
+  final Color labelColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2549,8 +2741,8 @@ class _VisualGraphPainter extends CustomPainter {
           hoveredNodeId != null &&
           (edge.sourceId == hoveredNodeId || edge.targetId == hoveredNodeId);
 
-      final colorA = nodeColor(nodeA.node.type);
-      final colorB = nodeColor(nodeB.node.type);
+      final colorA = nodeColors[nodeA.node.type]!;
+      final colorB = nodeColors[nodeB.node.type]!;
 
       final baseAlpha = isHighlighted
           ? 0.9
@@ -2565,7 +2757,7 @@ class _VisualGraphPainter extends CustomPainter {
         colorB.withValues(alpha: baseAlpha),
       ]);
 
-      if (edge.isCrossDay) {
+      if (edge.isWikilink || edge.isCrossDay) {
         _drawDashedLine(canvas, pA, pB, paint);
       } else {
         canvas.drawLine(pA, pB, paint);
@@ -2617,7 +2809,7 @@ class _VisualGraphPainter extends CustomPainter {
       final fade = hoveredNodeId != null && !isHovered && !isNeighbor;
       final opacityMultiplier = fade ? 0.25 : 1.0;
 
-      final color = nodeColor(node.node.type);
+      final color = nodeColors[node.node.type]!;
 
       if (isHovered) {
         canvas.drawCircle(
@@ -2641,19 +2833,25 @@ class _VisualGraphPainter extends CustomPainter {
         pos,
         18.0,
         Paint()
-          ..color = Colors.white.withValues(alpha: 0.7 * opacityMultiplier)
+          ..color = nodeOutlineColor.withValues(alpha: 0.7 * opacityMultiplier)
           ..style = PaintingStyle.stroke
           ..strokeWidth = isHovered ? 2.0 : 1.0,
       );
 
-      final iconStr = String.fromCharCode(nodeIcon(node.node.type).codePoint);
+      final iconColor =
+          ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+          ? Colors.white
+          : const Color(0xFF0A1317);
+      final iconStr = String.fromCharCode(
+        NodeVisuals.icon(node.node.type).codePoint,
+      );
       final iconPainter = TextPainter(
         text: TextSpan(
           text: iconStr,
           style: TextStyle(
             fontFamily: 'MaterialIcons',
             fontSize: 18.0,
-            color: Colors.white.withValues(alpha: opacityMultiplier),
+            color: iconColor.withValues(alpha: opacityMultiplier),
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -2667,16 +2865,9 @@ class _VisualGraphPainter extends CustomPainter {
         text: TextSpan(
           text: node.node.title,
           style: TextStyle(
-            color: Colors.white.withValues(alpha: opacityMultiplier),
+            color: labelColor.withValues(alpha: opacityMultiplier),
             fontSize: isHovered ? 12.0 : 10.0,
             fontWeight: isHovered ? FontWeight.bold : FontWeight.normal,
-            shadows: [
-              Shadow(
-                color: Colors.black.withValues(alpha: opacityMultiplier),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
-              ),
-            ],
           ),
         ),
         textDirection: TextDirection.ltr,
@@ -2719,7 +2910,11 @@ class _VisualGraphPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _VisualGraphPainter oldDelegate) {
     return oldDelegate.hoveredNodeId != hoveredNodeId ||
-        oldDelegate.nodes.length != nodes.length ||
-        oldDelegate.edges.length != edges.length;
+        oldDelegate.nodes != nodes ||
+        oldDelegate.edges != edges ||
+        oldDelegate.positions != positions ||
+        oldDelegate.nodeColors != nodeColors ||
+        oldDelegate.nodeOutlineColor != nodeOutlineColor ||
+        oldDelegate.labelColor != labelColor;
   }
 }

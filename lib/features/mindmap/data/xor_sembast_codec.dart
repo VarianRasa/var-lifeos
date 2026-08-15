@@ -3,10 +3,7 @@ import 'dart:math';
 import 'package:sembast/sembast.dart';
 
 SembastCodec getXorSembastCodec(String pin) {
-  return SembastCodec(
-    signature: 'xor_pin',
-    codec: _XorCodec(pin),
-  );
+  return SembastCodec(signature: 'xor_pin', codec: _XorCodec(pin));
 }
 
 class _XorCodec extends Codec<Map<String, Object?>, String> {

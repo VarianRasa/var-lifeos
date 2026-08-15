@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:var_app/core/constants/app_constants.dart';
 import 'package:var_app/features/graph/graph_page.dart';
+import 'package:var_app/features/graph/presentation/graph_physics_canvas.dart';
 import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
@@ -26,6 +30,196 @@ void main() {
     view.resetPhysicalSize();
     view.resetDevicePixelRatio();
   });
+  for (final width in [320.0, 768.0, 1024.0, 1440.0]) {
+    testWidgets('GraphPage adapts chrome at width $width', (tester) async {
+      await _pumpGraphPage(tester, width: width);
+
+      expect(find.byKey(const ValueKey('graph-page-body')), findsOneWidget);
+      expect(find.text('Graph'), findsOneWidget);
+      expect(
+        find.byTooltip('Switch to 2D Physics Force-Directed View'),
+        findsOneWidget,
+      );
+      if (width < 600) {
+        expect(
+          find.byKey(const ValueKey('graph-search-action')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('graph-search-action')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('graph-search-field')),
+          findsOneWidget,
+        );
+      } else {
+        expect(
+          find.byKey(const ValueKey('graph-search-field')),
+          findsOneWidget,
+        );
+      }
+      expect(tester.takeException(), isNull, reason: 'width=$width');
+    });
+  }
+
+  for (final variant in <({String name, bool disabled, bool accessible})>[
+    (name: 'disableAnimations', disabled: true, accessible: false),
+    (name: 'accessibleNavigation', disabled: false, accessible: true),
+  ]) {
+    testWidgets('${variant.name} reveals graph overview immediately', (
+      tester,
+    ) async {
+      await _pumpGraphPage(
+        tester,
+        width: 1024,
+        disableAnimations: variant.disabled,
+        accessibleNavigation: variant.accessible,
+      );
+
+      await tester.tap(find.text('Show overview'));
+      await tester.pump();
+
+      expect(find.text('Map overview'), findsOneWidget);
+      final transition = tester.widget<AnimatedSwitcher>(
+        find.ancestor(
+          of: find.byKey(const ValueKey('graph-overview-panels')),
+          matching: find.byType(AnimatedSwitcher),
+        ),
+      );
+      expect(transition.duration, Duration.zero);
+    });
+  }
+
+  testWidgets('visual and physics canvases expose concise labels', (
+    tester,
+  ) async {
+    await _pumpGraphPage(tester, width: 1024);
+    await tester.ensureVisible(find.byType(VisualGraphView));
+    await tester.pump();
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            RegExp(
+              r'^Graph canvas, \d+ nodes and \d+ links?$',
+            ).hasMatch(widget.properties.label ?? ''),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byTooltip('Switch to 2D Physics Force-Directed View'),
+    );
+    await tester.pump();
+    expect(
+      find.bySemanticsLabel(RegExp(r'^Physics graph canvas, \d+ nodes$')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('Launch task'), findsOneWidget);
+  });
+
+  testWidgets('physics mode preserves graph chrome and filters', (
+    tester,
+  ) async {
+    await _pumpGraphPage(tester, width: 768);
+    await tester.tap(
+      find.byTooltip('Switch to 2D Physics Force-Directed View'),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('graph-page-body')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('graph-filter-band-toggle')),
+      findsOneWidget,
+    );
+    expect(find.text('Visual Network'), findsOneWidget);
+    expect(find.byType(GraphPhysicsCanvas), findsOneWidget);
+  });
+
+  testWidgets('physics node tap focuses same graph detail state', (
+    tester,
+  ) async {
+    await _pumpGraphPage(tester, width: 768);
+    await tester.tap(
+      find.byTooltip('Switch to 2D Physics Force-Directed View'),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byType(GraphPhysicsCanvas));
+    await tester.pump();
+    await tester.tap(find.bySemanticsLabel('Launch task'));
+    await tester.pump();
+
+    final focusedSummary = find.textContaining('Focused on Launch task');
+    await tester.ensureVisible(focusedSummary);
+    await tester.pump();
+    expect(focusedSummary, findsOneWidget);
+    expect(find.text('Clear focus'), findsOneWidget);
+  });
+
+  testWidgets('compact search autofocuses and restores trigger focus', (
+    tester,
+  ) async {
+    await _pumpGraphPage(tester, width: 320);
+    final action = find.byKey(const ValueKey('graph-search-action'));
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.focusNode?.hasFocus, isTrue);
+    await tester.tap(find.byTooltip('Close search'));
+    await tester.pumpAndSettle();
+    final actionWidget = tester.widget<IconButton>(action);
+    expect(actionWidget.focusNode?.hasFocus, isTrue);
+  });
+
+  test('graph chrome avoids reviewed rigid and raw styles', () {
+    final source = File(
+      'lib/features/graph/graph_page.dart',
+    ).readAsStringSync();
+    expect(source, isNot(contains('height: 600')));
+    expect(source, isNot(contains('width: 156')));
+    expect(source, isNot(contains('width: 320')));
+    expect(source, isNot(contains('style: TextStyle(fontSize: 10)')));
+    expect(source, isNot(contains('Positioned(\n')));
+  });
+
+  testWidgets('enabled graph chrome controls have 44 targets', (tester) async {
+    await _pumpGraphPage(tester, width: 1440);
+    await tester.tap(find.byTooltip('Show graph controls'));
+    await tester.pumpAndSettle();
+
+    final controls = find.descendant(
+      of: find.byKey(const ValueKey('graph-page-body')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is IconButton && widget.onPressed != null ||
+            widget is ButtonStyleButton && widget.enabled,
+      ),
+    );
+    for (final element in controls.evaluate()) {
+      final size = tester.getSize(
+        find.byElementPredicate((item) => item == element),
+      );
+      expect(size.width, greaterThanOrEqualTo(44));
+      expect(size.height, greaterThanOrEqualTo(44));
+    }
+  });
+
+  testWidgets('GraphPage compact chrome supports 200-percent RTL', (
+    tester,
+  ) async {
+    await _pumpGraphPage(
+      tester,
+      width: 320,
+      textScaler: const TextScaler.linear(2),
+      textDirection: TextDirection.rtl,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('graph-search-action')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('graph-search-field')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('GraphPage surfaces graph nodes, hubs, and edges', (
     tester,
   ) async {
@@ -210,6 +404,12 @@ void main() {
     expect(find.byTooltip('Zoom out'), findsOneWidget);
     expect(find.byTooltip('Reset graph view'), findsOneWidget);
     expect(find.byTooltip('Zoom in'), findsOneWidget);
+    expect(find.byTooltip('Show graph node list'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show graph node list'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Graph nodes'), findsOneWidget);
+    expect(find.text('Launch task'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Zoom in'));
     await tester.pumpAndSettle();
@@ -348,6 +548,46 @@ void main() {
     expect(find.text('No links in this view'), findsOneWidget);
   });
 
+  testWidgets('GraphPage opens focused node as day highlight', (tester) async {
+    final repository = InMemoryMindmapRepository(
+      seedNodes: _buildExplorerNodes(),
+    );
+    final router = GoRouter(
+      initialLocation: '/graph',
+      routes: [
+        GoRoute(path: '/graph', builder: (_, _) => const GraphPage()),
+        GoRoute(
+          path: '/calendar/:date',
+          builder: (_, state) => Text(
+            'day=${state.pathParameters['date']} highlight=${state.uri.queryParameters['highlight']}',
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openExplorerList(tester);
+    await _openGraphFilters(tester);
+
+    final focusButton = find.byKey(const ValueKey('graph-focus-node-task-1'));
+    await tester.ensureVisible(focusButton);
+    await tester.tap(focusButton);
+    await tester.pumpAndSettle();
+    final openNode = find.widgetWithText(ActionChip, 'Open inline');
+    await tester.ensureVisible(openNode);
+    await tester.tap(openNode);
+    await tester.pumpAndSettle();
+
+    expect(find.text('day=2026-06-18 highlight=task-1'), findsOneWidget);
+  });
+
   testWidgets('GraphPage focuses a node neighborhood', (tester) async {
     final repository = InMemoryMindmapRepository(
       seedNodes: _buildExplorerNodes(),
@@ -452,6 +692,70 @@ void main() {
     expect(find.text('Launch task -> Release context'), findsOneWidget);
     expect(find.text('Ship v1 -> Launch task'), findsNothing);
   });
+  testWidgets('GraphPage rejects invalid saved filter JSON', (tester) async {
+    final repository = InMemoryMindmapRepository(
+      seedNodes: _buildExplorerNodes(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(home: GraphPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openGraphFilters(tester);
+
+    await tester.tap(find.byTooltip('Graph filter import/export'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import JSON'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Graph filters JSON',
+      ),
+      '{not valid json}',
+    );
+    await tester.tap(find.text('Import'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Invalid graph filters JSON'), findsOneWidget);
+  });
+}
+
+Future<void> _pumpGraphPage(
+  WidgetTester tester, {
+  required double width,
+  TextScaler textScaler = TextScaler.noScaling,
+  TextDirection textDirection = TextDirection.ltr,
+  bool disableAnimations = false,
+  bool accessibleNavigation = false,
+}) async {
+  tester.view.physicalSize = Size(width, 900);
+  tester.view.devicePixelRatio = 1;
+  final repository = InMemoryMindmapRepository(
+    seedNodes: _buildExplorerNodes(),
+  );
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+      child: MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(
+            textScaler: textScaler,
+            disableAnimations: disableAnimations,
+            accessibleNavigation: accessibleNavigation,
+          ),
+          child: Directionality(
+            textDirection: textDirection,
+            child: const GraphPage(),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openGraphFilters(WidgetTester tester) async {

@@ -1,81 +1,20 @@
-/// Material 3 theme definitions for Var.
-///
-/// Global blackboard-and-marker look. Dark stays primary, light stays available
-/// for accessibility, and typography remains readable while leaning handwritten.
+/// Material 3 translation of Astryx for Var.
 library;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-import '../../shared/widgets/doodle_border.dart';
 import '../constants/app_constants.dart';
 import 'app_colors.dart';
+import 'app_design_tokens.dart';
+import 'app_theme_icon_set.dart';
 import 'theme_controller.dart';
 
 class AppTheme {
   const AppTheme._();
 
-  /// Default marker accent used for primary actions.
-  static const Color seed = NodeColors.task;
+  static const Color seed = Color(0xFF0064E0);
 
-  static const String _handwrittenFont = 'PatrickHand';
-
-  static const List<String> _handwrittenFallback = [
-    'Comic Sans MS',
-    'Segoe Print',
-    'Bradley Hand',
-    'Chalkboard SE',
-    'Marker Felt',
-  ];
-
-  static String? _fontFor(AppThemeVariant variant) {
-    switch (variant) {
-      case AppThemeVariant.blueprint:
-        return 'RobotoMono';
-      case AppThemeVariant.midnight:
-        return 'Roboto';
-      default:
-        return _handwrittenFont;
-    }
-  }
-
-  static List<String>? _fallbackFor(AppThemeVariant variant) {
-    switch (variant) {
-      case AppThemeVariant.blueprint:
-        return const ['Courier New', 'Courier', 'monospace'];
-      case AppThemeVariant.midnight:
-        return const ['Arial', 'sans-serif'];
-      default:
-        return _handwrittenFallback;
-    }
-  }
-
-  static DoodleShapeBorder _doodleShape({
-    BorderSide side = BorderSide.none,
-    double radius = 20,
-    double wobble = 2,
-  }) {
-    return DoodleShapeBorder(side: side, radius: radius, wobble: wobble);
-  }
-
-  static DoodleInputBorder _doodleInput({
-    required BorderSide side,
-    double radius = 18,
-    double wobble = 1.8,
-  }) {
-    return DoodleInputBorder(borderSide: side, radius: radius, wobble: wobble);
-  }
-
-  static ThemeData get dark => _base(Brightness.dark, seed, AppThemeVariant.blackboard, AppFontSize.medium);
-
-  static ThemeData get light => _base(Brightness.light, seed, AppThemeVariant.blackboard, AppFontSize.medium);
-
-  static ThemeData darkWithAccent(Color accent, AppThemeVariant variant, AppFontSize fontSize) =>
-      _base(Brightness.dark, accent, variant, fontSize);
-
-  static ThemeData lightWithAccent(Color accent, AppThemeVariant variant, AppFontSize fontSize) =>
-      _base(Brightness.light, accent, variant, fontSize);
-
-  /// Smooth page transition used across all routes.
   static const pageTransitionsTheme = PageTransitionsTheme(
     builders: {
       TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
@@ -86,360 +25,631 @@ class AppTheme {
     },
   );
 
-  static ThemeData _base(Brightness brightness, Color seedColor, AppThemeVariant variant, AppFontSize fontSize) {
+  static ThemeData get dark => forVariant(
+    Brightness.dark,
+    AppThemeVariant.astryxNeutral,
+    AppFontSize.medium,
+  );
+
+  static ThemeData get light => forVariant(
+    Brightness.light,
+    AppThemeVariant.astryxNeutral,
+    AppFontSize.medium,
+  );
+
+  static ThemeData forVariant(
+    Brightness brightness,
+    AppThemeVariant variant,
+    AppFontSize fontSize,
+  ) {
+    final effectiveBrightness = variant.forcesDarkMode
+        ? Brightness.dark
+        : brightness;
     final scale = fontSize.scaleFactor;
-    final isDark = brightness == Brightness.dark;
     final palette = AppThemeVariantColors.of(variant);
-    final textPrimary = isDark
-        ? palette.darkTextPrimary
-        : palette.lightTextPrimary;
-    final textSecondary = isDark
-        ? palette.darkTextSecondary
-        : palette.lightTextSecondary;
-    final border = isDark
-        ? palette.darkBorder
-        : palette.lightBorder;
-    final surface = isDark
-        ? palette.darkSurface
-        : palette.lightSurface;
-    final surfaceHigh = isDark
-        ? palette.darkSurfaceHigh
-        : palette.lightSurfaceHigh;
-    final primary = seedColor;
-    final secondary = palette.nodeColors[NodeType.kanban] ?? NodeColors.kanban;
-    final tertiary = palette.nodeColors[NodeType.plan] ?? NodeColors.plan;
-    final scaffoldBg = isDark ? palette.darkBg : palette.lightBg;
+    final semantic = palette.semanticColors(effectiveBrightness);
+    final tokens = AppDesignTokens.forVariant(variant);
+    final isDark = effectiveBrightness == Brightness.dark;
     final scheme =
         ColorScheme.fromSeed(
-          seedColor: seedColor,
-          brightness: brightness,
-          surface: scaffoldBg,
+          seedColor: semantic.accent,
+          brightness: effectiveBrightness,
+          surface: semantic.surface,
         ).copyWith(
-          primary: primary,
-          onPrimary: _bestOnColor(primary),
-          secondary: secondary,
-          onSecondary: _bestOnColor(secondary),
-          tertiary: tertiary,
-          onTertiary: _bestOnColor(tertiary),
-          error: StatusColors.error,
-          onError: _bestOnColor(StatusColors.error),
-          surface: scaffoldBg,
-          onSurface: textPrimary,
-          surfaceContainer: surface,
-          surfaceContainerHigh: surfaceHigh,
-          surfaceContainerHighest: surfaceHigh,
-          onSurfaceVariant: textSecondary,
-          outline: border,
-          outlineVariant: border.withValues(alpha: isDark ? 0.82 : 0.78),
+          primary: semantic.accent,
+          onPrimary: semantic.onAccent,
+          primaryContainer: semantic.accentMuted,
+          onPrimaryContainer: semantic.textPrimary,
+          secondary: semantic.nodeColors[NodeType.kanban],
+          onSecondary: _bestOnColor(semantic.nodeColors[NodeType.kanban]!),
+          tertiary: semantic.nodeColors[NodeType.plan],
+          onTertiary: _bestOnColor(semantic.nodeColors[NodeType.plan]!),
+          error: semantic.danger,
+          onError: semantic.onDanger,
+          errorContainer: semantic.dangerMuted,
+          onErrorContainer: semantic.textPrimary,
+          surface: semantic.surface,
+          onSurface: semantic.textPrimary,
+          surfaceContainerLowest: semantic.background,
+          surfaceContainerLow: semantic.surfaceSunken,
+          surfaceContainer: semantic.surface,
+          surfaceContainerHigh: semantic.surfaceRaised,
+          surfaceContainerHighest: semantic.popover,
+          onSurfaceVariant: semantic.textSecondary,
+          outline: semantic.borderStrong,
+          outlineVariant: semantic.border,
+          inverseSurface: semantic.textPrimary,
+          onInverseSurface: semantic.background,
+          inversePrimary: semantic.onAccent,
+          scrim: semantic.scrim,
+          shadow: Colors.black,
         );
+    final elementShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(tokens.radiusElement),
+    );
+    final borderedElementShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(tokens.radiusElement),
+      side: BorderSide(color: semantic.border),
+    );
+    final containerShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(tokens.radiusContainer),
+      side: BorderSide(color: semantic.border),
+    );
+    final stateOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.disabled)) return Colors.transparent;
+      if (states.contains(WidgetState.pressed)) return semantic.pressedOverlay;
+      if (states.contains(WidgetState.hovered)) return semantic.hoverOverlay;
+      if (states.contains(WidgetState.focused)) return semantic.accentMuted;
+      return null;
+    });
+    final minimumButtonSize = Size(tokens.minimumTarget, tokens.minimumTarget);
 
     return ThemeData(
       useMaterial3: true,
-      brightness: brightness,
+      brightness: effectiveBrightness,
       colorScheme: scheme,
-      scaffoldBackgroundColor: scaffoldBg,
+      scaffoldBackgroundColor: semantic.background,
+      canvasColor: semantic.background,
+      disabledColor: semantic.textDisabled,
+      dividerColor: semantic.border,
+      focusColor: semantic.focusRing,
+      hoverColor: semantic.hoverOverlay,
+      highlightColor: semantic.pressedOverlay,
+      splashColor: semantic.pressedOverlay,
       pageTransitionsTheme: pageTransitionsTheme,
-      textTheme: _buildTextTheme(textPrimary, textSecondary, variant, scale),
-      cardTheme: CardThemeData(
-        color: surface,
-        elevation: 0,
-        shape: _doodleShape(
-          side: BorderSide(color: border, width: isDark ? 2 : 1.6),
-          radius: 22,
-          wobble: 2.4,
-        ),
-        margin: EdgeInsets.zero,
-      ),
+      extensions: <ThemeExtension<dynamic>>[
+        tokens,
+        semantic,
+        AppThemeIconSet.lucideLike,
+      ],
+      textTheme: _buildTextTheme(semantic, variant, scale),
       appBarTheme: AppBarTheme(
-        backgroundColor: Colors.transparent,
-        foregroundColor: textPrimary,
+        backgroundColor: semantic.background,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: semantic.textPrimary,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: textPrimary,
-          fontFamily: _fontFor(variant),
-          fontFamilyFallback: _fallbackFor(variant),
-          fontSize: 19 * scale,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.15,
+        titleTextStyle: _headingStyle(
+          variant,
+          scale,
+          semantic.textPrimary,
+          size: 20,
+          lineBox: 28,
         ),
       ),
-      dividerTheme: DividerThemeData(color: border, thickness: 1, space: 1),
+      cardTheme: CardThemeData(
+        color: semantic.card,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: containerShape,
+        margin: EdgeInsets.zero,
+      ),
+      dividerTheme: DividerThemeData(
+        color: semantic.border,
+        thickness: 1,
+        space: 1,
+      ),
+      badgeTheme: BadgeThemeData(
+        backgroundColor: semantic.accentMuted,
+        textColor: semantic.textPrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      ),
+      bannerTheme: MaterialBannerThemeData(
+        backgroundColor: semantic.surface,
+        surfaceTintColor: Colors.transparent,
+        contentTextStyle: TextStyle(
+          color: semantic.textPrimary,
+          fontSize: 14 * scale,
+          height: 20 / 14,
+        ),
+        elevation: 0,
+        padding: const EdgeInsets.all(16),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surfaceHigh.withValues(alpha: isDark ? 0.72 : 1),
-        border: _doodleInput(side: BorderSide(color: border, width: 1.4)),
-        enabledBorder: _doodleInput(
-          side: BorderSide(color: border, width: 1.4),
+        fillColor: semantic.surface,
+        border: _inputBorder(semantic.borderStrong, tokens.radiusElement),
+        enabledBorder: _inputBorder(
+          semantic.borderStrong,
+          tokens.radiusElement,
         ),
-        focusedBorder: _doodleInput(
-          side: BorderSide(color: scheme.primary, width: 2),
+        focusedBorder: _inputBorder(
+          semantic.focusRing,
+          tokens.radiusElement,
+          width: 2,
         ),
-        errorBorder: _doodleInput(
-          side: const BorderSide(color: StatusColors.error, width: 1.6),
+        errorBorder: _inputBorder(
+          semantic.danger,
+          tokens.radiusElement,
+          width: 1.5,
         ),
-        focusedErrorBorder: _doodleInput(
-          side: const BorderSide(color: StatusColors.error, width: 2),
+        focusedErrorBorder: _inputBorder(
+          semantic.danger,
+          tokens.radiusElement,
+          width: 2,
+        ),
+        disabledBorder: _inputBorder(
+          semantic.border.withValues(alpha: 0.56),
+          tokens.radiusElement,
         ),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
+          horizontal: 12,
+          vertical: 10,
         ),
+        constraints: BoxConstraints(minHeight: tokens.minimumTarget),
         isDense: true,
-      ),
-      chipTheme: ChipThemeData(
-        backgroundColor: surfaceHigh,
-        selectedColor: scheme.primary,
-        labelStyle: TextStyle(color: textPrimary, fontSize: 12 * scale),
-        secondaryLabelStyle: TextStyle(color: scheme.onPrimary, fontSize: 12 * scale),
-        side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
-        shape: _doodleShape(radius: 16, wobble: 1.7),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        hintStyle: TextStyle(color: semantic.textSecondary),
+        labelStyle: TextStyle(color: semantic.textSecondary),
+        helperStyle: TextStyle(color: semantic.textSecondary),
+        errorStyle: TextStyle(color: semantic.danger),
       ),
       filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          shape: _doodleShape(radius: 18, wobble: 1.9),
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-          textStyle: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 14 * scale,
-            letterSpacing: 0.1,
+        style: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(minimumButtonSize),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
+          shape: WidgetStatePropertyAll(elementShape),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 14 * scale, fontWeight: FontWeight.w600),
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            return states.contains(WidgetState.disabled)
+                ? semantic.textDisabled
+                : semantic.onAccent;
+          }),
+          overlayColor: stateOverlay,
+          elevation: const WidgetStatePropertyAll(0),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          shape: _doodleShape(radius: 18, wobble: 1.9),
-          side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-          textStyle: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 14 * scale,
-            letterSpacing: 0.1,
-          ),
-        ),
-      ),
-      segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) return scheme.primary;
-            return surfaceHigh.withValues(alpha: isDark ? 0.42 : 1);
-          }),
-          foregroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) return scheme.onPrimary;
-            return textPrimary;
-          }),
-          side: WidgetStateProperty.resolveWith((states) {
-            final color = states.contains(WidgetState.selected)
-                ? scheme.primary
-                : border;
-            return BorderSide(color: color, width: isDark ? 1.8 : 1.4);
-          }),
-          shape: WidgetStatePropertyAll(_doodleShape(radius: 999, wobble: 1.6)),
-          textStyle: WidgetStatePropertyAll(
-            TextStyle(fontWeight: FontWeight.w800, fontSize: 12 * scale),
+          minimumSize: WidgetStatePropertyAll(minimumButtonSize),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
-          visualDensity: VisualDensity.compact,
+          shape: WidgetStatePropertyAll(elementShape),
+          side: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.focused)) {
+              return BorderSide(color: semantic.focusRing, width: 2);
+            }
+            return BorderSide(color: semantic.borderStrong);
+          }),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 14 * scale, fontWeight: FontWeight.w600),
+          ),
+          overlayColor: stateOverlay,
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          shape: _doodleShape(radius: 18, wobble: 1.8),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        style: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(minimumButtonSize),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          shape: WidgetStatePropertyAll(elementShape),
+          overlayColor: stateOverlay,
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          shape: _doodleShape(radius: 16, wobble: 1.6),
+        style: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(minimumButtonSize),
+          fixedSize: WidgetStatePropertyAll(minimumButtonSize),
+          shape: WidgetStatePropertyAll(elementShape),
+          overlayColor: stateOverlay,
         ),
       ),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: scheme.primary,
-        foregroundColor: scheme.onPrimary,
-        elevation: 4,
-        highlightElevation: 8,
-        shape: _doodleShape(radius: 24, wobble: 2.1),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return semantic.textDisabled;
+          }
+          return states.contains(WidgetState.selected)
+              ? semantic.accent
+              : semantic.surface;
+        }),
+        checkColor: WidgetStatePropertyAll(semantic.onAccent),
+        overlayColor: stateOverlay,
+        side: BorderSide(color: semantic.borderStrong),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radiusInner),
+        ),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return semantic.textDisabled;
+          }
+          return states.contains(WidgetState.selected)
+              ? semantic.accent
+              : semantic.borderStrong;
+        }),
+        overlayColor: stateOverlay,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return semantic.textDisabled;
+          }
+          return states.contains(WidgetState.selected)
+              ? semantic.onAccent
+              : semantic.textSecondary;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return semantic.border;
+          }
+          return states.contains(WidgetState.selected)
+              ? semantic.accent
+              : semantic.track;
+        }),
+        overlayColor: stateOverlay,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: semantic.surfaceRaised,
+        selectedColor: semantic.accentMuted,
+        disabledColor: semantic.surfaceRaised.withValues(alpha: 0.56),
+        labelStyle: TextStyle(
+          color: semantic.textPrimary,
+          fontSize: 12 * scale,
+        ),
+        secondaryLabelStyle: TextStyle(
+          color: semantic.textPrimary,
+          fontSize: 12 * scale,
+          fontWeight: FontWeight.w600,
+        ),
+        side: BorderSide(color: semantic.border),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(
+            Size(tokens.minimumTarget, tokens.minimumTarget),
+          ),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return semantic.surface;
+            }
+            return semantic.surfaceSunken;
+          }),
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            return states.contains(WidgetState.disabled)
+                ? semantic.textDisabled
+                : semantic.textPrimary;
+          }),
+          overlayColor: stateOverlay,
+          side: WidgetStateProperty.resolveWith((states) {
+            return BorderSide(
+              color: states.contains(WidgetState.focused)
+                  ? semantic.focusRing
+                  : semantic.border,
+              width: states.contains(WidgetState.focused) ? 2 : 1,
+            );
+          }),
+          shape: WidgetStatePropertyAll(elementShape),
+          textStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 12 * scale, fontWeight: FontWeight.w600),
+          ),
+          elevation: WidgetStateProperty.resolveWith((states) {
+            return states.contains(WidgetState.selected) ? 1 : 0;
+          }),
+        ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: isDark
-            ? NeutralColors.darkSurface
-            : NeutralColors.lightSurface,
-        elevation: 12,
-        shape: _doodleShape(
-          side: BorderSide(color: border, width: 1.4),
-          radius: 28,
-          wobble: 2.8,
-        ),
-        titleTextStyle: TextStyle(
-          color: textPrimary,
-          fontFamily: _fontFor(variant),
-          fontFamilyFallback: _fallbackFor(variant),
-          fontSize: 19,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.15,
-        ),
-        contentTextStyle: TextStyle(color: textSecondary, fontSize: 14),
-      ),
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: isDark
-            ? NeutralColors.darkSurfaceHigh
-            : scheme.inverseSurface,
-        contentTextStyle: TextStyle(
-          color: isDark ? textPrimary : scheme.onInverseSurface,
-          fontSize: 13,
-        ),
-        shape: _doodleShape(
-          side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
-          radius: 20,
-          wobble: 2.2,
-        ),
-        behavior: SnackBarBehavior.floating,
+        backgroundColor: semantic.popover,
+        surfaceTintColor: Colors.transparent,
         elevation: 8,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shadowColor: scheme.shadow.withValues(alpha: isDark ? 0.36 : 0.16),
+        shape: containerShape,
+        titleTextStyle: _headingStyle(
+          variant,
+          scale,
+          semantic.textPrimary,
+          size: 20,
+          lineBox: 28,
+        ),
+        contentTextStyle: TextStyle(
+          color: semantic.textSecondary,
+          fontSize: 14 * scale,
+          height: 20 / 14,
+        ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: isDark
-            ? NeutralColors.darkSurface
-            : NeutralColors.lightSurface,
-        elevation: 16,
-        shape: _doodleShape(
-          side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
-          radius: 28,
-          wobble: 2.6,
+        backgroundColor: semantic.popover,
+        modalBackgroundColor: semantic.popover,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: isDark ? 0.30 : 0.18),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(tokens.radiusPage),
+          ),
+          side: BorderSide(color: semantic.border),
         ),
-        dragHandleColor: border,
+        dragHandleColor: semantic.borderStrong,
         dragHandleSize: const Size(40, 4),
         showDragHandle: true,
       ),
-      navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: isDark ? NeutralColors.darkBg : NeutralColors.lightBg,
-        selectedIconTheme: IconThemeData(color: scheme.primary, size: 22),
-        unselectedIconTheme: IconThemeData(color: textSecondary, size: 22),
-        selectedLabelTextStyle: TextStyle(
-          color: scheme.primary,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: scheme.inverseSurface,
+        contentTextStyle: TextStyle(
+          color: scheme.onInverseSurface,
+          fontSize: 14 * scale,
         ),
-        unselectedLabelTextStyle: TextStyle(color: textSecondary, fontSize: 12),
-        indicatorColor: scheme.primary,
-        indicatorShape: _doodleShape(radius: 22, wobble: 1.8),
+        actionTextColor: scheme.inversePrimary,
+        shape: containerShape,
+        behavior: SnackBarBehavior.floating,
+        elevation: 6,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: surface.withValues(alpha: isDark ? 0.96 : 1),
-        indicatorColor: scheme.primary,
-        indicatorShape: _doodleShape(radius: 24, wobble: 1.9),
-        elevation: 0,
-        height: 72,
-      ),
-      popupMenuTheme: PopupMenuThemeData(
-        color: isDark ? NeutralColors.darkSurface : NeutralColors.lightSurface,
-        elevation: 12,
-        shape: _doodleShape(
-          side: BorderSide(color: border, width: isDark ? 1.8 : 1.4),
-          radius: 18,
-          wobble: 2,
-        ),
-        textStyle: TextStyle(color: textPrimary, fontSize: 13),
-      ),
-      listTileTheme: ListTileThemeData(
-        shape: _doodleShape(radius: 18, wobble: 1.6),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-        dense: true,
-      ),
-      // Tab bar theme
-      tabBarTheme: TabBarThemeData(
-        labelColor: scheme.primary,
-        unselectedLabelColor: textSecondary,
-        indicator: DoodleUnderlineDecoration(
-          color: scheme.primary,
-          strokeWidth: 2.4,
-        ),
-        indicatorColor: scheme.primary,
-        indicatorSize: TabBarIndicatorSize.label,
-        dividerHeight: 0,
-        labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-        unselectedLabelStyle: const TextStyle(
-          fontWeight: FontWeight.w500,
-          fontSize: 13,
-        ),
-      ),
-      // Tooltip theme
       tooltipTheme: TooltipThemeData(
         decoration: ShapeDecoration(
-          color: isDark
-              ? NeutralColors.darkSurfaceHigh
-              : NeutralColors.lightTextPrimary,
-          shape: _doodleShape(radius: 14, wobble: 1.5),
-          shadows: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: scheme.inverseSurface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(tokens.radiusInner),
+          ),
+          shadows: tokens.shadowLow,
         ),
         textStyle: TextStyle(
-          color: isDark ? textPrimary : NeutralColors.lightBg,
-          fontSize: 12,
+          color: scheme.onInverseSurface,
+          fontSize: 12 * scale,
+          height: 20 / 12,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        waitDuration: const Duration(milliseconds: 400),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        waitDuration: tokens.motionMedium,
       ),
-      // Scrollbar theme
+      dropdownMenuTheme: DropdownMenuThemeData(
+        textStyle: TextStyle(
+          color: semantic.textPrimary,
+          fontSize: 14 * scale,
+          height: 20 / 14,
+        ),
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(semantic.popover),
+          elevation: const WidgetStatePropertyAll(3),
+          shape: WidgetStatePropertyAll(containerShape),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        ),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: semantic.popover,
+        surfaceTintColor: Colors.transparent,
+        elevation: 3,
+        shadowColor: Colors.black.withValues(alpha: isDark ? 0.24 : 0.14),
+        shape: containerShape,
+        textStyle: TextStyle(color: semantic.textPrimary, fontSize: 14 * scale),
+      ),
+      listTileTheme: ListTileThemeData(
+        iconColor: semantic.textSecondary,
+        textColor: semantic.textPrimary,
+        selectedColor: semantic.textPrimary,
+        selectedTileColor: semantic.accentMuted,
+        shape: elementShape,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        minTileHeight: tokens.minimumTarget,
+        dense: true,
+      ),
+      tabBarTheme: TabBarThemeData(
+        labelColor: semantic.textPrimary,
+        unselectedLabelColor: semantic.textSecondary,
+        indicatorColor: semantic.accent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: semantic.border,
+        labelStyle: TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 14 * scale,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontWeight: FontWeight.w500,
+          fontSize: 14 * scale,
+        ),
+        overlayColor: stateOverlay,
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: semantic.surface,
+        elevation: 0,
+        indicatorColor: semantic.accentMuted,
+        indicatorShape: elementShape,
+        selectedIconTheme: IconThemeData(color: semantic.accent, size: 22),
+        unselectedIconTheme: IconThemeData(
+          color: semantic.textSecondary,
+          size: 22,
+        ),
+        selectedLabelTextStyle: TextStyle(
+          color: semantic.textPrimary,
+          fontSize: 14 * scale,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelTextStyle: TextStyle(
+          color: semantic.textSecondary,
+          fontSize: 14 * scale,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      navigationDrawerTheme: NavigationDrawerThemeData(
+        backgroundColor: semantic.popover,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: semantic.accentMuted,
+        indicatorShape: elementShape,
+        elevation: 6,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: semantic.surface,
+        indicatorColor: semantic.accentMuted,
+        indicatorShape: elementShape,
+        elevation: 0,
+        height: 64,
+      ),
+      expansionTileTheme: ExpansionTileThemeData(
+        backgroundColor: Colors.transparent,
+        collapsedBackgroundColor: Colors.transparent,
+        iconColor: semantic.accent,
+        collapsedIconColor: semantic.textSecondary,
+        textColor: semantic.textPrimary,
+        collapsedTextColor: semantic.textPrimary,
+        shape: borderedElementShape,
+        collapsedShape: elementShape,
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: semantic.accent,
+        foregroundColor: semantic.onAccent,
+        elevation: 3,
+        focusElevation: 3,
+        hoverElevation: 3,
+        highlightElevation: 3,
+        shape: elementShape,
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: semantic.accent,
+        linearTrackColor: semantic.track,
+        circularTrackColor: semantic.track,
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: semantic.accent,
+        inactiveTrackColor: semantic.track,
+        thumbColor: semantic.accent,
+        overlayColor: semantic.accentMuted,
+      ),
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStatePropertyAll(border.withValues(alpha: 0.5)),
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.hovered)
+              ? semantic.borderStrong
+              : semantic.border;
+        }),
         radius: const Radius.circular(999),
         thickness: const WidgetStatePropertyAll(6),
         thumbVisibility: const WidgetStatePropertyAll(false),
         interactive: true,
       ),
-      // Progress indicator theme
-      progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: scheme.primary,
-        linearTrackColor: border,
-        circularTrackColor: border,
-      ),
-      // Slider theme
-      sliderTheme: SliderThemeData(
-        activeTrackColor: scheme.primary,
-        inactiveTrackColor: border,
-        thumbColor: scheme.primary,
-        overlayColor: scheme.primary.withValues(alpha: 0.12),
-      ),
-      // Switch theme
-      switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return scheme.primary;
-          return isDark
-              ? NeutralColors.darkTextSecondary
-              : NeutralColors.lightTextSecondary;
-        }),
-        trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return scheme.primary.withValues(alpha: 0.3);
-          }
-          return border;
-        }),
-      ),
       visualDensity: VisualDensity.compact,
-      // Smooth material animations
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
     );
   }
 
-  static Color _bestOnColor(Color color) {
-    final colorLuminance = color.computeLuminance();
-    final darkTextLuminance = NeutralColors.lightTextPrimary.computeLuminance();
-    final lightTextLuminance = NeutralColors.darkTextPrimary.computeLuminance();
-    final darkTextContrast = _contrastRatio(colorLuminance, darkTextLuminance);
-    final lightTextContrast = _contrastRatio(
-      colorLuminance,
-      lightTextLuminance,
+  static OutlineInputBorder _inputBorder(
+    Color color,
+    double radius, {
+    double width = 1,
+  }) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(radius),
+      borderSide: BorderSide(color: color, width: width),
     );
-    return darkTextContrast >= lightTextContrast
-        ? NeutralColors.lightTextPrimary
-        : NeutralColors.darkTextPrimary;
+  }
+
+  static TextTheme _buildTextTheme(
+    AppSemanticColors semantic,
+    AppThemeVariant variant,
+    double scale,
+  ) {
+    TextStyle body(double size, double lineBox, Color color, double weight) {
+      return TextStyle(
+        fontFamily: _bodyFontFor(variant),
+        fontFamilyFallback: _fontFallback,
+        fontSize: size * scale,
+        fontWeight: FontWeight.lerp(FontWeight.w400, FontWeight.w700, weight),
+        height: lineBox / size,
+        color: color,
+      );
+    }
+
+    TextStyle heading(double size, double lineBox, {double weight = 0.67}) {
+      return body(
+        size,
+        lineBox,
+        semantic.textPrimary,
+        weight,
+      ).copyWith(fontFamily: _headingFontFor(variant));
+    }
+
+    return TextTheme(
+      displayLarge: heading(42, 52, weight: 0),
+      displayMedium: heading(35, 44, weight: 0),
+      displaySmall: heading(29, 36, weight: 0),
+      headlineLarge: heading(24, 32),
+      headlineMedium: heading(20, 28),
+      headlineSmall: heading(17, 24),
+      titleLarge: heading(14, 20),
+      titleMedium: heading(12, 20),
+      titleSmall: heading(10, 16),
+      bodyLarge: body(17, 24, semantic.textPrimary, 0.33),
+      bodyMedium: body(14, 20, semantic.textPrimary, 0),
+      bodySmall: body(12, 20, semantic.textSecondary, 0),
+      labelLarge: body(14, 20, semantic.textPrimary, 0.33),
+      labelMedium: body(12, 20, semantic.textSecondary, 0.33),
+      labelSmall: body(10, 16, semantic.textSecondary, 0.33),
+    );
+  }
+
+  static TextStyle _headingStyle(
+    AppThemeVariant variant,
+    double scale,
+    Color color, {
+    required double size,
+    required double lineBox,
+  }) {
+    return TextStyle(
+      color: color,
+      fontFamily: _headingFontFor(variant),
+      fontFamilyFallback: _fontFallback,
+      fontSize: size * scale,
+      fontWeight: FontWeight.w600,
+      height: lineBox / size,
+    );
+  }
+
+  static String _bodyFontFor(AppThemeVariant variant) => switch (variant) {
+    AppThemeVariant.astryxNeutral || AppThemeVariant.astryxStone => 'Figtree',
+    AppThemeVariant.astryxGothic => 'Fustat',
+    AppThemeVariant.astryxMatcha => 'DMSans',
+    AppThemeVariant.astryxY2k => 'Poppins',
+    AppThemeVariant.astryxButter => 'Outfit',
+    AppThemeVariant.astryxChocolate => 'AlbertSans',
+  };
+
+  static String _headingFontFor(AppThemeVariant variant) => switch (variant) {
+    AppThemeVariant.astryxStone => 'Montserrat',
+    AppThemeVariant.astryxMatcha => 'PlaywriteUSTrad',
+    AppThemeVariant.astryxChocolate => 'Fraunces',
+    _ => _bodyFontFor(variant),
+  };
+
+  static const _fontFallback = <String>[
+    'Segoe UI',
+    'Roboto',
+    'Arial',
+    'sans-serif',
+  ];
+
+  static Color _bestOnColor(Color color) {
+    final luminance = color.computeLuminance();
+    const dark = Color(0xFF0A1317);
+    const light = Colors.white;
+    final darkContrast = _contrastRatio(luminance, dark.computeLuminance());
+    final lightContrast = _contrastRatio(luminance, light.computeLuminance());
+    return darkContrast >= lightContrast ? dark : light;
   }
 
   static double _contrastRatio(double first, double second) {
@@ -447,98 +657,8 @@ class AppTheme {
     final darker = first > second ? second : first;
     return (lighter + 0.05) / (darker + 0.05);
   }
-
-  static TextTheme _buildTextTheme(
-    Color primary,
-    Color secondary,
-    AppThemeVariant variant,
-    double scale,
-  ) {
-    final font = _fontFor(variant);
-    final fallback = _fallbackFor(variant);
-    final isMonospace = variant == AppThemeVariant.blueprint;
-
-    final body = TextStyle(
-      fontFamily: isMonospace ? 'RobotoMono' : null,
-      fontFamilyFallback: isMonospace ? const ['Courier New', 'Courier', 'monospace'] : null,
-      letterSpacing: 0,
-      height: 1.38,
-    );
-    final hand = TextStyle(
-      fontFamily: font,
-      fontFamilyFallback: fallback,
-      letterSpacing: 0.18,
-      height: 1.22,
-    );
-    return TextTheme(
-      displayLarge: hand.copyWith(
-        fontSize: 42 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      displayMedium: hand.copyWith(
-        fontSize: 34 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      displaySmall: hand.copyWith(
-        fontSize: 28 * scale,
-        fontWeight: FontWeight.w700,
-        color: primary,
-      ),
-      headlineLarge: hand.copyWith(
-        fontSize: 24 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      headlineMedium: hand.copyWith(
-        fontSize: 21 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      headlineSmall: hand.copyWith(
-        fontSize: 18 * scale,
-        fontWeight: FontWeight.w700,
-        color: primary,
-      ),
-      titleLarge: hand.copyWith(
-        fontSize: 17 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      titleMedium: hand.copyWith(
-        fontSize: 15 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      titleSmall: hand.copyWith(
-        fontSize: 14 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      bodyLarge: body.copyWith(fontSize: 14 * scale, color: primary),
-      bodyMedium: body.copyWith(fontSize: 13 * scale, color: primary),
-      bodySmall: body.copyWith(fontSize: 12 * scale, color: secondary),
-      labelLarge: hand.copyWith(
-        fontSize: 13 * scale,
-        fontWeight: FontWeight.w800,
-        color: primary,
-      ),
-      labelMedium: hand.copyWith(
-        fontSize: 12 * scale,
-        fontWeight: FontWeight.w700,
-        color: secondary,
-      ),
-      labelSmall: hand.copyWith(
-        fontSize: 11 * scale,
-        fontWeight: FontWeight.w700,
-        color: secondary,
-      ),
-    );
-  }
 }
 
-/// Custom fade+slide page transition for desktop platforms.
 class _FadeSlideTransitionBuilder extends PageTransitionsBuilder {
   const _FadeSlideTransitionBuilder();
 
@@ -550,16 +670,23 @@ class _FadeSlideTransitionBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    final media = MediaQuery.maybeOf(context);
+    final reduceMotion =
+        media != null &&
+        (media.disableAnimations || media.accessibleNavigation);
+    if (reduceMotion) return child;
+    final tokens = AppDesignTokens.of(context);
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: tokens.motionCurve,
+    );
     return FadeTransition(
-      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+      opacity: curved,
       child: SlideTransition(
-        position:
-            Tween<Offset>(
-              begin: const Offset(0.0, 0.02),
-              end: Offset.zero,
-            ).animate(
-              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-            ),
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.02),
+          end: Offset.zero,
+        ).animate(curved),
         child: child,
       ),
     );

@@ -50,4 +50,30 @@ void main() {
     ]);
     expect(graph.nodeFor('missing-node'), isNull);
   });
+
+  test('NodeGraph.fromNodes extracts implicit wikilink edges from body', () {
+    final today = DateTime(2026, 7, 24);
+    final targetNode = MindmapNode.create(
+      id: 'target-node-id',
+      type: NodeType.note,
+      title: 'Target Zettelkasten Note',
+      day: today,
+    );
+
+    final sourceNode = MindmapNode.create(
+      id: 'source-node-id',
+      type: NodeType.journal,
+      title: 'Source Daily Note',
+      body: 'Today I referenced [[Target Zettelkasten Note]] in my thoughts.',
+      day: today,
+    );
+
+    final graph = NodeGraph.fromNodes([targetNode, sourceNode]);
+
+    expect(graph.edges, hasLength(1));
+    final edge = graph.edges.first;
+    expect(edge.sourceId, 'source-node-id');
+    expect(edge.targetId, 'target-node-id');
+    expect(edge.isWikilink, isTrue);
+  });
 }

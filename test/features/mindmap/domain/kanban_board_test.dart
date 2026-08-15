@@ -39,4 +39,77 @@ void main() {
     expect(restored.cards, board.cards);
     expect(restored.cardsFor(KanbanColumn.done).single.title, 'Ship update');
   });
+
+  test('migrates legacy cards into flexible default columns', () {
+    final board = KanbanBoard.fromJson({
+      'cards': [
+        {'id': 'legacy', 'title': 'Legacy card', 'column': 'doing'},
+      ],
+    });
+
+    expect(board.columns, defaultKanbanColumns);
+    expect(board.cardById('legacy')?.columnId, kanbanInProgressColumnId);
+  });
+
+  test('per-column WIP limit blocks cross-column moves', () {
+    const board = KanbanBoard(
+      columns: [
+        KanbanColumnDefinition(id: 'backlog', title: 'Backlog', order: 0),
+        KanbanColumnDefinition(
+          id: 'doing',
+          title: 'Doing',
+          order: 1,
+          wipLimit: 1,
+        ),
+      ],
+      cards: [
+        KanbanCard(id: 'a', title: 'A', customColumnId: 'backlog'),
+        KanbanCard(id: 'b', title: 'B', customColumnId: 'doing'),
+      ],
+    );
+
+    final blocked = board.moveCard('a', 'doing', 1);
+
+    expect(blocked, board);
+    expect(blocked.canAddCardTo('doing'), isFalse);
+    expect(blocked.moveCard('b', 'doing', 0).cardById('b')?.columnId, 'doing');
+    expect(KanbanBoard.fromJson(board.toJson()).columns[1].wipLimit, 1);
+  });
+
+  test('round trips rich cards and reorders across custom columns', () {
+    final dueDate = DateTime(2026, 7, 20);
+    final board = KanbanBoard(
+      columns: const [
+        KanbanColumnDefinition(id: 'ideas', title: 'Ideas', order: 0),
+        KanbanColumnDefinition(id: 'shipping', title: 'Shipping', order: 1),
+      ],
+      cards: [
+        KanbanCard(
+          id: 'rich',
+          title: 'Rich card',
+          customColumnId: 'ideas',
+          description: 'Context',
+          priority: KanbanPriority.high,
+          dueDate: dueDate,
+          labels: const ['design'],
+          checklist: const [KanbanChecklistItem(id: 'check', title: 'Review')],
+          attachments: const [
+            KanbanAttachmentReference(
+              id: 'file',
+              fileName: 'brief.pdf',
+              mimeType: 'application/pdf',
+              byteLength: 42,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final moved = board.moveCard('rich', 'shipping', 0);
+    final restored = KanbanBoard.fromJson(moved.toJson());
+
+    expect(restored.cardById('rich')?.columnId, 'shipping');
+    expect(restored.cardById('rich')?.priority, KanbanPriority.high);
+    expect(restored.cardById('rich')?.attachments.single.fileName, 'brief.pdf');
+  });
 }

@@ -27,7 +27,7 @@ void main() {
   });
 
   test(
-    'buildDailyReviewBody summarizes completed, blocked, and open tasks',
+    'buildDailyReviewBody summarizes completed, blocked, and open tasks, ignoring next status',
     () {
       final day = DateTime(2026, 7, 2);
       final body = buildDailyReviewBody(day, [
@@ -52,6 +52,13 @@ void main() {
           title: 'Write docs',
           day: day,
         ),
+        MindmapNode.create(
+          id: 'next',
+          type: NodeType.task,
+          title: 'Triaged for future',
+          day: day,
+          status: NodeStatus.next,
+        ),
       ]);
 
       expect(body, contains('# Daily review — 2026-07-02'));
@@ -59,6 +66,7 @@ void main() {
       expect(body, contains('- Ship feature'));
       expect(body, contains('- Wait for API'));
       expect(body, contains('- Write docs'));
+      expect(body, isNot(contains('- Triaged for future')));
       expect(body, contains('## Tomorrow top 3'));
     },
   );

@@ -4,13 +4,13 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/theme/app_design_tokens.dart';
+import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
-import '../../../shared/widgets/doodle_border.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
 import '../domain/kanban_board.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/node_template.dart';
-import 'mindmap_canvas.dart';
 
 final class AddNodeDraft {
   const AddNodeDraft({
@@ -177,14 +177,25 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
     NodeType.routine =>
       'A repeatable workflow, ritual, or operating checklist.',
     NodeType.mood => 'A daily mood log with energy slider and emoji tracking.',
-    NodeType.timer => 'A focus session timer (Pomodoro) with customizable durations.',
+    NodeType.timer =>
+      'A focus session timer (Pomodoro) with customizable durations.',
     NodeType.quote => 'A quotation card with author details.',
     NodeType.audio => 'A voice memo or audio recording card.',
     NodeType.checklist => 'A checklist card with interactive checkable items.',
-    NodeType.canvas => 'A sketchpad card to draw doodles directly inside.',
+    NodeType.canvas => 'A sketchpad card for drawing directly inside.',
     NodeType.weather => 'A weather logger tracking conditions and temperature.',
     NodeType.fit => 'A fitness tracker for steps, water intake, and workouts.',
     NodeType.empty => 'A basic spacer/empty node.',
+    NodeType.itinerary =>
+      'A travel itinerary with destinations, dates, and ordered agenda items.',
+    NodeType.image =>
+      'An image reference with source, accessible alt text, and caption.',
+    NodeType.video =>
+      'A video reference with source, playback metadata, and caption.',
+    NodeType.frame =>
+      'A visual container frame to group and organize multiple nodes together.',
+    NodeType.swatch =>
+      'A color swatch and moodboard palette card for design projects.',
   };
 
   @override
@@ -256,6 +267,8 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = AppDesignTokens.of(context);
+    final typeColor = NodeVisuals.color(context, _type);
     final contentHeight = (MediaQuery.sizeOf(context).height * 0.65)
         .clamp(400.0, 600.0)
         .toDouble();
@@ -279,19 +292,16 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.all(12),
                 decoration: ShapeDecoration(
-                  color: nodeColor(_type).withValues(alpha: 0.08),
-                  shape: DoodleShapeBorder(
-                    side: BorderSide(
-                      color: nodeColor(_type).withValues(alpha: 0.3),
-                    ),
-                    radius: 10,
-                    wobble: 1.4,
+                  color: typeColor.withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(tokens.radiusElement),
+                    side: BorderSide(color: typeColor.withValues(alpha: 0.3)),
                   ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(nodeIcon(_type), color: nodeColor(_type), size: 20),
+                    Icon(NodeVisuals.icon(_type), color: typeColor, size: 20),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -332,7 +342,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Title',
                   errorText: _titleError,
                   prefixIcon: const Icon(Icons.title),
-                  border: const DoodleInputBorder(),
                 ),
                 textInputAction: TextInputAction.next,
                 onChanged: (_) {
@@ -348,7 +357,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: 'Body',
                   prefixIcon: Icon(Icons.notes),
-                  border: DoodleInputBorder(),
                   alignLabelWithHint: true,
                 ),
                 minLines: 2,
@@ -389,7 +397,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         labelText: 'Project',
                         hintText: 'Launch App',
                         prefixIcon: Icon(Icons.folder_outlined),
-                        border: DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                     ),
@@ -403,7 +410,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         labelText: 'Area',
                         hintText: 'Health, Finance',
                         prefixIcon: Icon(Icons.category_outlined),
-                        border: DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                     ),
@@ -418,7 +424,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Tags',
                   hintText: 'work, launch',
                   prefixIcon: Icon(Icons.tag),
-                  border: DoodleInputBorder(),
                 ),
                 textInputAction: TextInputAction.next,
               ),
@@ -436,7 +441,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         hintText: 'YYYY-MM-DD',
                         errorText: _dueDateError,
                         prefixIcon: const Icon(Icons.calendar_today),
-                        border: const DoodleInputBorder(),
                       ),
                       textInputAction: TextInputAction.next,
                       onChanged: (_) {
@@ -456,7 +460,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                         hintText: '0-100',
                         errorText: _progressError,
                         prefixIcon: const Icon(Icons.percent),
-                        border: const DoodleInputBorder(),
                       ),
                       keyboardType: TextInputType.number,
                       textInputAction: TextInputAction.next,
@@ -500,7 +503,6 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
                   labelText: 'Related node IDs',
                   hintText: 'node-a, node-b',
                   prefixIcon: Icon(Icons.link),
-                  border: DoodleInputBorder(),
                 ),
                 minLines: 1,
                 maxLines: 2,
@@ -616,28 +618,19 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
   }
 
   static const List<NodeType> _primaryNodeTypes = [
-    NodeType.task,
-    NodeType.kanban,
-    NodeType.plan,
     NodeType.note,
-    NodeType.journal,
-    NodeType.habit,
-    NodeType.goal,
+    NodeType.canvas,
+    NodeType.image,
+    NodeType.task,
     NodeType.link,
-    NodeType.event,
-    NodeType.decision,
-    NodeType.resource,
-    NodeType.idea,
-    NodeType.empty,
+    NodeType.kanban,
+    NodeType.frame,
+    NodeType.swatch,
   ];
 
   static const List<NodeType> _advancedNodeTypes = [
-    NodeType.question,
-    NodeType.contact,
-    NodeType.metric,
-    NodeType.expense,
-    NodeType.bookmark,
-    NodeType.routine,
+    NodeType.video,
+    NodeType.audio,
   ];
 
   ChoiceChip _typeChoiceChip(NodeType type) {
@@ -726,10 +719,11 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
     final theme = Theme.of(context);
     return DecoratedBox(
       decoration: ShapeDecoration(
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusElement,
+          ),
           side: BorderSide(color: theme.dividerColor),
-          radius: 8,
-          wobble: 1.2,
         ),
       ),
       child: Padding(
@@ -957,10 +951,11 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
     final payloadKind = _calendarKind ?? CalendarNodeKind.event;
     return DecoratedBox(
       decoration: ShapeDecoration(
-        shape: DoodleShapeBorder(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            AppDesignTokens.of(context).radiusElement,
+          ),
           side: BorderSide(color: Theme.of(context).dividerColor),
-          radius: 8,
-          wobble: 1.2,
         ),
       ),
       child: Padding(

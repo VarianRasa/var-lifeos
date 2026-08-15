@@ -28,6 +28,58 @@ void main() {
     view.resetDevicePixelRatio();
   });
 
+  testWidgets('showGlobalCommandPalette uses responsive dialog chrome', (
+    tester,
+  ) async {
+    final repository = InMemoryMindmapRepository();
+
+    Future<void> pumpAt(double width) async {
+      tester.view.physicalSize = Size(width, 844);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: FilledButton(
+                  onPressed: () => showGlobalCommandPalette(
+                    context,
+                    initialDate: DateTime(2026, 6, 18),
+                  ),
+                  child: const Text('Open command'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open command'));
+      await tester.pumpAndSettle();
+    }
+
+    await pumpAt(390);
+    expect(
+      find.byKey(const ValueKey('global-command-mobile-dialog')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('global-command-desktop-dialog')),
+      findsNothing,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await pumpAt(1200);
+    expect(
+      find.byKey(const ValueKey('global-command-desktop-dialog')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('global-command-mobile-dialog')),
+      findsNothing,
+    );
+  });
+
   testWidgets('GlobalCommandPalette searches and filters node index', (
     tester,
   ) async {
@@ -1353,7 +1405,9 @@ void main() {
           type: NodeType.task,
           title: 'Launch task',
           day: today,
-          status: NodeStatus.doing,
+          status: NodeStatus.done,
+          isDone: true,
+          progress: 1,
           priority: NodePriority.high,
           project: 'Launch App',
           area: 'Work',
@@ -1397,6 +1451,8 @@ void main() {
 
     final node = (await repository.listNodes(day: today)).single;
     expect(node.status, NodeStatus.open);
+    expect(node.isDone, isFalse);
+    expect(node.progress, 0);
     expect(node.priority, NodePriority.none);
     expect(node.project, isEmpty);
     expect(node.area, isEmpty);

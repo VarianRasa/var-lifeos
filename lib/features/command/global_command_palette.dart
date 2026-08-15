@@ -17,7 +17,12 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_design_tokens.dart';
+import '../../core/theme/node_visuals.dart';
 import '../../core/utils/date_utils.dart';
+import '../../shared/widgets/astryx_kbd.dart';
+import '../calendar/presentation/inbox_triage_dialog.dart';
 import '../mindmap/application/collaboration_controller.dart';
 import '../mindmap/application/mindmap_mutation_controller.dart';
 import '../mindmap/application/mindmap_providers.dart';
@@ -28,7 +33,10 @@ import '../mindmap/domain/node_template.dart';
 import '../mindmap/domain/recurring_routine.dart';
 import '../mindmap/domain/smart_node_view.dart';
 import '../mindmap/domain/workspace_context.dart';
-import '../mindmap/presentation/mindmap_canvas.dart';
+import '../mindmap/presentation/automation_rule_editor_dialog.dart';
+import '../search/application/search_providers.dart';
+import '../search/domain/search_query.dart';
+import '../search/presentation/search_result_tile.dart';
 import 'domain/command_date_parser.dart';
 import 'domain/command_node_query.dart';
 import 'domain/command_palette_entry.dart';
@@ -86,25 +94,38 @@ Future<void> showGlobalCommandPalette(
   BuildContext context, {
   DateTime? initialDate,
 }) {
+  final viewport = MediaQuery.sizeOf(context);
+  final isMobile = viewport.width <= LayoutConstants.mobileBreakpoint;
   return showDialog<void>(
     context: context,
+    useSafeArea: !isMobile,
     builder: (dialogContext) {
-      return AlertDialog(
+      final palette = GlobalCommandPalette(
+        initialDate: initialDate ?? DateTime.now().dateOnly,
+        onOpenNode: (node) {
+          Navigator.of(dialogContext).pop();
+          if (context.mounted) {
+            goToDay(context, node.day, highlightNodeId: node.id);
+          }
+        },
+        onJumpToDate: (date) {
+          Navigator.of(dialogContext).pop();
+          if (context.mounted) goToDay(context, date);
+        },
+      );
+      if (isMobile) {
+        return Dialog.fullscreen(
+          key: const ValueKey('global-command-mobile-dialog'),
+          child: SafeArea(
+            child: Padding(padding: const EdgeInsets.all(16), child: palette),
+          ),
+        );
+      }
+      return Dialog(
+        key: const ValueKey('global-command-desktop-dialog'),
         insetPadding: const EdgeInsets.all(20),
-        contentPadding: const EdgeInsets.all(14),
-        content: GlobalCommandPalette(
-          initialDate: initialDate ?? DateTime.now().dateOnly,
-          onOpenNode: (node) {
-            Navigator.of(dialogContext).pop();
-            if (context.mounted) {
-              goToDay(context, node.day, highlightNodeId: node.id);
-            }
-          },
-          onJumpToDate: (date) {
-            Navigator.of(dialogContext).pop();
-            if (context.mounted) goToDay(context, date);
-          },
-        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(padding: const EdgeInsets.all(14), child: palette),
       );
     },
   );
@@ -377,6 +398,10 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
     final tags = _availableTags(nodes);
     final workspaceContexts = WorkspaceContexts.fromNodes(nodes);
     final mutator = _CommandMutator.fromQuery(_query, nodes);
+    final globalResults =
+        _query.trim().isEmpty || _looksLikeCommandContext(_query)
+        ? null
+        : ref.watch(searchResultsProvider(SearchQuery(text: _query)));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -465,6 +490,40 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                   const SizedBox(height: 10),
                 ],
                 if (_query.trim().isNotEmpty) ...[
+                  if (globalResults != null) ...[
+                    globalResults.when(
+                      loading: () => const Text('Searching all content'),
+                      error: (error, stackTrace) =>
+                          const Text('Global search unavailable'),
+                      data: (results) => Column(
+                        children: [
+                          for (final result in results.take(8))
+                            SearchResultTile(
+                              result: result,
+                              onTap: () {
+                                final document = result.document;
+                                if (document.date case final date?) {
+                                  widget.onJumpToDate(date);
+                                } else if (document.boardId
+                                    case final boardId?) {
+                                  Navigator.maybeOf(context)?.pop();
+                                  final parts = document.workspaceId.split(':');
+                                  if (parts.length > 1) {
+                                    context.go(
+                                      projectCanvasLocation(
+                                        workspaceName: document.workspaceId,
+                                        boardId: boardId,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 18),
+                  ],
                   _QuickCreatePanel(
                     titleController: _createTitleController,
                     dateController: _createDateController,
@@ -634,6 +693,10 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
                       onRescheduleOverdue: _rescheduleOverdueTasks,
                       onCreateWeeklyReview: _createWeeklyReview,
                       onApplyRoutines: _applyReadyRoutinesForToday,
+                      onTriageInbox: () => showInboxTriageDialog(context),
+                      onPeriodicReview: () async => null,
+                      onManageAutomations: () =>
+                          showAutomationRuleEditorDialog(context),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -804,7 +867,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
       case CommandPaletteEntryKind.node:
         final node = entry.node!;
         _rememberCommand(
-          icon: nodeIcon(node.type),
+          icon: NodeVisuals.icon(node.type),
           title: node.title,
           subtitle: '${node.type.name} • ${dayKey(node.day)}',
         );
@@ -817,6 +880,7 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
           subtitle: link,
         );
         final messenger = ScaffoldMessenger.of(context);
+        final semantic = AppSemanticColors.of(context);
         messenger.showSnackBar(
           const SnackBar(
             content: Text('Connecting to room...'),
@@ -827,18 +891,18 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
           messenger.hideCurrentSnackBar();
           if (success) {
             messenger.showSnackBar(
-              const SnackBar(
-                content: Text('Successfully joined room!'),
-                backgroundColor: Colors.green,
+              SnackBar(
+                content: const Text('Successfully joined room!'),
+                backgroundColor: semantic.success,
               ),
             );
           } else {
             messenger.showSnackBar(
-              const SnackBar(
-                content: Text(
+              SnackBar(
+                content: const Text(
                   'Failed to join room. Check internet or platform support.',
                 ),
-                backgroundColor: Colors.redAccent,
+                backgroundColor: semantic.danger,
               ),
             );
           }
@@ -1121,12 +1185,17 @@ class _GlobalCommandPaletteState extends ConsumerState<GlobalCommandPalette> {
       _CommandMutatorType.status => node.copyWith(
         status: _statusFromCommandValue(mutator.value!) ?? node.status,
         isDone: mutator.value == NodeStatus.done.name,
-        progress: mutator.value == NodeStatus.done.name ? 1 : node.progress,
+        progress: mutator.value == NodeStatus.done.name
+            ? 1
+            : node.isDone
+            ? 0
+            : node.progress,
         updatedAt: DateTime.now(),
       ),
       _CommandMutatorType.clearStatus => node.copyWith(
         status: NodeStatus.open,
         isDone: false,
+        progress: node.isDone ? 0 : node.progress,
         updatedAt: DateTime.now(),
       ),
       _CommandMutatorType.type => node.copyWith(
@@ -1614,30 +1683,13 @@ class _CommandHintChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(
-          alpha: 0.45,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: RichText(
-          text: TextSpan(
-            style: theme.textTheme.labelSmall,
-            children: [
-              TextSpan(
-                text: label,
-                style: TextStyle(color: theme.colorScheme.primary),
-              ),
-              TextSpan(text: '  $text'),
-            ],
-          ),
-        ),
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AstryxKbd(label: label),
+        const SizedBox(width: 4),
+        Text(text, style: Theme.of(context).textTheme.labelSmall),
+      ],
     );
   }
 }
@@ -1658,10 +1710,11 @@ class _CommandSavedSearchesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = AppDesignTokens.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(tokens.radiusContainer),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -2547,6 +2600,9 @@ class _CommandPowerActionsPanel extends StatelessWidget {
     required this.onRescheduleOverdue,
     required this.onCreateWeeklyReview,
     required this.onApplyRoutines,
+    required this.onTriageInbox,
+    required this.onPeriodicReview,
+    required this.onManageAutomations,
   });
 
   final List<MindmapNode> nodes;
@@ -2555,6 +2611,9 @@ class _CommandPowerActionsPanel extends StatelessWidget {
   final Future<void> Function(List<MindmapNode> nodes) onRescheduleOverdue;
   final Future<void> Function() onCreateWeeklyReview;
   final Future<void> Function() onApplyRoutines;
+  final Future<void> Function() onTriageInbox;
+  final Future<MindmapNode?> Function() onPeriodicReview;
+  final Future<void> Function() onManageAutomations;
 
   @override
   Widget build(BuildContext context) {
@@ -2603,6 +2662,21 @@ class _CommandPowerActionsPanel extends StatelessWidget {
           avatar: const Icon(Icons.auto_awesome_motion_outlined, size: 16),
           label: const Text('Apply routines'),
           onPressed: onApplyRoutines,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.inbox_outlined, size: 16),
+          label: const Text('Triage inbox'),
+          onPressed: onTriageInbox,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.fact_check_outlined, size: 16),
+          label: const Text('Periodic review'),
+          onPressed: onPeriodicReview,
+        ),
+        ActionChip(
+          avatar: const Icon(Icons.auto_fix_high_outlined, size: 16),
+          label: const Text('Manage automations'),
+          onPressed: onManageAutomations,
         ),
       ],
     );
@@ -3309,7 +3383,7 @@ class _CommandResultTile extends StatelessWidget {
           width: isActive ? 2.0 : 1.0,
         ),
       ),
-      leading: Icon(_nodeIcon(node.type)),
+      leading: Icon(NodeVisuals.icon(node.type)),
       title: _HighlightedText(value: node.title, query: query),
       subtitle: Text(
         [
@@ -3389,7 +3463,7 @@ class _QuickCreateCommandTile extends StatelessWidget {
           width: isActive ? 2.0 : 1.0,
         ),
       ),
-      leading: Icon(_nodeIcon(command.type)),
+      leading: Icon(NodeVisuals.icon(command.type)),
       title: Text(command.label, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         [
@@ -3420,36 +3494,6 @@ class _QuickCreateCommandTile extends StatelessWidget {
     );
   }
 }
-
-IconData _nodeIcon(NodeType type) => switch (type) {
-  NodeType.task => Icons.check_circle_outline,
-  NodeType.kanban => Icons.view_kanban_outlined,
-  NodeType.plan => Icons.route_outlined,
-  NodeType.note => Icons.notes_outlined,
-  NodeType.journal => Icons.book_outlined,
-  NodeType.habit => Icons.repeat_outlined,
-  NodeType.goal => Icons.flag_outlined,
-  NodeType.link => Icons.link_outlined,
-  NodeType.event => Icons.event_outlined,
-  NodeType.decision => Icons.rule_outlined,
-  NodeType.resource => Icons.inventory_2_outlined,
-  NodeType.idea => Icons.lightbulb_outline,
-  NodeType.question => Icons.help_outline,
-  NodeType.contact => Icons.person_outline,
-  NodeType.metric => Icons.query_stats_outlined,
-  NodeType.expense => Icons.payments_outlined,
-  NodeType.bookmark => Icons.bookmark_border,
-  NodeType.routine => Icons.repeat_on_outlined,
-  NodeType.mood => Icons.mood,
-  NodeType.timer => Icons.timer_outlined,
-  NodeType.quote => Icons.format_quote_outlined,
-  NodeType.audio => Icons.mic_none_outlined,
-  NodeType.checklist => Icons.checklist_rtl_outlined,
-  NodeType.canvas => Icons.gesture_outlined,
-  NodeType.weather => Icons.wb_sunny_outlined,
-  NodeType.fit => Icons.directions_run_outlined,
-  NodeType.empty => Icons.crop_square_outlined,
-};
 
 String _smartViewChipLabel(SmartNodeView view) {
   final label = switch (view.type) {

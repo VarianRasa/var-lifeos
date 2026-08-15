@@ -174,6 +174,48 @@ List<TimeBlockConflict> detectTimeBlockConflicts(
   return List.unmodifiable(conflicts);
 }
 
+/// Shifts overlapping time blocks to resolve scheduling conflicts automatically.
+/// Returns a map of node IDs to their newly assigned [TimeBlock].
+Map<String, TimeBlock> autoResolveConflicts(List<DayTimeBlock> blocks) {
+  final activeBlocks = blocks.where((b) => !b.isDone).toList()
+    ..sort((a, b) => a.block.startMinute.compareTo(b.block.startMinute));
+
+  if (activeBlocks.isEmpty) return const {};
+
+  final resolved = <String, TimeBlock>{};
+  final occupiedWindows = <TimeBlock>[];
+
+  for (final item in activeBlocks) {
+    var currentStart = item.block.startMinute;
+    final duration = item.block.durationMinutes;
+
+    while (true) {
+      final currentEnd = currentStart + duration;
+      if (currentEnd > 1440) break;
+
+      final overlappingIndex = occupiedWindows.indexWhere(
+        (w) => currentStart < w.endMinute && currentEnd > w.startMinute,
+      );
+
+      if (overlappingIndex == -1) {
+        final newBlock = TimeBlock(
+          startMinute: currentStart,
+          endMinute: currentEnd,
+        );
+        occupiedWindows.add(newBlock);
+        if (currentStart != item.block.startMinute) {
+          resolved[item.id] = newBlock;
+        }
+        break;
+      } else {
+        currentStart = occupiedWindows[overlappingIndex].endMinute;
+      }
+    }
+  }
+
+  return resolved;
+}
+
 String formatTimeOfDay(int minuteOfDay) {
   var clamped = minuteOfDay;
   if (clamped < 0) clamped = 0;

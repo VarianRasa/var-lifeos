@@ -1,6 +1,7 @@
 /// Habit consistency and routine marker insights.
 library;
 
+import 'dart:math' as math;
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../mindmap/domain/automation_event.dart';
@@ -16,6 +17,7 @@ final class HabitStreak {
     required this.currentStreak,
     required this.longestStreak,
     required this.isAtRisk,
+    this.strengthScore = 0.0,
   });
 
   final String nodeId;
@@ -23,6 +25,7 @@ final class HabitStreak {
   final int currentStreak;
   final int longestStreak;
   final bool isAtRisk;
+  final double strengthScore;
 }
 
 final class HabitInsightSummary {
@@ -35,6 +38,7 @@ final class HabitInsightSummary {
     required this.streaks,
     required this.mostConsistentHabit,
     required this.streakAtRisk,
+    this.aggregateStrengthScore = 0.0,
   });
 
   final int habitCount;
@@ -45,6 +49,7 @@ final class HabitInsightSummary {
   final List<HabitStreak> streaks;
   final HabitStreak? mostConsistentHabit;
   final HabitStreak? streakAtRisk;
+  final double aggregateStrengthScore;
 }
 
 final class RoutineInsightSummary {
@@ -107,21 +112,28 @@ HabitInsightSummary buildHabitInsightSummary({
     for (final node in nodes)
       if (!node.isArchived &&
           node.type == NodeType.habit &&
-          _isInRange(node.day, normalizedStart, normalizedEnd))
+          !node.day.dateOnly.isAfter(normalizedEnd))
         node,
   ];
-  final windowKeys = _windowKeys(normalizedStart, normalizedEnd);
   var completedCount = 0;
+  var expectedCount = 0;
   final missedHabits = <MindmapNode>[];
   final streaks = <HabitStreak>[];
 
   for (final node in habitNodes) {
     final completions = habitCompletionKeys(node).toSet();
-    final inWindowCount = completions.where(windowKeys.contains).length;
+    final opportunityKeys = _habitOpportunityKeys(
+      node,
+      normalizedStart,
+      normalizedEnd,
+    );
+    final inWindowCount = completions.where(opportunityKeys.contains).length;
     completedCount += inWindowCount;
-    if (inWindowCount == 0 || !completions.contains(dayKey(normalizedToday))) {
+    expectedCount += opportunityKeys.length;
+    if (opportunityKeys.any((key) => !completions.contains(key))) {
       missedHabits.add(node);
     }
+    final strength = calculateHabitStrength(node, normalizedToday);
     streaks.add(
       HabitStreak(
         nodeId: node.id,
@@ -129,6 +141,7 @@ HabitInsightSummary buildHabitInsightSummary({
         currentStreak: _currentStreakFor(node, normalizedToday),
         longestStreak: calculateMaxStreak(node),
         isAtRisk: _isHabitAtRisk(node, normalizedToday),
+        strengthScore: strength,
       ),
     );
   }
@@ -140,7 +153,6 @@ HabitInsightSummary buildHabitInsightSummary({
   });
   missedHabits.sort((a, b) => a.title.compareTo(b.title));
 
-  final expectedCount = habitNodes.length * windowKeys.length;
   final risky =
       [
         for (final streak in streaks)
@@ -151,6 +163,11 @@ HabitInsightSummary buildHabitInsightSummary({
         return a.title.compareTo(b.title);
       });
 
+  final avgStrength = streaks.isEmpty
+      ? 0.0
+      : streaks.map((s) => s.strengthScore).reduce((a, b) => a + b) /
+            streaks.length;
+
   return HabitInsightSummary(
     habitCount: habitNodes.length,
     completionRate: expectedCount == 0 ? 0 : completedCount / expectedCount,
@@ -160,6 +177,7 @@ HabitInsightSummary buildHabitInsightSummary({
     streaks: List.unmodifiable(streaks),
     mostConsistentHabit: streaks.isEmpty ? null : streaks.first,
     streakAtRisk: risky.isEmpty ? null : risky.first,
+    aggregateStrengthScore: double.parse(avgStrength.toStringAsFixed(1)),
   );
 }
 
@@ -214,6 +232,31 @@ RoutineInsightSummary buildRoutineInsightSummary({
   );
 }
 
+/// Calculates Habit Strength Score [0.0 - 100.0] using exponential decay.
+/// Half-life of habit completion weight is ~14 days (lambda = 0.05).
+double calculateHabitStrength(MindmapNode node, DateTime today) {
+  final keys = habitCompletionKeys(node);
+  if (keys.isEmpty) return 0.0;
+
+  final normalizedToday = today.dateOnly;
+  double rawScore = 0.0;
+  const lambda = 0.05;
+
+  for (final key in keys) {
+    final completionDate = DateTime.tryParse(key)?.dateOnly;
+    if (completionDate == null || completionDate.isAfter(normalizedToday)) {
+      continue;
+    }
+    final daysAgo = normalizedToday.difference(completionDate).inDays;
+    // Base weight per completion is 20, decayed exponentially over daysAgo
+    final weight = 20.0 * math.exp(-lambda * daysAgo);
+    rawScore += weight;
+  }
+
+  final score = rawScore.clamp(0.0, 100.0);
+  return double.parse(score.toStringAsFixed(1));
+}
+
 bool _isHabitAtRisk(MindmapNode node, DateTime today) {
   final keys = habitCompletionKeys(node).toSet();
   if (keys.isEmpty) return true;
@@ -232,9 +275,30 @@ int _currentStreakFor(MindmapNode node, DateTime today) {
   return streak;
 }
 
-Set<String> _windowKeys(DateTime start, DateTime end) {
+Set<String> _habitOpportunityKeys(
+  MindmapNode node,
+  DateTime start,
+  DateTime end,
+) {
+  final effectiveStart = node.day.dateOnly.isAfter(start)
+      ? node.day.dateOnly
+      : start;
+  final recurrence = _stringValue(
+    _sectionData(node.data, 'habit')['recurrence'],
+  );
   return {
-    for (var day = start; !day.isAfter(end); day = day.addDays(1)) dayKey(day),
+    for (var day = effectiveStart; !day.isAfter(end); day = day.addDays(1))
+      if (_habitIsDueOn(day, node.day.dateOnly, recurrence ?? 'daily'))
+        dayKey(day),
+  };
+}
+
+bool _habitIsDueOn(DateTime day, DateTime startedOn, String recurrence) {
+  return switch (recurrence) {
+    'weekdays' => day.weekday <= DateTime.friday,
+    'weekly' => day.weekday == startedOn.weekday,
+    'monthly' => day.day == startedOn.day,
+    _ => true,
   };
 }
 
