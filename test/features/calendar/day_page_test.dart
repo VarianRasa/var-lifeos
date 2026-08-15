@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
@@ -12,7 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:var_app/core/constants/app_constants.dart';
-import 'package:var_app/features/calendar/application/node_inbox.dart';
 import 'package:var_app/features/calendar/day_page.dart';
 import 'package:var_app/features/mindmap/application/inline_node_workspace_controller.dart';
 import 'package:var_app/features/mindmap/application/media_file_import_service.dart';
@@ -21,8 +19,6 @@ import 'package:var_app/features/mindmap/data/canvas_board_repositories.dart';
 import 'package:var_app/features/mindmap/data/in_memory_mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/canvas_board.dart';
 import 'package:var_app/features/mindmap/domain/canvas_position.dart';
-import 'package:var_app/features/mindmap/domain/custom_node_template_codec.dart';
-import 'package:var_app/features/mindmap/domain/inline_node_workspace_policy.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_node.dart';
 import 'package:var_app/features/mindmap/domain/mindmap_repository.dart';
 import 'package:var_app/features/mindmap/domain/node_attachment.dart';
@@ -649,44 +645,6 @@ void main() {
     expect(find.text('Save draft before continuing'), findsOneWidget);
   });
 
-  testWidgets('DayPage Pulse navigation keeps invalid draft and sheet', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final day = DateTime(2026, 7, 15);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [_testNode('pulse-invalid', day)],
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Pulse').first);
-    await tester.pumpAndSettle();
-
-    final container = ProviderScope.containerOf(
-      tester.element(find.byType(DayPage)),
-    );
-    final controller = container.read(
-      inlineNodeWorkspaceControllerProvider.notifier,
-    );
-    await controller.requestExpansion('pulse-invalid');
-    controller.updateDraft('pulse-invalid', InlineNodeDraftPatch(title: '   '));
-    await tester.tap(find.text('Thu').last);
-    await tester.pumpAndSettle();
-
-    expect(find.text('7-day pulse'), findsOneWidget);
-    expect((await repository.getNode('pulse-invalid'))!.title, 'pulse-invalid');
-    expect(find.text('Save draft before continuing'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
   testWidgets('DayPage opens Life Explorer as sheet on compact canvas', (
     tester,
   ) async {
@@ -779,6 +737,54 @@ void main() {
     final nodes = await repository.listNodes(day: day);
     expect(nodes.single.type, NodeType.kanban);
   });
+
+  testWidgets(
+    'DayPage hides status bar and auto time-blocks from canvas menu',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final day = DateTime(2026, 8, 13);
+      final repository = InMemoryMindmapRepository(
+        seedNodes: [
+          MindmapNode.create(
+            id: 'time-block-task',
+            type: NodeType.task,
+            title: 'Schedule me',
+            day: day,
+            now: day,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(home: DayPage(date: day)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Board '), findsNothing);
+      expect(find.text('Pulse'), findsNothing);
+      expect(find.text('Focus only'), findsNothing);
+      expect(find.text('Plan'), findsNothing);
+      expect(find.text('Capture'), findsNothing);
+      expect(find.text('Auto Time-Block'), findsNothing);
+
+      await tester.tap(find.byTooltip('Show canvas controls'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Auto layout'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Auto Time-Block'));
+      await tester.pumpAndSettle();
+
+      final saved = (await repository.getNode('time-block-task'))!;
+      expect(saved.data['time_block'], isA<Map<String, Object?>>());
+    },
+  );
 
   testWidgets('DayPage table project edit does not reuse disposed controller', (
     tester,
@@ -1010,348 +1016,6 @@ void main() {
       expect(nodes.first.title, 'random loose thought');
     },
   );
-
-  testWidgets('DayPage applies day template from smart plan', (tester) async {
-    final day = DateTime(2026, 6, 18);
-    final repository = InMemoryMindmapRepository(seedNodes: const []);
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Apply template'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Personal reset'));
-    await tester.pumpAndSettle();
-
-    final nodes = await repository.listNodes(day: day);
-    expect(nodes, hasLength(3));
-    expect(nodes.every((node) => node.tags.contains('template')), isTrue);
-    expect(
-      nodes.every((node) => node.data['dayTemplateId'] == 'personal-reset'),
-      isTrue,
-    );
-  });
-
-  testWidgets('DayPage selects custom template', (tester) async {
-    final day = DateTime(2026, 6, 18);
-    final repository = InMemoryMindmapRepository(seedNodes: const []);
-    await SharedPreferencesAsync().setString(
-      customNodeTemplatesPreferenceKey,
-      jsonEncode([
-        {
-          'id': 'custom-focus',
-          'label': 'Custom focus',
-          'type': 'task',
-          'title': 'Focus task',
-          'priority': 'high',
-          'tags': ['focus'],
-        },
-      ]),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Apply template'));
-    await tester.pumpAndSettle();
-    final customTemplate = find.byKey(
-      const ValueKey('day-custom-template-custom-focus'),
-    );
-    await tester.scrollUntilVisible(
-      customTemplate,
-      200,
-      scrollable: find.byType(Scrollable).last,
-    );
-    await tester.tap(customTemplate);
-    await tester.pumpAndSettle();
-
-    final node = (await repository.listNodes(day: day)).single;
-    expect(node.title, 'Focus task');
-    expect(node.type, NodeType.task);
-    expect(node.priority, NodePriority.high);
-    expect(node.tags, contains('focus'));
-  });
-
-  testWidgets('DayPage disables already applied template', (tester) async {
-    final day = DateTime(2026, 6, 18);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'template-marker',
-          type: NodeType.task,
-          title: 'Template marker',
-          day: day,
-          tags: const ['template'],
-          data: const {'dayTemplateId': 'workday'},
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Apply template'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Already applied'), findsOneWidget);
-    final before = await repository.listNodes(day: day);
-    await tester.tap(find.text('Workday'));
-    await tester.pumpAndSettle();
-    final after = await repository.listNodes(day: day);
-    expect(after, hasLength(before.length));
-  });
-
-  testWidgets('DayPage carry-over sheet moves unfinished prior task', (
-    tester,
-  ) async {
-    final day = DateTime(2026, 6, 18);
-    final yesterday = DateTime(2026, 6, 17);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'old-task',
-          type: NodeType.task,
-          title: 'Old task',
-          day: yesterday,
-          dueDate: yesterday,
-          now: DateTime(2026, 6, 17, 9),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Carry over 1 items'), findsOneWidget);
-
-    await tester.tap(find.text('Carry over 1 items'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Carry-over assistant'), findsOneWidget);
-    expect(find.text('Old task'), findsWidgets);
-
-    await tester.tap(find.byTooltip('Move to day'));
-    await tester.pumpAndSettle();
-
-    final moved = (await repository.listNodes(day: day)).single;
-    expect(moved.id, 'old-task');
-    expect(moved.day, day);
-    expect(moved.dueDate, day);
-    expect(await repository.listNodes(day: yesterday), isEmpty);
-  });
-
-  testWidgets('DayPage creates tomorrow top tasks from daily review', (
-    tester,
-  ) async {
-    final day = DateTime(2026, 6, 18);
-    final tomorrow = DateTime(2026, 6, 19);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'review',
-          type: NodeType.journal,
-          title: 'Daily review ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 2026-06-18',
-          day: day,
-          body: '''
-## Tomorrow top 3
-- Write docs
-- Fix sync
-- Plan launch
-''',
-          tags: const ['daily-review'],
-          now: DateTime(2026, 6, 18, 18),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Create tomorrow top 3'), findsOneWidget);
-
-    await tester.tap(find.text('Create tomorrow top 3'));
-    await tester.pumpAndSettle();
-
-    final tomorrowNodes = await repository.listNodes(day: tomorrow);
-    expect(tomorrowNodes.map((node) => node.title), [
-      'Write docs',
-      'Fix sync',
-      'Plan launch',
-    ]);
-    expect(tomorrowNodes.first.priority, NodePriority.high);
-    expect(tomorrowNodes.skip(1).map((node) => node.priority), [
-      NodePriority.medium,
-      NodePriority.medium,
-    ]);
-    expect(
-      tomorrowNodes.every((node) => node.relatedNodeIds.contains('review')),
-      isTrue,
-    );
-  });
-
-  testWidgets('DayPage skips existing tomorrow top tasks', (tester) async {
-    final day = DateTime(2026, 6, 18);
-    final tomorrow = DateTime(2026, 6, 19);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'review',
-          type: NodeType.journal,
-          title: 'Daily review ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 2026-06-18',
-          day: day,
-          body: '''
-## Tomorrow top 3
-- Write docs
-- Fix sync
-''',
-          tags: const ['daily-review'],
-          now: DateTime(2026, 6, 18, 18),
-        ),
-        MindmapNode.create(
-          id: 'existing',
-          type: NodeType.task,
-          title: 'Write docs',
-          day: tomorrow,
-          tags: const ['tomorrow-top-3'],
-          now: DateTime(2026, 6, 18, 19),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Create tomorrow top 2'));
-    await tester.pumpAndSettle();
-
-    final tomorrowNodes = await repository.listNodes(day: tomorrow);
-    expect(
-      tomorrowNodes.where((node) => node.title == 'Write docs'),
-      hasLength(1),
-    );
-    expect(
-      tomorrowNodes.where((node) => node.title == 'Fix sync'),
-      hasLength(1),
-    );
-  });
-
-  testWidgets('DayPage inbox sheet assigns loose capture to today', (
-    tester,
-  ) async {
-    final day = DateTime(2026, 6, 18);
-    final yesterday = DateTime(2026, 6, 17);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'capture',
-          type: NodeType.note,
-          title: 'Loose capture',
-          day: yesterday,
-          data: const {inboxNodeDataKey: true},
-          now: DateTime(2026, 6, 17, 8),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Inbox 1'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Loose capture'), findsOneWidget);
-    await tester.tap(find.byTooltip('Assign today'));
-    await tester.pumpAndSettle();
-
-    final assigned = (await repository.listNodes(day: day)).single;
-    expect(assigned.id, 'capture');
-    expect(isInboxNode(assigned), isFalse);
-    expect(
-      assigned.data[inboxAssignedFromDataKey],
-      yesterday.toIso8601String(),
-    );
-  });
-
-  testWidgets('DayPage inbox sheet archives loose capture', (tester) async {
-    final day = DateTime(2026, 6, 18);
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'capture',
-          type: NodeType.note,
-          title: 'Loose capture',
-          day: day,
-          data: const {inboxNodeDataKey: true},
-          now: DateTime(2026, 6, 18, 8),
-        ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Inbox 1'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Archive'));
-    await tester.pumpAndSettle();
-
-    final archived = (await repository.listNodes()).single;
-    expect(archived.id, 'capture');
-    expect(archived.isArchived, isTrue);
-  });
 
   testWidgets('DayPage activity log shows recent created node', (tester) async {
     final day = DateTime(2026, 6, 18);
@@ -1791,45 +1455,6 @@ void main() {
     saved = (await repository.getNode('context-latest'))!;
     expect(saved.title, 'Edited before context action');
     expect(saved.isArchived, isTrue);
-  });
-
-  testWidgets('DayPage duplicate clones latest inline draft fields', (
-    tester,
-  ) async {
-    final day = DateTime(2026, 6, 18);
-    final priorDay = day.subtract(const Duration(days: 1));
-    final repository = InMemoryMindmapRepository(
-      seedNodes: [
-        MindmapNode.create(
-          id: 'duplicate-latest',
-          type: NodeType.task,
-          title: 'duplicate-latest',
-          day: priorDay,
-          dueDate: priorDay,
-          now: priorDay,
-        ),
-      ],
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [mindmapRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(home: DayPage(date: day)),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Plan'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Carry over 1 items'));
-    await tester.pumpAndSettle();
-    final latest = (await repository.getNode(
-      'duplicate-latest',
-    ))!.copyWith(title: 'Edited before duplicate');
-    await repository.saveNode(latest);
-    await tester.tap(find.byTooltip('Duplicate to day'));
-    await tester.pumpAndSettle();
-
-    final duplicated = (await repository.listNodes(day: day)).single;
-    expect(duplicated.title, 'Edited before duplicate');
   });
 
   testWidgets(

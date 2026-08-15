@@ -5,7 +5,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../life_os/application/user_gamification_providers.dart';
 import '../application/mindmap_mutation_controller.dart';
 import '../domain/mindmap_node.dart';
 import '../domain/spaced_repetition.dart';
@@ -75,7 +74,6 @@ class _FlashcardReviewDialogState extends ConsumerState<FlashcardReviewDialog>
     final updatedNode = updateFlashcardState(currentCard, nextState);
 
     await ref.read(mindmapMutationControllerProvider).saveNode(updatedNode);
-    await ref.read(userGamificationProvider.notifier).recordFlashcardReview();
 
     setState(() {
       _reviewedCount++;

@@ -15,6 +15,7 @@ import 'package:var_app/features/mindmap/application/mindmap_providers.dart';
 import 'package:var_app/features/mindmap/application/node_inline_edit_controller.dart';
 import 'package:var_app/features/mindmap/domain/canvas_board.dart';
 import 'package:var_app/features/mindmap/domain/canvas_position.dart';
+import 'package:var_app/features/mindmap/domain/connection_style.dart';
 import 'package:var_app/features/mindmap/domain/hybrid_timer.dart';
 import 'package:var_app/features/mindmap/domain/inline_node_workspace_policy.dart';
 import 'package:var_app/features/mindmap/domain/kanban_board.dart';
@@ -26,6 +27,7 @@ import 'package:var_app/features/mindmap/domain/node_ui_state_codec.dart';
 import 'package:var_app/features/mindmap/presentation/inline_node_workspace.dart';
 import 'package:var_app/features/mindmap/presentation/mindmap_canvas.dart';
 import 'package:var_app/features/mindmap/presentation/node_shell.dart';
+import 'package:var_app/features/mindmap/presentation/widgets/connection_style_bar.dart';
 
 Future<void> settleCanvas(WidgetTester tester) async {
   await tester.pumpAndSettle();
@@ -83,6 +85,46 @@ void main() {
       tester.getSize(find.byKey(const ValueKey('mindmap-node-kanban'))),
       Size(policy.width, policy.height),
     );
+  });
+
+  testWidgets('canvas auto layout menu exposes auto time-block action', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1920, 1080));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var autoTimeBlockRequested = false;
+    final day = DateTime(2026, 8, 13);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MindmapCanvas(
+            nodes: [
+              MindmapNode.create(
+                id: 'auto-time-block-task',
+                type: NodeType.task,
+                title: 'Schedule me',
+                day: day,
+                now: day,
+              ),
+            ],
+            onAutoTimeBlockRequested: () => autoTimeBlockRequested = true,
+          ),
+        ),
+      ),
+    );
+    await settleCanvas(tester);
+
+    await tester.tap(find.byTooltip('Show canvas controls'));
+    await settleCanvas(tester);
+    await tester.tap(find.byTooltip('Auto layout'));
+    await settleCanvas(tester);
+
+    expect(find.text('Auto Time-Block'), findsOneWidget);
+    await tester.tap(find.text('Auto Time-Block'));
+    await settleCanvas(tester);
+
+    expect(autoTimeBlockRequested, isTrue);
   });
 
   testWidgets('bookmark fields keep focus and autosave one merged node', (
@@ -3488,6 +3530,57 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     expect(viewer.panEnabled, isFalse);
   });
 
+  testWidgets('MindmapCanvas zooms at pointer with Ctrl and mouse wheel', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: MindmapCanvas(nodes: [])),
+      ),
+    );
+    await settleCanvas(tester);
+
+    final canvas = find.byKey(const ValueKey('mindmap-canvas'));
+    final controller = tester
+        .widget<InteractiveViewer>(canvas)
+        .transformationController!;
+    final pointer = tester.getCenter(canvas);
+    final beforeScale = controller.value.getMaxScaleOnAxis();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendEventToBinding(
+      PointerScrollEvent(position: pointer, scrollDelta: const Offset(0, -120)),
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(controller.value.getMaxScaleOnAxis(), greaterThan(beforeScale));
+  });
+
+  testWidgets('MindmapCanvas handles web Ctrl wheel scale events', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: MindmapCanvas(nodes: [])),
+      ),
+    );
+    await settleCanvas(tester);
+
+    final canvas = find.byKey(const ValueKey('mindmap-canvas'));
+    final controller = tester
+        .widget<InteractiveViewer>(canvas)
+        .transformationController!;
+    final beforeScale = controller.value.getMaxScaleOnAxis();
+
+    await tester.sendEventToBinding(
+      PointerScaleEvent(position: tester.getCenter(canvas), scale: 1.2),
+    );
+    await tester.pump();
+
+    expect(controller.value.getMaxScaleOnAxis(), greaterThan(beforeScale));
+  });
+
   testWidgets('zoom controls preserve scene point at canvas viewport center', (
     tester,
   ) async {
@@ -5199,6 +5292,94 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     },
   );
 
+  testWidgets(
+    'MindmapCanvas selects and updates connection line style and stroke pattern',
+    (tester) async {
+      final day = DateTime(2026, 6, 18);
+      final source = MindmapNode.create(
+        id: 'style-source',
+        type: NodeType.task,
+        title: 'Source',
+        day: day,
+        position: const CanvasPosition(-180, 0),
+        relatedNodeIds: const ['style-target'],
+        now: day,
+      );
+      final target = MindmapNode.create(
+        id: 'style-target',
+        type: NodeType.note,
+        title: 'Target',
+        day: day,
+        position: const CanvasPosition(180, 0),
+        now: day,
+      );
+      MindmapNode? updated;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MindmapCanvas(
+              nodes: [source, target],
+              onNodeUpdated: (node) => updated = node,
+            ),
+          ),
+        ),
+      );
+      await settleCanvas(tester);
+
+      final line = find.byKey(
+        const ValueKey('mindmap-connection-line-style-source-style-target'),
+      );
+      tester.widget<GestureDetector>(line).onTap!();
+      await settleCanvas(tester);
+
+      expect(find.byType(ConnectionStyleBar), findsOneWidget);
+
+      // Trigger Line Style change on PopupMenuButton
+      final lineTypeBtn = tester.widget<PopupMenuButton<ConnectionLineType>>(
+        find.byWidgetPredicate((w) => w is PopupMenuButton<ConnectionLineType>),
+      );
+      lineTypeBtn.onSelected!(ConnectionLineType.straight);
+      await settleCanvas(tester);
+
+      final stylesMap1 = updated?.data['connection_styles'] as Map?;
+      final targetStyleMap1 = stylesMap1?['style-target'] as Map?;
+      expect(targetStyleMap1?['lineType'], 'straight');
+
+      // Re-pump with updated node to verify persistent state in bar UI
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MindmapCanvas(
+              nodes: [updated!, target],
+              onNodeUpdated: (node) => updated = node,
+            ),
+          ),
+        ),
+      );
+      await settleCanvas(tester);
+
+      // Re-select connection
+      tester.widget<GestureDetector>(line).onTap!();
+      await settleCanvas(tester);
+
+      // Trigger Stroke Pattern change on PopupMenuButton
+      final linePatternBtn = tester
+          .widget<PopupMenuButton<ConnectionLinePattern>>(
+            find.byWidgetPredicate(
+              (w) => w is PopupMenuButton<ConnectionLinePattern>,
+            ),
+          );
+      linePatternBtn.onSelected!(ConnectionLinePattern.dashed);
+      await settleCanvas(tester);
+
+      final stylesMap2 = updated?.data['connection_styles'] as Map?;
+      final targetStyleMap2 = stylesMap2?['style-target'] as Map?;
+      expect(targetStyleMap2?['lineType'], 'straight');
+      expect(targetStyleMap2?['linePattern'], 'dashed');
+    },
+  );
+
   testWidgets('MindmapCanvas selects and labels a connection', (tester) async {
     final day = DateTime(2026, 6, 18);
     final source = MindmapNode.create(
@@ -5292,10 +5473,6 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
     );
     tester.widget<GestureDetector>(line).onTap!();
     await tester.pump();
-    final selectedLine = tester.widget<AnimatedContainer>(
-      find.descendant(of: line, matching: find.byType(AnimatedContainer)),
-    );
-    expect(selectedLine.constraints?.minHeight, 6);
 
     final label = find.byKey(
       const ValueKey('mindmap-connection-menu-source-menu-target'),
@@ -5352,34 +5529,12 @@ Baris penutup tetap harus terlihat penuh di mode collapse.''',
       );
       tester.widget<GestureDetector>(line).onTap!();
       await tester.pump();
-      expect(
-        tester
-            .widget<AnimatedContainer>(
-              find.descendant(
-                of: line,
-                matching: find.byType(AnimatedContainer),
-              ),
-            )
-            .constraints
-            ?.minHeight,
-        6,
-      );
+      expect(find.byType(ConnectionStyleBar), findsOneWidget);
 
       await tester.tapAt(const Offset(20, 20));
       await tester.pump();
 
-      expect(
-        tester
-            .widget<AnimatedContainer>(
-              find.descendant(
-                of: line,
-                matching: find.byType(AnimatedContainer),
-              ),
-            )
-            .constraints
-            ?.minHeight,
-        2,
-      );
+      expect(find.byType(ConnectionStyleBar), findsNothing);
     },
   );
 

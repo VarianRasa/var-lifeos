@@ -190,8 +190,6 @@ const _primaryRoutes = <AppRoute>[
   AppRoute.calendar,
   AppRoute.search,
   AppRoute.focus,
-  AppRoute.goalsHabits,
-  AppRoute.notesJournal,
   AppRoute.workspaces,
 ];
 
@@ -334,8 +332,6 @@ AppRoute _routeFromLocation(String location) {
   if (location.startsWith('/calendar')) return AppRoute.calendar;
   if (location.startsWith('/search')) return AppRoute.search;
   if (location.startsWith('/focus')) return AppRoute.focus;
-  if (location.startsWith('/goals-habits')) return AppRoute.goalsHabits;
-  if (location.startsWith('/notes-journal')) return AppRoute.notesJournal;
   if (location.startsWith('/workspaces')) return AppRoute.workspaces;
   if (location.startsWith('/insights')) return AppRoute.insights;
   if (location.startsWith('/graph')) return AppRoute.graph;

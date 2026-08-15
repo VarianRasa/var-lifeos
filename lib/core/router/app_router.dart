@@ -14,8 +14,6 @@ import '../../features/calendar/day_page.dart';
 import '../../features/focus/focus_page.dart';
 import '../../features/graph/graph_page.dart';
 import '../../features/insights/insights_page.dart';
-import '../../features/life_os/goals_habits_page.dart';
-import '../../features/life_os/notes_journal_page.dart';
 import '../../features/mindmap/presentation/collab_page.dart';
 import '../../features/mindmap/presentation/node_detail_page.dart';
 import '../../features/search/presentation/search_page.dart';
@@ -102,18 +100,6 @@ GoRouter createAppRouter({String? initialLocation}) {
             name: AppRoute.focus.name,
             redirect: (context, state) =>
                 _legacyPanelLocation(state, AppRoute.focus, todayStr),
-          ),
-          GoRoute(
-            path: '/goals-habits',
-            name: AppRoute.goalsHabits.name,
-            redirect: (context, state) =>
-                _legacyPanelLocation(state, AppRoute.goalsHabits, todayStr),
-          ),
-          GoRoute(
-            path: '/notes-journal',
-            name: AppRoute.notesJournal.name,
-            redirect: (context, state) =>
-                _legacyPanelLocation(state, AppRoute.notesJournal, todayStr),
           ),
           GoRoute(
             path: '/insights',
@@ -407,8 +393,6 @@ class _ResizableRoutePanelState extends State<_ResizableRoutePanel>
     AppRoute.calendar => const CalendarPage(),
     AppRoute.search => const SearchPage(),
     AppRoute.focus => const FocusPage(),
-    AppRoute.goalsHabits => const GoalsHabitsPage(),
-    AppRoute.notesJournal => const NotesJournalPage(),
     AppRoute.workspaces => const WorkspacesPage(),
     AppRoute.insights => const InsightsPage(),
     AppRoute.graph => const GraphPage(),
@@ -488,8 +472,6 @@ enum AppRoute {
   calendar,
   search,
   focus,
-  goalsHabits,
-  notesJournal,
   workspaces,
   insights,
   graph,
@@ -500,8 +482,6 @@ enum AppRoute {
     AppRoute.calendar => '/calendar',
     AppRoute.search => '/search',
     AppRoute.focus => '/focus',
-    AppRoute.goalsHabits => '/goals-habits',
-    AppRoute.notesJournal => '/notes-journal',
     AppRoute.workspaces => '/workspaces',
     AppRoute.insights => '/insights',
     AppRoute.graph => '/graph',
@@ -520,8 +500,6 @@ enum AppRoute {
     AppRoute.calendar => Icons.calendar_month_outlined,
     AppRoute.search => Icons.search_outlined,
     AppRoute.focus => Icons.timer_outlined,
-    AppRoute.goalsHabits => Icons.track_changes_outlined,
-    AppRoute.notesJournal => Icons.auto_stories_outlined,
     AppRoute.workspaces => Icons.workspaces_outline,
     AppRoute.insights => Icons.insights_outlined,
     AppRoute.graph => Icons.account_tree_outlined,
@@ -533,8 +511,6 @@ enum AppRoute {
     AppRoute.calendar => Icons.calendar_month_rounded,
     AppRoute.search => Icons.search_rounded,
     AppRoute.focus => Icons.timer_rounded,
-    AppRoute.goalsHabits => Icons.track_changes_rounded,
-    AppRoute.notesJournal => Icons.auto_stories_rounded,
     AppRoute.workspaces => Icons.workspaces,
     AppRoute.insights => Icons.insights_rounded,
     AppRoute.graph => Icons.account_tree,
@@ -546,8 +522,6 @@ enum AppRoute {
     AppRoute.calendar => 'Calendar',
     AppRoute.search => 'Search',
     AppRoute.focus => 'Focus',
-    AppRoute.goalsHabits => 'Goals & Habits',
-    AppRoute.notesJournal => 'Notes & Journal',
     AppRoute.workspaces => 'Workspaces',
     AppRoute.insights => 'Insights',
     AppRoute.graph => 'Graph',

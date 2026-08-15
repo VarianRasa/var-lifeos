@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -27,7 +28,6 @@ import '../../../core/theme/node_visuals.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../calendar/domain/calendar_node_payload.dart';
 import '../application/canvas_file_drop_handler.dart';
-import '../application/canvas_file_drop_reader.dart';
 import '../application/collaboration_controller.dart';
 import '../application/mindmap_providers.dart';
 import '../application/node_inline_edit_controller.dart';
@@ -38,6 +38,7 @@ import '../data/canvas_export_stub.dart'
 import '../domain/canvas_board.dart';
 import '../domain/canvas_column_layout.dart';
 import '../domain/canvas_connector_router.dart';
+import '../domain/canvas_drawing_layer.dart';
 import '../domain/canvas_navigation.dart';
 import '../domain/canvas_object_style.dart';
 import '../domain/canvas_position.dart';
@@ -45,6 +46,7 @@ import '../domain/canvas_scene_bounds.dart';
 import '../domain/canvas_spatial_index.dart' as spatial;
 import '../domain/canvas_workshop.dart';
 import '../domain/connection_style.dart';
+import '../domain/gendo_ai_node.dart';
 import '../domain/goal_progress.dart';
 import '../domain/habit_completion.dart';
 import '../domain/hybrid_timer.dart';
@@ -73,6 +75,10 @@ import 'node_type_content.dart';
 import 'node_type_inline_editor.dart';
 import 'widgets/canvas_dropzone_overlay.dart';
 import 'widgets/connection_style_bar.dart';
+import 'widgets/drawing_studio_overlay.dart';
+import 'widgets/gendo_ai_canvas_card.dart';
+import 'widgets/milanote_element_palette.dart';
+import 'widgets/milanote_visual_card.dart';
 
 Uint8List _attachmentBytes(List<int> bytes) =>
     bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
@@ -682,6 +688,15 @@ double _nodePortY(Size size) => size.height / 2;
 
 enum _CanvasLayoutMode { tidy, radial, byType, timeline, matrix, priorityGrid }
 
+enum _CanvasAutomationAction {
+  autoTimeBlock,
+  tidy,
+  radial,
+  byType,
+  matrix,
+  priorityGrid,
+}
+
 enum _CanvasMoreTool { image, linkPreview, eraser, productivityNode }
 
 enum CanvasContextAction {
@@ -766,6 +781,7 @@ class MindmapCanvas extends StatefulWidget {
     this.isWorkshopHost = false,
     this.onViewportChanged,
     this.onCanvasAssistantRequested,
+    this.onAutoTimeBlockRequested,
     this.assistantPreviewObjects = const <CanvasObject>[],
     this.collaborationBoardComments =
         const <String, List<CanvasObjectComment>>{},
@@ -838,6 +854,7 @@ class MindmapCanvas extends StatefulWidget {
   final bool isWorkshopHost;
   final ValueChanged<CanvasViewport>? onViewportChanged;
   final VoidCallback? onCanvasAssistantRequested;
+  final FutureOr<void> Function()? onAutoTimeBlockRequested;
   final List<CanvasObject> assistantPreviewObjects;
   final Map<String, List<CanvasObjectComment>> collaborationBoardComments;
   final CanvasObjectCommentsCallback? onCollaborationBoardCommentsChanged;
@@ -1164,6 +1181,12 @@ class MindmapCanvasState extends State<MindmapCanvas>
   Offset? _middlePanLastLocal;
   Offset? _touchPanLastLocal;
   _ConnectionDrag? _connectionDrag;
+  final Map<String, ConnectionStyle> _localConnectionStyles = {};
+  bool _showMilanotePalette = false;
+  bool _isDrawingStudioOpen = false;
+  bool _isGendoAiOpen = false;
+  DrawingLayerManager _studioDrawingManager = DrawingLayerManager.initial();
+  GendoAiNodeData _gendoAiData = const GendoAiNodeData();
 
   StreamSubscription<PingEvent>? _pingSub;
   final List<_ActivePing> _activePings = <_ActivePing>[];
@@ -2122,15 +2145,49 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   String _connectionLabel(MindmapNode source, String targetId) {
-    final labels = source.data['connectionLabels'];
-    return labels is Map ? (labels[targetId] as String? ?? '') : '';
+    final labelsA = source.data['connectionLabels'];
+    final labelA = labelsA is Map ? (labelsA[targetId] as String? ?? '') : '';
+    if (labelA.isNotEmpty) return labelA;
+
+    final targetNode = widget.nodes.where((n) => n.id == targetId).firstOrNull;
+    if (targetNode != null) {
+      final labelsB = targetNode.data['connectionLabels'];
+      return labelsB is Map ? (labelsB[source.id] as String? ?? '') : '';
+    }
+    return '';
   }
 
   ConnectionStyle _connectionStyle(MindmapNode source, String targetId) {
-    final styles = source.data['connection_styles'];
-    final styleMap = styles is Map ? styles[targetId] : null;
-    var style = styleMap is Map
-        ? ConnectionStyle.fromJson((styleMap).cast<String, dynamic>())
+    final connKey1 = '${source.id}-$targetId';
+    final connKey2 = '$targetId-${source.id}';
+    if (_localConnectionStyles.containsKey(connKey1)) {
+      return _localConnectionStyles[connKey1]!;
+    }
+    if (_localConnectionStyles.containsKey(connKey2)) {
+      return _localConnectionStyles[connKey2]!;
+    }
+
+    final stylesA = source.data['connection_styles'];
+    final styleMapA = stylesA is Map ? stylesA[targetId] : null;
+
+    Map<String, dynamic>? styleMap;
+    if (styleMapA is Map) {
+      styleMap = (styleMapA).cast<String, dynamic>();
+    } else {
+      final targetNode = widget.nodes
+          .where((n) => n.id == targetId)
+          .firstOrNull;
+      if (targetNode != null) {
+        final stylesB = targetNode.data['connection_styles'];
+        final styleMapB = stylesB is Map ? stylesB[source.id] : null;
+        if (styleMapB is Map) {
+          styleMap = (styleMapB).cast<String, dynamic>();
+        }
+      }
+    }
+
+    var style = styleMap != null
+        ? ConnectionStyle.fromJson(styleMap)
         : const ConnectionStyle();
     final label = _connectionLabel(source, targetId);
     if (label.isNotEmpty && (style.label == null || style.label!.isEmpty)) {
@@ -2144,6 +2201,8 @@ class MindmapCanvasState extends State<MindmapCanvas>
     String targetId,
     ConnectionStyle newStyle,
   ) async {
+    _localConnectionStyles['${source.id}-$targetId'] = newStyle;
+
     final styles = <String, Object?>{
       if (source.data['connection_styles'] is Map)
         ...(source.data['connection_styles'] as Map).map(
@@ -2164,16 +2223,18 @@ class MindmapCanvasState extends State<MindmapCanvas>
       labels.remove(targetId);
     }
 
-    await widget.onNodeUpdated?.call(
-      source.copyWith(
-        data: {
-          ...source.data,
-          'connection_styles': styles,
-          'connectionLabels': labels,
-        },
-        updatedAt: DateTime.now(),
-      ),
+    final updatedSource = source.copyWith(
+      data: {
+        ...source.data,
+        'connection_styles': styles,
+        'connectionLabels': labels,
+      },
+      updatedAt: DateTime.now(),
     );
+
+    if (mounted) setState(() {});
+
+    await widget.onNodeUpdated?.call(updatedSource);
   }
 
   Future<void> _editConnectionLabel(MindmapNode source, String targetId) async {
@@ -2490,6 +2551,10 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   void _handleCanvasPointerSignal(PointerSignalEvent event) {
+    if (event is PointerScaleEvent) {
+      _zoomAt(event.localPosition, event.scale);
+      return;
+    }
     if (event is! PointerScrollEvent || !_isCtrlPressed) return;
     _zoomAt(event.localPosition, event.scrollDelta.dy < 0 ? 1.12 : 1 / 1.12);
   }
@@ -2834,22 +2899,19 @@ class MindmapCanvasState extends State<MindmapCanvas>
   }
 
   Future<void> _handleFilesDropped(
-    List<String> filePaths,
-    Offset screenOffset,
+    List<XFile> files,
+    Offset localOffset,
   ) async {
-    final renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final localOffset = renderBox.globalToLocal(screenOffset);
     final scenePosition = _transformationController.toScene(localOffset);
     final worldPosition = _sceneBounds.sceneToWorld(scenePosition);
     final day = widget.nodes.firstOrNull?.day ?? DateTime.now();
     final dk = dayKey(day);
     const handler = CanvasFileDropHandler();
-    for (var i = 0; i < filePaths.length; i++) {
+    for (var i = 0; i < files.length; i++) {
       try {
-        final bytes = await readCanvasFileBytes(filePaths[i]);
+        final bytes = await files[i].readAsBytes();
         if (bytes.isEmpty) continue;
-        final fileName = filePaths[i].split(RegExp(r'[/\\]')).last;
+        final fileName = files[i].name;
         final position = CanvasPosition(
           worldPosition.dx + i * 24,
           worldPosition.dy + i * 24,
@@ -6471,6 +6533,10 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                                 origin: origin,
                                                 compactNodeIds: compactNodeIds,
                                                 nodeColors: nodeColors,
+                                                selectedConnectionKey:
+                                                    _selectedConnectionKey,
+                                                localConnectionStyles:
+                                                    _localConnectionStyles,
                                               ),
                                             ),
                                           ),
@@ -7716,11 +7782,58 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                 return Positioned(
                                   bottom: 16,
                                   left: leftOverlayInset,
-                                  child: _buildCanvasToolbar(
-                                    context,
-                                    isSearchActive: isSearchActive,
-                                    filteredCount: filteredNodes.length,
-                                    showCreationTools: !showMiroToolRail,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_showMilanotePalette) ...[
+                                        MilanoteElementPalette(
+                                          key: const ValueKey(
+                                            'mindmap-milanote-palette',
+                                          ),
+                                          onSelectType: (type) {
+                                            if (widget.onNodeQuickCreate !=
+                                                null) {
+                                              widget.onNodeQuickCreate!(
+                                                type,
+                                                '',
+                                              );
+                                            } else if (widget.onNodeDropped !=
+                                                null) {
+                                              final center =
+                                                  _transformationController
+                                                      .toScene(
+                                                        Offset(
+                                                          MediaQuery.sizeOf(
+                                                                context,
+                                                              ).width /
+                                                              2,
+                                                          MediaQuery.sizeOf(
+                                                                context,
+                                                              ).height /
+                                                              2,
+                                                        ),
+                                                      );
+                                              widget.onNodeDropped!(
+                                                type,
+                                                center,
+                                              );
+                                            }
+                                            setState(() {
+                                              _showMilanotePalette = false;
+                                            });
+                                          },
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
+                                      _buildCanvasToolbar(
+                                        context,
+                                        isSearchActive: isSearchActive,
+                                        filteredCount: filteredNodes.length,
+                                        showCreationTools: !showMiroToolRail,
+                                      ),
+                                    ],
                                   ),
                                 );
                               },
@@ -7776,6 +7889,60 @@ class MindmapCanvasState extends State<MindmapCanvas>
                                   ),
                                 );
                               },
+                            ),
+
+                          // Procreate / IbisPaint Digital Drawing Studio Overlay
+                          if (_isDrawingStudioOpen)
+                            Positioned.fill(
+                              child: DrawingStudioOverlay(
+                                initialManager: _studioDrawingManager,
+                                onClose: () => setState(
+                                  () => _isDrawingStudioOpen = false,
+                                ),
+                                onSave: (DrawingLayerManager newManager) =>
+                                    setState(
+                                      () => _studioDrawingManager = newManager,
+                                    ),
+                              ),
+                            ),
+
+                          // Gendo AI Interactive Studio Card Dialog / Overlay
+                          if (_isGendoAiOpen)
+                            Positioned(
+                              top: 60,
+                              left: 80,
+                              child: Material(
+                                elevation: 12,
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      GendoAiCanvasCard(
+                                        data: _gendoAiData,
+                                        onChanged: (GendoAiNodeData newData) =>
+                                            setState(
+                                              () => _gendoAiData = newData,
+                                            ),
+                                        onDelete: () => setState(
+                                          () => _isGendoAiOpen = false,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -8663,12 +8830,57 @@ class MindmapCanvasState extends State<MindmapCanvas>
               ),
               tool(
                 key: const ValueKey('mindmap-canvas-create-sticky'),
-                label: 'Sticky note',
-                icon: Icons.note_add_outlined,
+                label: 'Card / Note',
+                icon: Icons.sticky_note_2_outlined,
                 selected: _creationObjectType == CanvasObjectType.stickyNote,
                 type: CanvasObjectType.stickyNote,
                 onPressed: _canCreateCanvasObjects
                     ? () => _showToolSettings(CanvasObjectType.stickyNote)
+                    : null,
+              ),
+              tool(
+                key: const ValueKey('mindmap-canvas-create-freehand'),
+                label: 'Drawing Studio / Brush',
+                icon: Icons.brush_outlined,
+                selected:
+                    _isDrawingStudioOpen ||
+                    _creationObjectType == CanvasObjectType.freehand,
+                type: CanvasObjectType.freehand,
+                onPressed: () {
+                  setState(() {
+                    _isDrawingStudioOpen = true;
+                  });
+                },
+              ),
+              tool(
+                key: const ValueKey('mindmap-canvas-create-gendo-ai'),
+                label: 'Gendo AI Studio',
+                icon: Icons.auto_awesome_mosaic_outlined,
+                selected: _isGendoAiOpen,
+                onPressed: () {
+                  setState(() {
+                    _isGendoAiOpen = true;
+                  });
+                },
+              ),
+              tool(
+                key: const ValueKey('mindmap-canvas-create-frame'),
+                label: 'Board / Frame',
+                icon: Icons.crop_free_rounded,
+                selected: _creationObjectType == CanvasObjectType.frame,
+                type: CanvasObjectType.frame,
+                onPressed: _canCreateCanvasObjects
+                    ? () => _showToolSettings(CanvasObjectType.frame)
+                    : null,
+              ),
+              tool(
+                key: const ValueKey('mindmap-canvas-create-connector'),
+                label: 'Connector',
+                icon: Icons.polyline_outlined,
+                selected: _creationObjectType == CanvasObjectType.connector,
+                type: CanvasObjectType.connector,
+                onPressed: _canCreateCanvasObjects
+                    ? () => _showToolSettings(CanvasObjectType.connector)
                     : null,
               ),
               tool(
@@ -8689,36 +8901,6 @@ class MindmapCanvasState extends State<MindmapCanvas>
                 type: CanvasObjectType.shape,
                 onPressed: _canCreateCanvasObjects
                     ? () => _showToolSettings(CanvasObjectType.shape)
-                    : null,
-              ),
-              tool(
-                key: const ValueKey('mindmap-canvas-create-connector'),
-                label: 'Connector',
-                icon: Icons.polyline_outlined,
-                selected: _creationObjectType == CanvasObjectType.connector,
-                type: CanvasObjectType.connector,
-                onPressed: _canCreateCanvasObjects
-                    ? () => _showToolSettings(CanvasObjectType.connector)
-                    : null,
-              ),
-              tool(
-                key: const ValueKey('mindmap-canvas-create-freehand'),
-                label: 'Freehand pen',
-                icon: Icons.draw_outlined,
-                selected: _creationObjectType == CanvasObjectType.freehand,
-                type: CanvasObjectType.freehand,
-                onPressed: _canCreateCanvasObjects
-                    ? () => _showToolSettings(CanvasObjectType.freehand)
-                    : null,
-              ),
-              tool(
-                key: const ValueKey('mindmap-canvas-create-frame'),
-                label: 'Frame / section',
-                icon: Icons.crop_free_rounded,
-                selected: _creationObjectType == CanvasObjectType.frame,
-                type: CanvasObjectType.frame,
-                onPressed: _canCreateCanvasObjects
-                    ? () => _showToolSettings(CanvasObjectType.frame)
                     : null,
               ),
               tool(
@@ -9283,6 +9465,17 @@ class MindmapCanvasState extends State<MindmapCanvas>
               child: VerticalDivider(width: 16, thickness: 1),
             ),
             IconButton(
+              key: const ValueKey('mindmap-milanote-palette-toggle'),
+              tooltip: 'Milanote element palette',
+              icon: const Icon(Icons.dashboard_customize_outlined, size: 20),
+              color: _showMilanotePalette ? theme.colorScheme.primary : null,
+              onPressed: () {
+                setState(() {
+                  _showMilanotePalette = !_showMilanotePalette;
+                });
+              },
+            ),
+            IconButton(
               key: const ValueKey('mindmap-presentation-mode'),
               tooltip: 'Enter presentation mode',
               icon: const Icon(Icons.slideshow_outlined, size: 20),
@@ -9294,31 +9487,53 @@ class MindmapCanvasState extends State<MindmapCanvas>
               icon: const Icon(Icons.keyboard_alt_outlined, size: 20),
               onPressed: _showShortcutHelp,
             ),
-            PopupMenuButton<_CanvasLayoutMode>(
+            PopupMenuButton<_CanvasAutomationAction>(
               tooltip: 'Auto layout',
               icon: const Icon(Icons.auto_awesome_motion_outlined, size: 20),
-              enabled: widget.nodes.length > 1 && widget.onNodeMoved != null,
-              onSelected: _applyAutoLayout,
-              itemBuilder: (context) => const [
+              enabled:
+                  widget.onAutoTimeBlockRequested != null ||
+                  (widget.nodes.length > 1 && widget.onNodeMoved != null),
+              onSelected: _runCanvasAutomation,
+              itemBuilder: (context) => [
                 PopupMenuItem(
-                  value: _CanvasLayoutMode.tidy,
-                  child: Text('Tidy grid'),
+                  key: const ValueKey('mindmap-auto-time-block'),
+                  value: _CanvasAutomationAction.autoTimeBlock,
+                  enabled: widget.onAutoTimeBlockRequested != null,
+                  child: const ListTile(
+                    leading: Icon(Icons.bolt, color: Colors.amber),
+                    title: Text('Auto Time-Block'),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: _CanvasAutomationAction.tidy,
+                  enabled:
+                      widget.nodes.length > 1 && widget.onNodeMoved != null,
+                  child: const Text('Tidy grid'),
                 ),
                 PopupMenuItem(
-                  value: _CanvasLayoutMode.radial,
-                  child: Text('Radial'),
+                  value: _CanvasAutomationAction.radial,
+                  enabled:
+                      widget.nodes.length > 1 && widget.onNodeMoved != null,
+                  child: const Text('Radial'),
                 ),
                 PopupMenuItem(
-                  value: _CanvasLayoutMode.byType,
-                  child: Text('By type'),
+                  value: _CanvasAutomationAction.byType,
+                  enabled:
+                      widget.nodes.length > 1 && widget.onNodeMoved != null,
+                  child: const Text('By type'),
                 ),
                 PopupMenuItem(
-                  value: _CanvasLayoutMode.matrix,
-                  child: Text('Eisenhower matrix'),
+                  value: _CanvasAutomationAction.matrix,
+                  enabled:
+                      widget.nodes.length > 1 && widget.onNodeMoved != null,
+                  child: const Text('Eisenhower matrix'),
                 ),
                 PopupMenuItem(
-                  value: _CanvasLayoutMode.priorityGrid,
-                  child: Text('Priority grid'),
+                  value: _CanvasAutomationAction.priorityGrid,
+                  enabled:
+                      widget.nodes.length > 1 && widget.onNodeMoved != null,
+                  child: const Text('Priority grid'),
                 ),
               ],
             ),
@@ -9584,6 +9799,23 @@ class MindmapCanvasState extends State<MindmapCanvas>
       final position = positions[node.id];
       if (position == null) continue;
       await callback(node, position);
+    }
+  }
+
+  Future<void> _runCanvasAutomation(_CanvasAutomationAction action) async {
+    switch (action) {
+      case _CanvasAutomationAction.autoTimeBlock:
+        await widget.onAutoTimeBlockRequested?.call();
+      case _CanvasAutomationAction.tidy:
+        await _applyAutoLayout(_CanvasLayoutMode.tidy);
+      case _CanvasAutomationAction.radial:
+        await _applyAutoLayout(_CanvasLayoutMode.radial);
+      case _CanvasAutomationAction.byType:
+        await _applyAutoLayout(_CanvasLayoutMode.byType);
+      case _CanvasAutomationAction.matrix:
+        await _applyAutoLayout(_CanvasLayoutMode.matrix);
+      case _CanvasAutomationAction.priorityGrid:
+        await _applyAutoLayout(_CanvasLayoutMode.priorityGrid);
     }
   }
 
@@ -15085,6 +15317,59 @@ class _MindmapNodeCardState extends State<_MindmapNodeCard> {
       );
     }
 
+    final isMilanoteCard =
+        (node.data['isMilanote'] ?? node.data['is_milanote']) == true ||
+        (node.data['isVisualCard'] ?? node.data['is_visual_card']) == true;
+
+    if (isMilanoteCard) {
+      return SizedBox(
+        width: widget.size.width,
+        height: widget.size.height,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: MilanoteVisualCard(
+                node: node,
+                onTap: widget.onOpen,
+                onUpdate: (title, body) {
+                  if (widget.onNodeUpdated != null) {
+                    final updated = node.copyWith(
+                      title: title,
+                      body: body,
+                      data: {...node.data, 'caption': body},
+                    );
+                    widget.onNodeUpdated!(updated);
+                  }
+                },
+                onColorChange: (newColor) {
+                  if (widget.onNodeUpdated != null) {
+                    final updated = node.copyWith(
+                      data: {
+                        ...node.data,
+                        'color': newColor.toARGB32(),
+                        'card_color': newColor.toARGB32(),
+                      },
+                    );
+                    widget.onNodeUpdated!(updated);
+                  }
+                },
+              ),
+            ),
+            Positioned(
+              left: -6,
+              top: _nodePortY(widget.size) - 9,
+              child: _NodePort(color: color, alignment: Alignment.centerLeft),
+            ),
+            Positioned(
+              right: -6,
+              top: _nodePortY(widget.size) - 9,
+              child: _NodePort(color: color, alignment: Alignment.centerRight),
+            ),
+          ],
+        ),
+      );
+    }
+
     final h = node.body.trim().isNotEmpty || node.isDone ? 240 : 200;
     final useNarrowHeader = widget.size.width < 240;
     final compact =
@@ -16855,7 +17140,6 @@ class _ConnectionOverlay extends StatelessWidget {
     final length = delta.distance;
     final angle = math.atan2(delta.dy, delta.dx);
     final midpoint = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
-    final selectedColor = Theme.of(context).colorScheme.primary;
 
     Widget hitTarget({required Widget child, Key? key}) {
       return GestureDetector(
@@ -16886,13 +17170,7 @@ class _ConnectionOverlay extends StatelessWidget {
                   width: length,
                   height: 20,
                   child: Center(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 120),
-                      height: isSelected ? 6 : 2,
-                      color: isSelected
-                          ? selectedColor.withValues(alpha: 0.72)
-                          : Colors.transparent,
-                    ),
+                    child: Container(height: 20, color: Colors.transparent),
                   ),
                 ),
               ),
@@ -16943,6 +17221,8 @@ class _ConnectionLinesPainter extends CustomPainter {
     required this.origin,
     required this.compactNodeIds,
     required this.nodeColors,
+    this.selectedConnectionKey,
+    this.localConnectionStyles = const {},
   });
 
   final List<MindmapNode> nodes;
@@ -16951,6 +17231,8 @@ class _ConnectionLinesPainter extends CustomPainter {
   final Offset origin;
   final Set<String> compactNodeIds;
   final Map<NodeType, Color> nodeColors;
+  final String? selectedConnectionKey;
+  final Map<String, ConnectionStyle> localConnectionStyles;
 
   CanvasPosition _positionFor(MindmapNode node) {
     return dragPositions[node.id] ?? node.position;
@@ -16983,11 +17265,31 @@ class _ConnectionLinesPainter extends CustomPainter {
   }
 
   ConnectionStyle _styleFor(MindmapNode source, String targetId) {
-    final styles = source.data['connection_styles'];
-    final styleMap = styles is Map ? styles[targetId] : null;
-    return styleMap is Map
-        ? ConnectionStyle.fromJson((styleMap).cast<String, dynamic>())
-        : const ConnectionStyle();
+    final connKey1 = '${source.id}-$targetId';
+    final connKey2 = '$targetId-${source.id}';
+    if (localConnectionStyles.containsKey(connKey1)) {
+      return localConnectionStyles[connKey1]!;
+    }
+    if (localConnectionStyles.containsKey(connKey2)) {
+      return localConnectionStyles[connKey2]!;
+    }
+
+    final stylesA = source.data['connection_styles'];
+    final styleMapA = stylesA is Map ? stylesA[targetId] : null;
+    if (styleMapA is Map) {
+      return ConnectionStyle.fromJson((styleMapA).cast<String, dynamic>());
+    }
+
+    final targetNode = nodes.where((n) => n.id == targetId).firstOrNull;
+    if (targetNode != null) {
+      final stylesB = targetNode.data['connection_styles'];
+      final styleMapB = stylesB is Map ? stylesB[source.id] : null;
+      if (styleMapB is Map) {
+        return ConnectionStyle.fromJson((styleMapB).cast<String, dynamic>());
+      }
+    }
+
+    return const ConnectionStyle();
   }
 
   Path _buildPath(Offset pA, Offset pB, ConnectionLineType lineType) {
@@ -17135,6 +17437,20 @@ class _ConnectionLinesPainter extends CustomPainter {
           ..color = lineColor.withValues(alpha: 0.82);
 
         final path = _buildPath(pA, pB, style.lineType);
+
+        final isConnSelected =
+            selectedConnectionKey != null &&
+            (selectedConnectionKey == '${node.id}-$relatedId' ||
+                selectedConnectionKey == '$relatedId-${node.id}');
+        if (isConnSelected) {
+          final highlightPaint = Paint()
+            ..strokeWidth = style.strokeWidth + 5.0
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round
+            ..color = const Color(0xFF2694FE).withValues(alpha: 0.55);
+          _drawDashedPath(canvas, path, highlightPaint, style.linePattern);
+        }
+
         _drawDashedPath(canvas, path, paint, style.linePattern);
 
         final sketchPaint = Paint()
@@ -17230,7 +17546,9 @@ class _ConnectionLinesPainter extends CustomPainter {
         oldDelegate.nodeSizes != nodeSizes ||
         oldDelegate.origin != origin ||
         oldDelegate.compactNodeIds != compactNodeIds ||
-        oldDelegate.nodeColors != nodeColors;
+        oldDelegate.nodeColors != nodeColors ||
+        oldDelegate.selectedConnectionKey != selectedConnectionKey ||
+        oldDelegate.localConnectionStyles != localConnectionStyles;
   }
 }
 

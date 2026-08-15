@@ -58,7 +58,6 @@ class CanvasToolPopover extends StatelessWidget {
                         dimension: tokens.minimumTarget,
                         child: IconButton(
                           padding: EdgeInsets.zero,
-                          tooltip: 'Close tool settings',
                           onPressed: onClose,
                           icon: const Icon(Icons.close_rounded, size: 18),
                         ),

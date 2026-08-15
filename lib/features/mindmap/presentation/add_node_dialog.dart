@@ -618,39 +618,19 @@ class _NodeEditorDialogState extends State<_NodeEditorDialog> {
   }
 
   static const List<NodeType> _primaryNodeTypes = [
-    NodeType.task,
-    NodeType.kanban,
-    NodeType.plan,
-    NodeType.checklist,
-    NodeType.routine,
     NodeType.note,
-    NodeType.journal,
-    NodeType.habit,
-    NodeType.goal,
-    NodeType.event,
-    NodeType.decision,
-    NodeType.resource,
-    NodeType.idea,
+    NodeType.canvas,
+    NodeType.image,
+    NodeType.task,
+    NodeType.link,
+    NodeType.kanban,
+    NodeType.frame,
+    NodeType.swatch,
   ];
 
   static const List<NodeType> _advancedNodeTypes = [
-    NodeType.question,
-    NodeType.contact,
-    NodeType.metric,
-    NodeType.expense,
-    NodeType.bookmark,
-    NodeType.link,
-    NodeType.mood,
-    NodeType.timer,
-    NodeType.quote,
-    NodeType.audio,
-    NodeType.canvas,
-    NodeType.weather,
-    NodeType.fit,
-    NodeType.itinerary,
-    NodeType.image,
     NodeType.video,
-    NodeType.empty,
+    NodeType.audio,
   ];
 
   ChoiceChip _typeChoiceChip(NodeType type) {

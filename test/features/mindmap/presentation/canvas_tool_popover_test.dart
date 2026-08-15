@@ -42,6 +42,14 @@ void main() {
       matchesSemantics(label: 'Close tool settings', isButton: true),
     );
 
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: tester.getCenter(close));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+
     await tester.tap(close);
     await tester.pump();
 
